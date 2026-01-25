@@ -1,0 +1,48 @@
+cubes:
+  - name: distributors
+    sql_table: public.distributors
+    data_source: default
+
+    joins:
+      - name: territories
+        sql: "{CUBE}.territory_id = {territories}.territory_id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+
+      - name: credit_limit
+        sql: credit_limit
+        type: string
+
+      - name: distributor_code
+        sql: distributor_code
+        type: string
+
+      - name: distributor_name
+        sql: distributor_name
+        type: string
+
+      - name: distributor_type
+        sql: distributor_type
+        type: string
+
+      - name: is_active
+        sql: is_active
+        type: boolean
+
+      - name: onboarding_date
+        sql: onboarding_date
+        type: time
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

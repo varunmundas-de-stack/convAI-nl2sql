@@ -9,9 +9,10 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - C:/Users/Kevin Joshua/lambdazen/nl2sql/cube/data:/docker-entrypoint-initdb.d
+      - ./data:/docker-entrypoint-initdb.d
 
   cube:
+    restart: always
     image: cubejs/cube:latest
     ports:
       - "4000:4000"
@@ -24,7 +25,7 @@ services:
       CUBEJS_DB_PASS: postgres
       CUBEJS_API_SECRET: mysecretkey123
     volumes:
-      - ./schema:/cube/conf/schema
+      - ./model:/cube/conf/model
     depends_on:
       - postgres
 

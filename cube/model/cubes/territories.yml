@@ -1,0 +1,45 @@
+cubes:
+  - name: territories
+    sql_table: public.territories
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+
+      - name: is_active
+        sql: is_active
+        type: boolean
+
+      - name: region
+        sql: region
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: territory_code
+        sql: territory_code
+        type: string
+
+      - name: territory_name
+        sql: territory_name
+        type: string
+
+      - name: zone
+        sql: zone
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

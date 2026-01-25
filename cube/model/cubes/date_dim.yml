@@ -1,0 +1,36 @@
+cubes:
+  - name: date_dim
+    sql_table: public.date_dim
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: day_name
+        sql: day_name
+        type: string
+
+      - name: is_weekend
+        sql: is_weekend
+        type: boolean
+
+      - name: month_name
+        sql: month_name
+        type: string
+
+      - name: full_date
+        sql: full_date
+        type: time
+
+    measures:
+      - name: count
+        type: count
+
+      - name: month_number
+        sql: month_number
+        type: sum
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

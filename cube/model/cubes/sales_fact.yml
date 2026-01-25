@@ -1,0 +1,84 @@
+cubes:
+  - name: sales_fact
+    sql_table: public.sales_fact
+    data_source: default
+
+    joins:
+      - name: distributors
+        sql: "{CUBE}.distributor_id = {distributors}.distributor_id"
+        relationship: many_to_one
+
+      - name: outlets
+        sql: "{CUBE}.outlet_id = {outlets}.outlet_id"
+        relationship: many_to_one
+
+      - name: skus
+        sql: "{CUBE}.sku_id = {skus}.sku_id"
+        relationship: many_to_one
+
+      - name: territories
+        sql: "{CUBE}.territory_id = {territories}.territory_id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+
+      - name: base_price
+        sql: base_price
+        type: string
+
+      - name: discount_amount
+        sql: discount_amount
+        type: string
+
+      - name: gross_amount
+        sql: gross_amount
+        type: string
+
+      - name: invoice_number
+        sql: invoice_number
+        type: string
+
+      - name: is_credit
+        sql: is_credit
+        type: boolean
+
+      - name: net_amount
+        sql: net_amount
+        type: string
+
+      - name: sales_rep_code
+        sql: sales_rep_code
+        type: string
+
+      - name: sales_type
+        sql: sales_type
+        type: string
+
+      - name: scheme_discount
+        sql: scheme_discount
+        type: string
+
+      - name: tax_amount
+        sql: tax_amount
+        type: string
+
+      - name: invoice_date
+        sql: invoice_date
+        type: time
+
+    measures:
+      - name: count
+        type: count
+
+      - name: quantity
+        sql: quantity
+        type: sum
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

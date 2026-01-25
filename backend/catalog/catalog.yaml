@@ -1,0 +1,46 @@
+metrics:
+  total_sales:
+    cube_measure: sales_fact.net_amount
+    description: Net sales amount after discounts and tax
+    synonyms:
+      - sales
+      - revenue
+      - net sales
+
+  order_count:
+    cube_measure: sales_fact.count
+    description: Number of invoices/orders
+    synonyms:
+      - orders
+      - invoices
+      - transactions
+
+dimensions:
+  region:
+    cube_dimension: territories.region
+    synonyms:
+      - zone
+      - area
+      - geography
+
+  distributor:
+    cube_dimension: distributors.distributor_name
+    synonyms:
+      - distributor
+      - channel partner
+      - wholesaler
+
+  outlet:
+    cube_dimension: outlets.outlet_name
+    synonyms:
+      - retailer
+      - shop
+      - store
+
+time_dimensions:
+  invoice_date:
+    cube_dimension: sales_fact.invoice_date
+    granularity:
+      - day
+      - week
+      - month

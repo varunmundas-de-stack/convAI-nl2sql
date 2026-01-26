@@ -1,3 +1,5 @@
 venv/*
 cube/.cubestore/
 plan.txt
+__pycache__/*
+__pycache__

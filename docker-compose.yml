@@ -1,3 +1,4 @@
+name: nl2sql
 services:
   postgres:
     image: postgres:15
@@ -9,7 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./data:/docker-entrypoint-initdb.d
+      - ./cube/data:/docker-entrypoint-initdb.d
 
   cube:
     restart: always
@@ -25,7 +26,7 @@ services:
       CUBEJS_DB_PASS: postgres
       CUBEJS_API_SECRET: mysecretkey123
     volumes:
-      - ./model:/cube/conf/model
+      - ./cube/model:/cube/conf/model
     depends_on:
       - postgres
 

@@ -16,7 +16,7 @@ Responsibilities:
 
 from enum import Enum
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
 class IntentType(str, Enum):
@@ -71,8 +71,7 @@ class TimeRange(BaseModel):
         
         return self
 
-    class Config:
-        extra = "forbid"  # No extra fields allowed
+    model_config = ConfigDict(extra="forbid")
 
 
 class Filter(BaseModel):
@@ -111,8 +110,7 @@ class Filter(BaseModel):
                 )
         return self
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class TimeDimension(BaseModel):
@@ -130,8 +128,7 @@ class TimeDimension(BaseModel):
         description="Time granularity for grouping"
     )
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class Intent(BaseModel):
@@ -220,9 +217,8 @@ class Intent(BaseModel):
         
         return self
 
-    class Config:
-        extra = "forbid"  # No extra fields allowed
-        use_enum_values = True  # Serialize enums as their values
+    model_config = ConfigDict(extra="forbid", use_enum_values=True)
+    
 
 
 # Type alias for clarity

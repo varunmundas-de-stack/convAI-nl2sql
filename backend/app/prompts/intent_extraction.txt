@@ -48,15 +48,39 @@ The output MUST conform to this exact schema. No additional fields allowed.
 }
 ```
 
+
 ## FIELD SPECIFICATIONS
 
-### intent_type (required if determinable)
-- Type: string | null
-- Allowed values: ONLY from `intent_types` section in CATALOG
-- Description: The type of analytical query
-- Set to "snapshot" for point-in-time metrics (e.g., "total sales", "how many")
-- Set to "trend" for time-series analysis (e.g., "daily sales", "sales trend", "over time")
-- If cannot be determined, return null
+### intent_type (REQUIRED - NEVER return null)
+- Type: string
+- Allowed values: "snapshot", "trend", "comparison", "ranking", "distribution", "drill_down"
+- You MUST always set intent_type to one of the allowed values. NEVER return null.
+
+**DECISION RULES (apply in order):**
+
+1. **Use "comparison"** if the query contains:
+   - Words: "compare", "vs", "versus", "compared to", "difference between"
+   - Phrases: "Primary vs Secondary", "this month vs last month", "year over year"
+   
+2. **Use "ranking"** if the query contains:
+   - Words: "top", "bottom", "best", "worst", "highest", "lowest", "rank", "most", "least"
+   - Phrases: "top 5", "top 10", "best performing", "leading", "identify the top"
+   
+3. **Use "trend"** if the query contains:
+   - Words: "trend", "growth", "change", "over time", "daily", "weekly", "monthly"
+   - Phrases: "sales trend", "growth rate", "which month saw", "how has X changed"
+   - Any request for time-series data with granularity (day/week/month/quarter/year)
+   
+4. **Use "distribution"** if the query asks for:
+   - Breakdown by dimension: "by region", "by category", "breakdown"
+   - Contribution analysis: "contributing", "share of", "percentage of"
+   
+5. **Use "drill_down"** if the query asks for:
+   - Hierarchical exploration: "then show", "drill into", "break down further"
+   
+6. **Default to "snapshot"** for:
+   - Simple metric queries: "what is the total", "how many", "count of"
+   - Any query that doesn't clearly match the above patterns
 
 ### metric (required if determinable)
 - Type: string | null

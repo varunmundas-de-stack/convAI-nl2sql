@@ -24,9 +24,14 @@ class IntentType(str, Enum):
     Defines the type of analytical query the user wants to perform.
     
     Each intent type has different requirements for which fields are needed.
+    These match the intent_types defined in the catalog.
     """
-    SNAPSHOT = "snapshot"   # Point-in-time metric value (e.g., "total sales this month")
-    TREND = "trend"         # Metric over time (e.g., "daily sales last 30 days")
+    SNAPSHOT = "snapshot"       # Point-in-time metric value (e.g., "total sales this month")
+    TREND = "trend"             # Metric over time (e.g., "daily sales last 30 days")
+    COMPARISON = "comparison"   # Compare metric across periods or segments
+    RANKING = "ranking"         # Ranked list by metric (e.g., "top 5 products")
+    DISTRIBUTION = "distribution"  # Breakdown by dimension (e.g., "sales by region")
+    DRILL_DOWN = "drill_down"   # Hierarchical exploration
 
 
 class TimeRange(BaseModel):
@@ -79,6 +84,10 @@ class Filter(BaseModel):
     Represents a filter condition on a dimension.
     
     Example: {"dimension": "region", "operator": "equals", "value": "North"}
+    
+    Value normalization:
+    - For 'in'/'not_in': accepts string or list, normalizes to list
+    - For 'equals'/'not_equals'/'contains': accepts string or single-item list, normalizes to string
     """
     dimension: str = Field(
         ...,
@@ -94,20 +103,29 @@ class Filter(BaseModel):
     )
 
     @model_validator(mode='after')
-    def validate_operator_value_match(self) -> 'Filter':
-        """Ensure operator and value type are compatible."""
+    def normalize_and_validate_value(self) -> 'Filter':
+        """
+        Normalize value type based on operator and validate compatibility.
+        
+        - 'in'/'not_in': convert string to list if needed
+        - 'equals'/'not_equals'/'contains': convert single-item list to string if needed
+        """
         if self.operator in ("in", "not_in"):
-            if not isinstance(self.value, list):
-                raise ValueError(
-                    f"Operator '{self.operator}' requires a list of values, "
-                    f"got {type(self.value).__name__}"
-                )
+            # Normalize to list
+            if isinstance(self.value, str):
+                object.__setattr__(self, 'value', [self.value])
         elif self.operator in ("equals", "not_equals", "contains"):
+            # Normalize to string
             if isinstance(self.value, list):
-                raise ValueError(
-                    f"Operator '{self.operator}' requires a single value, "
-                    f"got list"
-                )
+                if len(self.value) == 1:
+                    object.__setattr__(self, 'value', self.value[0])
+                elif len(self.value) == 0:
+                    raise ValueError(
+                        f"Operator '{self.operator}' requires at least one value"
+                    )
+                else:
+                    # Multiple values with equals - upgrade to 'in' operator
+                    object.__setattr__(self, 'operator', 'in')
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -196,6 +214,7 @@ class Intent(BaseModel):
         Enforce intent-type-specific constraints.
         
         - TREND intent MUST have time_dimension and time_range
+        - RANKING/DISTRIBUTION/DRILL_DOWN require group_by dimensions
         - Metric must be a non-empty string
         """
         # Validate metric is non-empty
@@ -213,6 +232,13 @@ class Intent(BaseModel):
                 raise ValueError(
                     "TREND intent requires 'time_range' to specify "
                     "the date range for the trend"
+                )
+        
+        # RANKING, DISTRIBUTION, DRILL_DOWN require group_by
+        if self.intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION, IntentType.DRILL_DOWN):
+            if not self.group_by or len(self.group_by) == 0:
+                raise ValueError(
+                    f"{self.intent_type.value.upper()} intent requires 'group_by' dimensions"
                 )
         
         return self

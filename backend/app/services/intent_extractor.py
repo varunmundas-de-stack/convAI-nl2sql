@@ -29,6 +29,8 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +52,7 @@ TIMEOUT_SECONDS = os.getenv("MODEL_TIMEOUT_SECONDS", 30.0)
 # Paths
 PROMPT_TEMPLATE_PATH = Path(__file__).parent.parent / "prompts" / "intent_extraction.txt"
 CATALOG_PATH = Path(__file__).parent.parent.parent / "catalog" / "catalog.yaml"
+LOG_DB_PATH = Path(__file__).parent.parent.parent / "logs" / "extraction_logs.db"
 
 # =============================================================================
 # LOGGING
@@ -115,8 +118,12 @@ def _build_prompt(query: str, catalog: str, template: str) -> str:
     Inject runtime values into prompt template.
     
     No conditional logic. No mutations. Pure string substitution.
+    Uses simple string replacement instead of .format() to avoid
+    conflicts with JSON curly braces in the template.
     """
-    return template.format(catalog=catalog, query=query)
+    result = template.replace("{catalog}", catalog)
+    result = result.replace("{query}", query)
+    return result
 
 
 def _parse_json_response(raw_response: str) -> dict[str, Any]:
@@ -165,7 +172,9 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
         LLMTimeoutError: Request timed out
         EmptyResponseError: Empty response received
     """
-    client = anthropic.Anthropic(timeout=TIMEOUT_SECONDS)
+    client = anthropic.Anthropic(
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        timeout=TIMEOUT_SECONDS)
     
     attempt = 0
     max_attempts = 2 if retry_once else 1
@@ -190,7 +199,7 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
             text_block = response.content[0]
             if not hasattr(text_block, "text") or not text_block.text:
                 raise EmptyResponseError("LLM returned empty text")
-            
+        
             return text_block.text
             
         except anthropic.APITimeoutError as e:
@@ -208,6 +217,93 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
     
     # All retries exhausted
     raise last_error  # type: ignore[misc]
+
+
+# =============================================================================
+# SQLITE LOGGING
+# =============================================================================
+
+def _init_log_db() -> None:
+    """
+    Initialize the SQLite logging database.
+    
+    Creates the logs directory and table if they don't exist.
+    """
+    # Ensure logs directory exists
+    LOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    conn = sqlite3.connect(str(LOG_DB_PATH))
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS extraction_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                query TEXT NOT NULL,
+                prompt_hash TEXT,
+                raw_response TEXT,
+                parsed_intent TEXT,
+                error_type TEXT,
+                error_message TEXT,
+                model_id TEXT,
+                duration_ms INTEGER
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# def _log_extraction(
+#     query: str,
+#     prompt_hash: str,
+#     raw_response: str | None,
+#     parsed_intent: dict[str, Any] | None,
+#     error: Exception | None,
+#     duration_ms: int
+# ) -> None:
+#     """
+#     Log an extraction attempt to SQLite database.
+    
+#     Args:
+#         query: Original user query
+#         prompt_hash: Hash of the full prompt
+#         raw_response: Raw LLM response text (or None if failed)
+#         parsed_intent: Parsed intent dict (or None if failed)
+#         error: Exception if any occurred
+#         duration_ms: Duration of the extraction in milliseconds
+#     """
+#     try:
+#         _init_log_db()
+        
+#         conn = sqlite3.connect(str(LOG_DB_PATH))
+#         try:
+#             cursor = conn.cursor()
+#             cursor.execute(
+#                 """
+#                 INSERT INTO extraction_logs (
+#                     timestamp, query, prompt_hash, raw_response, 
+#                     parsed_intent, error_type, error_message, model_id, duration_ms
+#                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+#                 """,
+#                 (
+#                     datetime.now(timezone.utc).isoformat(),
+#                     query,
+#                     prompt_hash,
+#                     raw_response,
+#                     json.dumps(parsed_intent) if parsed_intent else None,
+#                     type(error).__name__ if error else None,
+#                     str(error) if error else None,
+#                     MODEL_ID,
+#                     duration_ms,
+#                 )
+#             )
+#             conn.commit()
+#         finally:
+#             conn.close()
+#     except Exception as e:
+#         # Don't fail extraction due to logging errors
+#         logger.warning(f"Failed to log extraction: {e}")
 
 
 # =============================================================================
@@ -233,37 +329,72 @@ def extract_intent(query: str) -> dict[str, Any]:
     The returned dict is NOT validated against the catalog.
     Semantic validation happens downstream in intent_validator.
     """
-    # Load external resources
-    template = _load_prompt_template()
-    catalog = _load_catalog()
+    import time
+    start_time = time.monotonic()
     
-    # Build prompt (pure substitution, no logic)
-    prompt = _build_prompt(query=query, catalog=catalog, template=template)
-    prompt_hash = _compute_prompt_hash(prompt)
+    raw_response = None
+    intent_dict = None
+    error = None
+    prompt_hash = None
     
-    # Log raw input
-    logger.info(
-        "Intent extraction started",
-        extra={
-            "query": query,
-            "prompt_hash": prompt_hash,
-        }
-    )
+    try:
+        # Load external resources
+        template = _load_prompt_template()
+        catalog = _load_catalog()
+        
+        # Build prompt (pure substitution, no logic)
+        prompt = _build_prompt(query=query, catalog=catalog, template=template)
+        prompt_hash = _compute_prompt_hash(prompt)
+        
+        # Log raw input
+        logger.info(
+            "Intent extraction started",
+            extra={
+                "query": query,
+                "prompt_hash": prompt_hash,
+            }
+        )
     
-    # Call LLM
-    raw_response = _call_llm(prompt)
-    
-    # Log raw output
-    logger.info(
-        "Intent extraction completed",
-        extra={
-            "query": query,
-            "prompt_hash": prompt_hash,
-            "raw_response": raw_response,
-        }
-    )
-    
-    # Parse JSON (technical validation only)
-    intent_dict = _parse_json_response(raw_response)
-    
-    return intent_dict
+        # Call LLM
+        raw_response = _call_llm(prompt)
+
+        with open("./backend/logs/extraction_logs.json", "a") as f:
+            json.dump({
+                "query": query,
+                "prompt_hash": prompt_hash,
+                "raw_response": raw_response,
+                "start_time": start_time,
+                "duration_ms": int((time.monotonic() - start_time) * 1000),
+            }, f)
+
+        
+        # Log raw output
+        logger.info(
+            "Intent extraction completed",
+            extra={
+                "query": query,
+                "prompt_hash": prompt_hash,
+                "raw_response": raw_response,
+            }
+        )
+        
+        # Parse JSON (technical validation only)
+        intent_dict = _parse_json_response(raw_response)
+        
+        return intent_dict
+        
+    except Exception as e:
+        error = e
+        raise
+        
+    finally:
+        # Always log to SQLite, even on error
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        # _log_extraction(
+        #     query=query,
+        #     prompt_hash=prompt_hash or "",
+        #     raw_response=raw_response,
+        #     parsed_intent=intent_dict,
+        #     error=error,
+        #     duration_ms=duration_ms,
+        # )

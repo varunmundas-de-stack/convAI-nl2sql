@@ -16,7 +16,7 @@ import os
 import json
 import logging
 import pytest
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from backend.app.services.query_orchestrator import (
     execute_query,
@@ -28,6 +28,87 @@ from backend.app.services.query_orchestrator import (
 # Configure logging for test visibility
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# TEST QUERIES - 10+ queries covering various intent types
+# =============================================================================
+
+TEST_QUERIES: List[Tuple[str, str, str]] = [
+    # (query, expected_intent_type, description)
+    
+    # RANKING QUERIES
+    (
+        "What are the top 5 territories by total quantity?",
+        "ranking",
+        "Simple ranking query with limit"
+    ),
+    (
+        "Which state has the highest number of active retail outlets?",
+        "ranking",
+        "Ranking by outlet count"
+    ),
+    (
+        "List the top 3 territories in the South region based on Secondary sales volume.",
+        "ranking",
+        "Ranking with region filter"
+    ),
+    
+    # COMPARISON QUERIES
+    (
+        "Compare the sales performance of Metro zones versus Rural zones for the Beverages category.",
+        "comparison",
+        "Zone comparison with category filter"
+    ),
+    (
+        "What is the total Primary vs Secondary sales for the first quarter of 2024?",
+        "comparison",
+        "Sales type comparison with date range"
+    ),
+    
+    # SNAPSHOT QUERIES
+    (
+        "How many transactions were recorded in the North region?",
+        "snapshot",
+        "Simple count with region filter"
+    ),
+    (
+        "What is the total quantity sold for the Snacks category?",
+        "snapshot",
+        "Total quantity with category filter"
+    ),
+    
+    # TREND QUERIES
+    (
+        "Show the monthly sales trend for the last 6 months.",
+        "trend",
+        "Monthly trend with time window"
+    ),
+    (
+        "How has the transaction count changed over the past quarter by week?",
+        "trend",
+        "Weekly trend for quarterly data"
+    ),
+    
+    # DISTRIBUTION QUERIES
+    (
+        "What is the breakdown of sales by region?",
+        "distribution",
+        "Regional distribution"
+    ),
+    
+    # COMPLEX QUERIES
+    (
+        "Find the sub-categories that are underperforming in the West region.",
+        "ranking",
+        "Ranking with region filter for sub-categories"
+    ),
+    (
+        "What is the most popular pack size for FreshCo Cola across all Metro cities?",
+        "ranking",
+        "Ranking with brand and zone filter"
+    ),
+]
 
 
 # =============================================================================
@@ -44,19 +125,22 @@ def api_key_check():
 
 
 # =============================================================================
-# E2E TEST - SINGLE QUERY
+# E2E TEST - MULTIPLE QUERIES (PARAMETERIZED)
 # =============================================================================
 
 class TestQueryOrchestratorE2E:
     """
     End-to-end test for the complete query orchestrator pipeline.
     
-    Uses a single, well-defined query to test the full flow.
+    Tests multiple queries covering various intent types.
     """
     
-    TEST_QUERY = "Compare the sales performance of Metro zones versus Rural zones for the 'Beverages' category."
-    
-    def test_full_pipeline_success(self, api_key_check):
+    @pytest.mark.parametrize(
+        "query,expected_intent_type,description",
+        TEST_QUERIES,
+        ids=[q[2] for q in TEST_QUERIES]  # Use description as test ID
+    )
+    def test_full_pipeline(self, api_key_check, query: str, expected_intent_type: str, description: str):
         """
         Test the complete pipeline from query to Cube execution.
         
@@ -69,17 +153,19 @@ class TestQueryOrchestratorE2E:
         """
         # Execute the query
         print(f"\n{'='*80}")
-        print(f"E2E TEST: {self.TEST_QUERY}")
+        print(f"E2E TEST: {description}")
+        print(f"Query: {query}")
+        print(f"Expected Intent Type: {expected_intent_type}")
         print(f"{'='*80}")
         
-        response = execute_query(self.TEST_QUERY)
+        response = execute_query(query)
         
         # =====================================================================
         # STEP 1: Query received
         # =====================================================================
-        assert response.query == self.TEST_QUERY, "Query should be stored unchanged"
+        assert response.query == query, "Query should be stored unchanged"
         print(f"\n✓ Step 1: Query received")
-        print(f"  Query: {response.query}")
+        print(f"  Query: {response.query[:80]}...")
         
         # =====================================================================
         # STEP 2: Intent extracted
@@ -87,14 +173,20 @@ class TestQueryOrchestratorE2E:
         assert response.raw_intent is not None, \
             f"Raw intent should be populated. Error: {response.error}"
         
+        actual_intent_type = response.raw_intent.get('intent_type')
         print(f"\n✓ Step 2: Intent extracted")
-        print(f"  Intent type: {response.raw_intent.get('intent_type')}")
+        print(f"  Intent type: {actual_intent_type} (expected: {expected_intent_type})")
         print(f"  Metric: {response.raw_intent.get('metric')}")
         print(f"  Group by: {response.raw_intent.get('group_by')}")
         
         # Verify intent structure
         assert "intent_type" in response.raw_intent, "Intent should have intent_type"
         assert response.raw_intent.get("intent_type") is not None, "intent_type should not be null"
+        
+        # Check if intent type matches expected (soft check - log mismatch but don't fail)
+        if actual_intent_type != expected_intent_type:
+            print(f"\n⚠ Warning: Intent type mismatch!")
+            print(f"  Expected: {expected_intent_type}, Got: {actual_intent_type}")
         
         # If extraction failed, stop here and report
         if response.stage == PipelineStage.RECEIVED:
@@ -155,8 +247,8 @@ class TestQueryOrchestratorE2E:
         
         print(f"\n✓ Step 5: Cube query executed")
         print(f"  Rows returned: {len(response.data)}")
-        if response.data:
-            print(f"  Response Data: {response.data}")
+        if response.data and len(response.data) > 0:
+            print(f"  First row: {response.data[0]}")
             
         
         # =====================================================================
@@ -175,8 +267,10 @@ class TestQueryOrchestratorE2E:
     def test_response_structure(self, api_key_check):
         """
         Test that the response has the expected structure for API serialization.
+        Uses the first test query.
         """
-        response_dict = execute_query_dict(self.TEST_QUERY)
+        test_query = TEST_QUERIES[0][0]
+        response_dict = execute_query_dict(test_query)
         
         # Verify all expected keys are present
         expected_keys = [

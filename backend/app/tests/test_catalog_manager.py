@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from backend.app.services.catalog_manager import CatalogManager, CatalogError, AmbiguousResolutionError
+from app.services.catalog_manager import CatalogManager, CatalogError, AmbiguousResolutionError
 
 CATALOG_PATH = str(Path(__file__).parent.parent.parent / "catalog" / "catalog.yaml")
 

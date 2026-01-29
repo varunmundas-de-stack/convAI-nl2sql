@@ -291,7 +291,7 @@ def execute_query(query: str) -> OrchestratorResponse:
         response.error = OrchestratorError(
             stage=PipelineStage.INTENT_EXTRACTED,
             error_type=e.__class__.__name__,
-            error_code=e.ERROR_CODE.value if e.ERROR_CODE else None,
+            error_code=e.ERROR_CODE.value if hasattr(e.ERROR_CODE, 'value') else str(e.ERROR_CODE) if e.ERROR_CODE else None,
             message=str(e),
             details=e.to_dict()
         )

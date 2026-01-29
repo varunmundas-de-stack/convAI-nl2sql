@@ -234,11 +234,17 @@ class Intent(BaseModel):
                     "the date range for the trend"
                 )
         
-        # RANKING, DISTRIBUTION, DRILL_DOWN require group_by
+        # RANKING, DISTRIBUTION, DRILL_DOWN require group_by OR time_dimension
+        # If time_dimension is provided, it can serve as the grouping factor (e.g., ranking by month)
         if self.intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION, IntentType.DRILL_DOWN):
-            if not self.group_by or len(self.group_by) == 0:
+            has_group_by = self.group_by and len(self.group_by) > 0
+            has_time_dimension = self.time_dimension is not None
+            
+            if not has_group_by and not has_time_dimension:
+                # Get the string value safely (works for both Enum and str)
+                intent_type_str = self.intent_type.value if hasattr(self.intent_type, 'value') else str(self.intent_type)
                 raise ValueError(
-                    f"{self.intent_type.value.upper()} intent requires 'group_by' dimensions"
+                    f"{intent_type_str.upper()} intent requires 'group_by' dimensions or 'time_dimension'"
                 )
         
         return self

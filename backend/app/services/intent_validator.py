@@ -114,6 +114,14 @@ class IntentValidator:
         
         return intent
     
+    def _preprocess_intent(self, raw_intent: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Pre-process raw intent to fix common LLM output issues.
+        
+        Currently a passthrough - can be extended for future fixes.
+        """
+        return raw_intent.copy()
+    
     def _parse_intent(self, raw_intent: Dict[str, Any]) -> Intent:
         """
         Parse raw dictionary into Intent Pydantic model.
@@ -122,7 +130,9 @@ class IntentValidator:
             MalformedIntentError: If parsing fails
         """
         try:
-            return Intent(**raw_intent)
+            # Pre-process to fix common LLM issues
+            processed_intent = self._preprocess_intent(raw_intent)
+            return Intent(**processed_intent)
         except ValidationError as e:
             # Extract meaningful error message from Pydantic
             errors = e.errors()

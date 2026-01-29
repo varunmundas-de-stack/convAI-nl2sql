@@ -220,7 +220,7 @@ class IntentService:
                 extra={
                     "query": query,
                     "raw_intent": raw_intent,
-                    "error_code": e.ERROR_CODE.value if e.ERROR_CODE else "UNKNOWN",
+                    "error_code": e.ERROR_CODE.value if hasattr(e.ERROR_CODE, 'value') else str(e.ERROR_CODE) if e.ERROR_CODE else "UNKNOWN",
                     "error": str(e),
                 }
             )

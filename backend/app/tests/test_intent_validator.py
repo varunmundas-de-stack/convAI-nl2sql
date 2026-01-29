@@ -1,9 +1,9 @@
 import pytest
 from pathlib import Path
 
-from backend.app.services.catalog_manager import CatalogManager
-from backend.app.services.intent_validator import validate_intent
-from backend.app.services.intent_errors import (
+from app.services.catalog_manager import CatalogManager
+from app.services.intent_validator import validate_intent
+from app.services.intent_errors import (
     UnknownMetricError,
     UnknownDimensionError,
     MalformedIntentError,

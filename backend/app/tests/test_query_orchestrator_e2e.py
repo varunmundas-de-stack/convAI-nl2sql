@@ -18,7 +18,7 @@ import logging
 import pytest
 from typing import Any, Dict, List, Tuple
 
-from backend.app.services.query_orchestrator import (
+from app.services.query_orchestrator import (
     execute_query,
     execute_query_dict,
     OrchestratorResponse,

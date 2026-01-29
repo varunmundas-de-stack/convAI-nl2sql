@@ -26,7 +26,7 @@ This file does NOT:
 
 from typing import Any
 
-from backend.app.models.intent import Intent, IntentType
+from app.models.intent import Intent, IntentType
 
 
 # =============================================================================

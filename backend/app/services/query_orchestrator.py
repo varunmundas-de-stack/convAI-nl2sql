@@ -35,23 +35,23 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from backend.app.services.intent_extractor import (
+from app.services.intent_extractor import (
     extract_intent,
     ExtractionError,
     LLMCallError,
     LLMTimeoutError,
     JSONParseError,
 )
-from backend.app.services.intent_validator import validate_intent
-from backend.app.services.intent_errors import IntentValidationError
-from backend.app.services.cube_query_builder import build_cube_query
-from backend.app.services.cube_client import (
+from app.services.intent_validator import validate_intent
+from app.services.intent_errors import IntentValidationError
+from app.services.cube_query_builder import build_cube_query
+from app.services.cube_client import (
     CubeClient,
     CubeClientError,
     CubeResponse,
 )
-from backend.app.services.catalog_manager import CatalogManager
-from backend.app.models.intent import Intent
+from app.services.catalog_manager import CatalogManager
+from app.models.intent import Intent
 
 
 # =============================================================================

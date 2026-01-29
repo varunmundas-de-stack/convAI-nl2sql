@@ -6,8 +6,8 @@ cubes:
     joins: []
 
     dimensions:
-      - name: id
-        sql: id
+      - name: sku_id
+        sql: sku_id
         type: number
         primary_key: true
         

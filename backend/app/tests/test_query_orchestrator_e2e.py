@@ -249,6 +249,8 @@ class TestQueryOrchestratorE2E:
         print(f"  Rows returned: {len(response.data)}")
         if response.data and len(response.data) > 0:
             print(f"  First row: {response.data[0]}")
+            with open("data.json", "a") as f:
+                json.dump(response.data, f, indent=4)
             
         
         # =====================================================================

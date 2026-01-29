@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 import logging
 
-from backend.app.models.intent import Intent
-from backend.app.services.intent_extractor import (
+from app.models.intent import Intent
+from app.services.intent_extractor import (
     extract_intent,
     ExtractionError,
     LLMCallError,
@@ -33,9 +33,9 @@ from backend.app.services.intent_extractor import (
     JSONParseError,
     EmptyResponseError,
 )
-from backend.app.services.intent_validator import IntentValidator
-from backend.app.services.intent_errors import IntentValidationError
-from backend.app.services.catalog_manager import CatalogManager
+from app.services.intent_validator import IntentValidator
+from app.services.intent_errors import IntentValidationError
+from app.services.catalog_manager import CatalogManager
 
 
 # =============================================================================

@@ -9,8 +9,8 @@ cubes:
         relationship: many_to_one
 
     dimensions:
-      - name: id
-        sql: id
+      - name: distributor_id
+        sql: distributor_id
         type: number
         primary_key: true
 

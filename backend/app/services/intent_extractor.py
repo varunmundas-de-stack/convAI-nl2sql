@@ -358,7 +358,10 @@ def extract_intent(query: str) -> dict[str, Any]:
         # Call LLM
         raw_response = _call_llm(prompt)
 
-        with open("./backend/logs/extraction_logs.json", "a") as f:
+        # Log to JSON file
+        log_file_path = Path(__file__).parent.parent.parent / "logs" / "extraction_logs.json"
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file_path, "a") as f:
             json.dump({
                 "query": query,
                 "prompt_hash": prompt_hash,
@@ -366,6 +369,7 @@ def extract_intent(query: str) -> dict[str, Any]:
                 "start_time": start_time,
                 "duration_ms": int((time.monotonic() - start_time) * 1000),
             }, f)
+            f.write("\n")  # Add newline for JSONL format
 
         
         # Log raw output

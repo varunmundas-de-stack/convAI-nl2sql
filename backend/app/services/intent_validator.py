@@ -14,15 +14,15 @@ NO business logic. NO LLM logic. Only validation.
 
 from typing import Any, Dict, List, Optional
 
-from backend.app.models.intent import (
+from app.models.intent import (
     Intent,
     IntentType,
     Filter,
     TimeDimension,
     TimeRange,
 )
-from backend.app.services.catalog_manager import CatalogManager, AmbiguousResolutionError
-from backend.app.services.intent_errors import (
+from app.services.catalog_manager import CatalogManager, AmbiguousResolutionError
+from app.services.intent_errors import (
     IntentValidationError,
     MalformedIntentError,
     UnknownMetricError,

@@ -6,8 +6,8 @@ cubes:
     joins: []
 
     dimensions:
-      - name: id
-        sql: id
+      - name: territory_id
+        sql: territory_id
         type: number
         primary_key: true
 

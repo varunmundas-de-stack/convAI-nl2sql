@@ -13,8 +13,8 @@ cubes:
         relationship: many_to_one
 
     dimensions:
-      - name: id
-        sql: id
+      - name: outlet_id
+        sql: outlet_id
         type: number
         primary_key: true
 

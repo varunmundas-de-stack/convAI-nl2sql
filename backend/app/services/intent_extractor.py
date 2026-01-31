@@ -101,11 +101,11 @@ def _load_prompt_template() -> str:
     return PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
-def _load_catalog() -> str:
-    """Load catalog as raw text. Raises if file missing."""
-    if not CATALOG_PATH.exists():
-        raise FileNotFoundError(f"Catalog not found: {CATALOG_PATH}")
-    return CATALOG_PATH.read_text(encoding="utf-8")
+# def _load_catalog() -> str:
+#     """Load catalog as raw text. Raises if file missing."""
+#     if not CATALOG_PATH.exists():
+#         raise FileNotFoundError(f"Catalog not found: {CATALOG_PATH}")
+#     return CATALOG_PATH.read_text(encoding="utf-8")
 
 
 def _compute_prompt_hash(prompt: str) -> str:
@@ -113,7 +113,7 @@ def _compute_prompt_hash(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()[:12]
 
 
-def _build_prompt(query: str, catalog: str, template: str) -> str:
+def _build_prompt(query: str, template: str) -> str:
     """
     Inject runtime values into prompt template.
     
@@ -121,8 +121,8 @@ def _build_prompt(query: str, catalog: str, template: str) -> str:
     Uses simple string replacement instead of .format() to avoid
     conflicts with JSON curly braces in the template.
     """
-    result = template.replace("{catalog}", catalog)
-    result = result.replace("{query}", query)
+    # result = template.replace("{catalog}", catalog)
+    result = template.replace("{query}", query)
     return result
 
 
@@ -199,7 +199,7 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
             text_block = response.content[0]
             if not hasattr(text_block, "text") or not text_block.text:
                 raise EmptyResponseError("LLM returned empty text")
-        
+
             return text_block.text
             
         except anthropic.APITimeoutError as e:
@@ -340,10 +340,11 @@ def extract_intent(query: str) -> dict[str, Any]:
     try:
         # Load external resources
         template = _load_prompt_template()
-        catalog = _load_catalog()
+        # catalog = _load_catalog()
         
         # Build prompt (pure substitution, no logic)
-        prompt = _build_prompt(query=query, catalog=catalog, template=template)
+        # prompt = _build_prompt(query=query, catalog=catalog, template=template)
+        prompt = _build_prompt(query=query, template=template)
         prompt_hash = _compute_prompt_hash(prompt)
         
         # Log raw input
@@ -358,18 +359,18 @@ def extract_intent(query: str) -> dict[str, Any]:
         # Call LLM
         raw_response = _call_llm(prompt)
 
-        # Log to JSON file
-        log_file_path = Path(__file__).parent.parent.parent / "logs" / "extraction_logs.json"
-        log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_file_path, "a") as f:
-            json.dump({
-                "query": query,
-                "prompt_hash": prompt_hash,
-                "raw_response": raw_response,
-                "start_time": start_time,
-                "duration_ms": int((time.monotonic() - start_time) * 1000),
-            }, f)
-            f.write("\n")  # Add newline for JSONL format
+        # # Log to JSON file
+        # log_file_path = Path(__file__).parent.parent.parent / "logs" / "extraction_logs.json"
+        # log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        # with open(log_file_path, "a") as f:
+        #     json.dump({
+        #         "query": query,
+        #         "prompt_hash": prompt_hash,
+        #         "raw_response": raw_response,
+        #         "start_time": start_time,
+        #         "duration_ms": int((time.monotonic() - start_time) * 1000),
+        #     }, f)
+        #     f.write("\n")  # Add newline for JSONL format
 
         
         # Log raw output

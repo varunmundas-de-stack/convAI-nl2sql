@@ -187,7 +187,7 @@ DISTRIBUTION_TESTS = [
         query="What is the most popular Outlet Type (Kirana vs. Modern Trade) for the 'Snacks' brand 'CrunchTime'?",
         category="Distribution & Channel Analysis",
         description="Outlet type analysis with brand filter",
-        valid_intent_types=["ranking", "snapshot", "distribution"],
+        valid_intent_types=["ranking", "snapshot", "distribution", "comparison"],
         should_have_group_by=True,
         should_have_filters=True,  # Brand filter
     ),

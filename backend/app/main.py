@@ -11,6 +11,7 @@ DESIGN PRINCIPLE:
 """
 
 import logging
+import colorlog
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,10 +37,30 @@ CATALOG_PATH = Path(__file__).parent.parent / "catalog" / "catalog.yaml"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Configure logging
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+
+def setup_global_color_logging():
+    # Configure root logger
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper()))
+    root_logger = logging.getLogger()
+
+    # Remove existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+
+    # Create console handler
+    handler = logging.StreamHandler()
+    handler.setFormatter(colorlog.ColoredFormatter(
+        "%(log_color)s%(levelname)-8s%(reset)s %(name)s: %(message)s",
+        log_colors={
+            'DEBUG': 'cyan',
+            'INFO': 'green',
+            'WARNING': 'yellow',
+            'ERROR': 'red',
+            'CRITICAL': 'bold_red',
+        }
+    ))
+    root_logger.addHandler(handler)
+
+setup_global_color_logging()
 logger = logging.getLogger(__name__)
 
 

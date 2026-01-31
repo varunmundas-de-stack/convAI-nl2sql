@@ -236,7 +236,7 @@ def execute_query(query: str) -> OrchestratorResponse:
             stage=PipelineStage.RECEIVED,
             error_type="JSONParseError",
             message=str(e),
-            details={"raw_response": getattr(e, '__cause__', None)}
+            details={"raw_response": str(getattr(e, '__cause__', None))}
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response

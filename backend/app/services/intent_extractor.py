@@ -191,6 +191,15 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
                     {"role": "user", "content": prompt}
                 ]
             )
+
+            input_token_count = client.messages.count_tokens(
+                model=MODEL_ID,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+           
+            logger.info(f"Input token count: {input_token_count.input_tokens}")
             
             # Extract text content
             if not response.content:

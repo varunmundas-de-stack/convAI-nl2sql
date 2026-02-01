@@ -50,6 +50,7 @@ from app.services.cube_client import (
     CubeClientError,
     CubeResponse,
 )
+from app.services.intent_normalizer import normalize_intent
 from app.services.catalog_manager import CatalogManager
 from app.models.intent import Intent
 
@@ -280,6 +281,8 @@ def execute_query(query: str) -> OrchestratorResponse:
     try:
         logger.info("Step 3: Validating intent...")
         catalog = _get_catalog()
+        raw_intent = normalize_intent(raw_intent)
+        logger.info(f"Intent normalized: {raw_intent}")
         validated_intent = validate_intent(raw_intent, catalog)
         response.validated_intent = validated_intent.model_dump()
         response.stage = PipelineStage.INTENT_VALIDATED
@@ -413,3 +416,6 @@ def execute_query_dict(query: str) -> Dict[str, Any]:
     """
     response = execute_query(query)
     return response.to_dict()
+
+
+

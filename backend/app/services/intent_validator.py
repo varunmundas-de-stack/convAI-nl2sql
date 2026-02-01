@@ -157,50 +157,23 @@ class IntentValidator:
         Raises:
             UnknownMetricError: If metric not found
         """
-        try:
-            self.catalog.is_valid_metric(metric)
-        except Exception:
-            # Metric not found - try to get suggestions
-            suggestions = self._get_metric_suggestions(metric)
-            raise UnknownMetricError(metric, suggestions)
+        if not self.catalog.is_valid_metric(metric):
+            raise UnknownMetricError(metric)
     
-    def _validate_dimensions(self, dimensions: List[str], context: str = "group_by") -> None:
-        """
-        Validate that all dimensions exist in catalog.
-        
-        Args:
-            dimensions: List of dimension names to validate
-            context: Context for error messages (group_by, filter, etc.)
-            
-        Raises:
-            UnknownDimensionError: If any dimension not found
-        """
+    def _validate_dimensions(self, dimensions: list[str], context: str):
         for dim in dimensions:
-            try:
-                self.catalog.is_valid_dimension(dim)
-            except Exception:
-                suggestions = self._get_dimension_suggestions(dim)
-                raise UnknownDimensionError(dim, context, suggestions)
+            if not self.catalog.is_valid_dimension(dim):
+                raise UnknownDimensionError(dim, context)
+
     
     def _validate_time_dimension(self, time_dim: TimeDimension) -> None:
-        """
-        Validate time dimension exists and granularity is valid.
-        
-        Raises:
-            UnknownTimeDimensionError: If time dimension not in catalog
-            InvalidGranularityError: If granularity not valid
-        """
-        # Validate dimension exists
-        try:
-            self.catalog.is_valid_time_dimension(time_dim.dimension)
-        except Exception:
-            suggestions = self._get_time_dimension_suggestions(time_dim.dimension)
-            raise UnknownTimeDimensionError(time_dim.dimension, suggestions)
-        
-        # Validate granularity
+        if not self.catalog.is_valid_time_dimension(time_dim.dimension):
+            raise UnknownTimeDimensionError(time_dim.dimension)
+
         allowed = self.catalog.get_time_granularities(time_dim.dimension)
         if time_dim.granularity not in allowed:
             raise InvalidGranularityError(time_dim.granularity)
+
     
     def _validate_time_range(self, time_range: TimeRange) -> None:
         """

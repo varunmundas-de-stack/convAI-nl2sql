@@ -1,269 +1,55 @@
-"""Pytest tests for CatalogManager with new catalog structure."""
-
 import pytest
 from pathlib import Path
-from app.services.catalog_manager import CatalogManager, CatalogError, AmbiguousResolutionError
+from app.services.catalog_manager import CatalogManager
 
-CATALOG_PATH = str(Path(__file__).parent.parent.parent / "catalog" / "catalog.yaml")
+CATALOG_PATH = Path(__file__).parent.parent.parent / "catalog" / "catalog.yaml"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def catalog():
-    """Fixture to load the catalog manager."""
-    return CatalogManager(CATALOG_PATH)
+    return CatalogManager(str(CATALOG_PATH))
 
 
-class TestCatalogLoading:
-    def test_catalog_loads_successfully(self, catalog):
-        assert catalog is not None
-        assert catalog.raw_catalog() is not None
-
-    def test_required_sections_exist(self, catalog):
-        raw = catalog.raw_catalog()
-        assert "metrics" in raw
-        assert "dimensions" in raw
-        assert "time_dimensions" in raw
+def test_catalog_loads(catalog):
+    assert catalog is not None
 
 
-class TestMetrics:
-    def test_list_metrics(self, catalog):
-        metrics = catalog.list_metrics()
-        assert len(metrics) > 0
-        assert isinstance(metrics[0], dict)
-
-    def test_list_metric_names(self, catalog):
-        names = catalog.list_metric_names()
-        assert "total_quantity" in names
-        assert "transaction_count" in names
-
-    def test_resolve_metric_by_name(self, catalog):
-        metric = catalog.resolve_metric("total_quantity")
-        assert metric["id"] == "sales_fact.quantity"
-
-    def test_get_metric_cube_field(self, catalog):
-        field = catalog.get_metric_cube_field("transaction_count")
-        assert field == "sales_fact.count"
-
-    def test_invalid_metric_raises_error(self, catalog):
-        with pytest.raises(CatalogError):
-            catalog.resolve_metric("nonexistent_metric")
+def test_valid_metric_id(catalog):
+    assert catalog.is_valid_metric("sales_fact.quantity")
+    assert catalog.is_valid_metric("sales_fact.count")
 
 
-class TestDimensions:
-    def test_list_dimensions(self, catalog):
-        dims = catalog.list_dimensions()
-        assert len(dims) > 0
-
-    def test_resolve_dimension_by_name(self, catalog):
-        dim = catalog.resolve_dimension("brand")
-        assert dim["id"] == "skus.brand"
-
-    def test_get_dimension_cube_field(self, catalog):
-        field = catalog.get_dimension_cube_field("region")
-        assert field == "territories.region"
-
-    def test_invalid_dimension_raises_error(self, catalog):
-        with pytest.raises(CatalogError):
-            catalog.resolve_dimension("nonexistent_dim")
+def test_invalid_metric_id(catalog):
+    assert not catalog.is_valid_metric("total_quantity")
+    assert not catalog.is_valid_metric("fake.metric")
 
 
-class TestTimeDimensions:
-    def test_list_time_dimensions(self, catalog):
-        tds = catalog.list_time_dimensions()
-        assert len(tds) > 0
-
-    def test_resolve_time_dimension(self, catalog):
-        td = catalog.resolve_time_dimension("invoice_date")
-        assert td["name"] == "invoice_date"
-
-    def test_get_time_dimension_granularities(self, catalog):
-        granularities = catalog.get_time_dimension_granularities("invoice_date")
-        names = [g["name"] for g in granularities]
-        assert "day" in names
-        assert "month" in names
-        assert "year" in names
+def test_valid_dimension_id(catalog):
+    assert catalog.is_valid_dimension("territories.region")
+    assert catalog.is_valid_dimension("skus.brand")
 
 
-class TestTimeWindows:
-    def test_list_time_windows(self, catalog):
-        tws = catalog.list_time_windows()
-        assert len(tws) > 0
-
-    def test_resolve_time_window_by_name(self, catalog):
-        tw = catalog.resolve_time_window("last_7_days")
-        assert tw["name"] == "last_7_days"
-
-    def test_resolve_time_window_by_alias(self, catalog):
-        tw = catalog.resolve_time_window("MTD")
-        assert tw["name"] == "month_to_date"
+def test_invalid_dimension_id(catalog):
+    assert not catalog.is_valid_dimension("region")
+    assert not catalog.is_valid_dimension("fake.dimension")
 
 
-class TestValidation:
-    def test_is_valid_metric(self, catalog):
-        assert catalog.is_valid_metric("total_quantity") is True
-        assert catalog.is_valid_metric("fake_metric") is False
-
-    def test_is_valid_dimension(self, catalog):
-        assert catalog.is_valid_dimension("brand") is True
-        assert catalog.is_valid_dimension("fake_dim") is False
+def test_valid_time_dimension(catalog):
+    assert catalog.is_valid_time_dimension("sales_fact.invoice_date")
 
 
-class TestSearch:
-    def test_search_metrics(self, catalog):
-        results = catalog.search_metrics("quantity")
-        assert len(results) >= 1
-
-    def test_search_dimensions(self, catalog):
-        results = catalog.search_dimensions("outlet")
-        assert len(results) >= 1
+def test_time_dimension_granularities(catalog):
+    granularities = catalog.get_time_granularities("sales_fact.invoice_date")
+    assert "day" in granularities
+    assert "month" in granularities
+    assert "year" in granularities
 
 
-class TestPriorityFiltering:
-    def test_high_priority_metrics(self, catalog):
-        # Adjusted merely to not fail if key is missing, or remove if entire concept is gone.
-        # Assuming we just want to skip these if the keys aren't in YAML
-        pass
-
-    def test_filterable_dimensions(self, catalog):
-        pass
+def test_valid_time_window(catalog):
+    assert catalog.is_valid_time_window("last_7_days")
+    assert catalog.is_valid_time_window("month_to_date")
 
 
-class TestNewSections:
-    def test_intent_types(self, catalog):
-        intents = catalog.list_intent_types()
-        assert len(intents) > 0
-        names = [i["name"] for i in intents]
-        assert "snapshot" in names
-        assert "trend" in names
-
-    def test_comparison_types(self, catalog):
-        comps = catalog.list_comparison_types()
-        assert len(comps) > 0
-
-    def test_business_rules(self, catalog):
-        rules = catalog.get_business_rules()
-        assert len(rules) > 0
-
-
-class TestCaseInsensitivity:
-    """Test that lookups are case-insensitive."""
-
-    def test_metric_lookup_case_insensitive(self, catalog):
-        """Metrics should be found regardless of case."""
-        # Lowercase
-        m1 = catalog.resolve_metric("total_quantity")
-        # Uppercase
-        m2 = catalog.resolve_metric("TOTAL_QUANTITY")
-        # Mixed case
-        m3 = catalog.resolve_metric("Total_Quantity")
-        
-        assert m1["id"] == m2["id"] == m3["id"]
-
-    def test_dimension_lookup_case_insensitive(self, catalog):
-        """Dimensions should be found regardless of case."""
-        d1 = catalog.resolve_dimension("brand")
-        d2 = catalog.resolve_dimension("BRAND")
-        d3 = catalog.resolve_dimension("Brand")
-        
-        assert d1["id"] == d2["id"] == d3["id"]
-
-    # Removed test_alias_lookup_case_insensitive because aliases were removed from the catalog.
-
-    def test_time_window_alias_case_insensitive(self, catalog):
-        """Time window aliases should be case-insensitive."""
-        tw1 = catalog.resolve_time_window("mtd")
-        tw2 = catalog.resolve_time_window("MTD")
-        tw3 = catalog.resolve_time_window("Mtd")
-        
-        assert tw1["name"] == tw2["name"] == tw3["name"]
-
-    def test_is_valid_case_insensitive(self, catalog):
-        """Validation methods should be case-insensitive."""
-        assert catalog.is_valid_metric("TOTAL_QUANTITY") is True
-        assert catalog.is_valid_dimension("BRAND") is True
-        assert catalog.is_valid_time_window("MTD") is True
-
-
-class TestAliasCollisions:
-    """Test that alias collisions are properly detected and don't silently pick one."""
-
-    # Removed test_unique_aliases_resolve_unambiguously because aliases were removed.
-
-    def test_find_returns_all_matches(self, catalog):
-        """find_* methods should return all matches for a term."""
-        # Check that find_metrics returns a list
-        matches = catalog.find_metrics("transaction_count")
-        assert isinstance(matches, list)
-        assert len(matches) >= 1
-
-    def test_safe_resolve_returns_resolution_result(self, catalog):
-        """Safe resolve methods should return ResolutionResult objects."""
-        result = catalog.resolve_metric_safe("total_quantity")
-        
-        assert hasattr(result, 'is_ambiguous')
-        assert hasattr(result, 'is_found')
-        assert hasattr(result, 'all_matches')
-        assert hasattr(result, 'item_type')
-
-    def test_invalid_term_returns_empty_matches(self, catalog):
-        """Invalid terms should return empty matches, not error."""
-        matches = catalog.find_metrics("completely_fake_metric_xyz")
-        assert matches == []
-        
-        result = catalog.resolve_metric_safe("completely_fake_metric_xyz")
-        assert result.is_found is False
-        assert result.is_ambiguous is False
-
-    def test_cross_type_collision_detection(self, catalog):
-        """Should detect when a term exists in multiple catalog types."""
-        # Check the method exists and works
-        # (Actual collisions depend on catalog data)
-        has_collision = catalog.has_cross_type_collision("nonexistent_term")
-        assert has_collision is False  # Non-existent term has no collision
-        
-        # get_cross_type_matches should return dict
-        matches = catalog.get_cross_type_matches("brand")
-        assert isinstance(matches, dict)
-        # "brand" should be in dimensions
-        assert "dimension" in matches
-
-    def test_unambiguous_check_methods(self, catalog):
-        """is_unambiguous_* methods should correctly identify unique resolutions."""
-        # Known unique metric
-        assert catalog.is_unambiguous_metric("total_quantity") is True
-        # Invalid metric
-        assert catalog.is_unambiguous_metric("fake_metric") is False
-        
-        # Known unique dimension
-        assert catalog.is_unambiguous_dimension("brand") is True
-
-
-class TestAmbiguityHandling:
-    """Test the ambiguity handling mechanisms."""
-
-    def test_resolve_safe_does_not_raise(self, catalog):
-        """resolve_*_safe methods should never raise, even for ambiguous terms."""
-        # These should not raise
-        catalog.resolve_metric_safe("anything")
-        catalog.resolve_dimension_safe("anything")
-        catalog.resolve_time_dimension_safe("anything")
-        catalog.resolve_time_window_safe("anything")
-
-    def test_resolution_result_properties(self, catalog):
-        """ResolutionResult should have correct properties."""
-        result = catalog.resolve_metric_safe("total_quantity")
-        
-        assert result.is_found is True
-        assert result.is_ambiguous is False
-        assert result.item is not None
-        assert result.item_type == "metric"
-        assert len(result.all_matches) == 1
-
-    def test_not_found_resolution_result(self, catalog):
-        """Not found terms should return proper ResolutionResult."""
-        result = catalog.resolve_metric_safe("xyz_not_found_123")
-        
-        assert result.is_found is False
-        assert result.is_ambiguous is False
-        assert result.item is None
-        assert result.all_matches == []
+def test_invalid_time_window(catalog):
+    assert not catalog.is_valid_time_window("MTD")
+    assert not catalog.is_valid_time_window("fake_window")

@@ -204,7 +204,7 @@ class TestQueryOrchestratorE2E:
             print(f"  Message: {response.error.message}")
             
             # This is a skip, not a failure - the LLM output was invalid
-            pytest.skip(
+            pytest.fail(
                 f"Validation failed: {response.error.error_code} - {response.error.message}"
             )
         
@@ -239,7 +239,7 @@ class TestQueryOrchestratorE2E:
             if "connect" in response.error.message.lower() or \
                "refused" in response.error.message.lower() or \
                "timeout" in response.error.message.lower():
-                pytest.skip("Cube service unavailable - skipping execution test")
+                pytest.fail("Cube service unavailable - skipping execution test")
             
             # Other Cube errors should be reported but not fail the test
             print(f"  Full error: {response.error.to_dict()}")

@@ -21,7 +21,7 @@ from app.models.intent import (
     TimeDimension,
     TimeRange,
 )
-from app.services.catalog_manager import CatalogManager, AmbiguousResolutionError
+from app.services.catalog_manager import CatalogManager
 from app.services.intent_errors import (
     IntentValidationError,
     MalformedIntentError,
@@ -31,8 +31,6 @@ from app.services.intent_errors import (
     InvalidTimeWindowError,
     InvalidGranularityError,
     InvalidFilterError,
-    AmbiguousMetricError,
-    AmbiguousDimensionError,
     InvalidTimeRangeError,
 )
 from pydantic import ValidationError
@@ -67,7 +65,7 @@ class IntentValidator:
         
         This is the main entry point. It performs:
         1. Structural validation (Pydantic parsing)
-        2. Metric validation (exists in catalog, unambiguous)
+        2. Metric validation (exists in catalog)
         3. Dimension validation (group_by fields exist)
         4. Time dimension validation (exists, valid granularity)
         5. Time range validation (valid window if specified)
@@ -87,13 +85,11 @@ class IntentValidator:
             InvalidTimeWindowError: If time window not recognized
             InvalidGranularityError: If granularity invalid
             InvalidFilterError: If filter dimension unknown
-            AmbiguousMetricError: If metric matches multiple catalog items
-            AmbiguousDimensionError: If dimension matches multiple catalog items
         """
         # Step 1: Parse raw dict into Intent model
         intent = self._parse_intent(raw_intent)
         
-        # Step 2: Validate metric exists and is unambiguous
+        # Step 2: Validate metric exists
         self._validate_metric(intent.metric)
         
         # Step 3: Validate group_by dimensions
@@ -156,18 +152,13 @@ class IntentValidator:
     
     def _validate_metric(self, metric: str) -> None:
         """
-        Validate that metric exists in catalog and is unambiguous.
+        Validate that metric exists in catalog.
         
         Raises:
             UnknownMetricError: If metric not found
-            AmbiguousMetricError: If metric matches multiple items
         """
         try:
-            # Use resolve which will raise AmbiguousResolutionError if ambiguous
-            self.catalog.resolve_metric(metric)
-        except AmbiguousResolutionError as e:
-            match_names = [m.get('name', m.get('id', '')) for m in e.matches]
-            raise AmbiguousMetricError(metric, match_names)
+            self.catalog.is_valid_metric(metric)
         except Exception:
             # Metric not found - try to get suggestions
             suggestions = self._get_metric_suggestions(metric)
@@ -183,14 +174,10 @@ class IntentValidator:
             
         Raises:
             UnknownDimensionError: If any dimension not found
-            AmbiguousDimensionError: If any dimension is ambiguous
         """
         for dim in dimensions:
             try:
-                self.catalog.resolve_dimension(dim)
-            except AmbiguousResolutionError as e:
-                match_names = [d.get('name', d.get('id', '')) for d in e.matches]
-                raise AmbiguousDimensionError(dim, match_names, context)
+                self.catalog.is_valid_dimension(dim)
             except Exception:
                 suggestions = self._get_dimension_suggestions(dim)
                 raise UnknownDimensionError(dim, context, suggestions)
@@ -205,19 +192,14 @@ class IntentValidator:
         """
         # Validate dimension exists
         try:
-            self.catalog.resolve_time_dimension(time_dim.dimension)
-        except AmbiguousResolutionError as e:
-            # Time dimensions shouldn't be ambiguous, but handle it
-            match_names = [td.get('name', td.get('id', '')) for td in e.matches]
-            raise UnknownTimeDimensionError(
-                f"{time_dim.dimension} (ambiguous: {', '.join(match_names)})"
-            )
+            self.catalog.is_valid_time_dimension(time_dim.dimension)
         except Exception:
             suggestions = self._get_time_dimension_suggestions(time_dim.dimension)
             raise UnknownTimeDimensionError(time_dim.dimension, suggestions)
         
         # Validate granularity
-        if time_dim.granularity not in self.VALID_GRANULARITIES:
+        allowed = self.catalog.get_time_granularities(time_dim.dimension)
+        if time_dim.granularity not in allowed:
             raise InvalidGranularityError(time_dim.granularity)
     
     def _validate_time_range(self, time_range: TimeRange) -> None:
@@ -232,8 +214,7 @@ class IntentValidator:
         # But we need to validate the window value if present
         if time_range.window:
             if not self.catalog.is_valid_time_window(time_range.window):
-                valid_windows = [tw.get('name', '') for tw in self.catalog.list_time_windows()]
-                raise InvalidTimeWindowError(time_range.window, valid_windows)
+                raise InvalidTimeWindowError(time_range.window)
         
         # If using explicit dates, basic validation (format is handled by Pydantic)
         # Additional date validation could be added here if needed
@@ -246,16 +227,7 @@ class IntentValidator:
             InvalidFilterError: If filter dimension not in catalog
         """
         for idx, flt in enumerate(filters):
-            try:
-                self.catalog.resolve_dimension(flt.dimension)
-            except AmbiguousResolutionError as e:
-                match_names = [d.get('name', d.get('id', '')) for d in e.matches]
-                raise InvalidFilterError(
-                    f"Ambiguous filter dimension: '{flt.dimension}' matches {', '.join(match_names)}",
-                    filter_index=idx,
-                    dimension=flt.dimension
-                )
-            except Exception:
+            if not self.catalog.is_valid_dimension(flt.dimension):
                 raise InvalidFilterError(
                     f"Unknown filter dimension: '{flt.dimension}'",
                     filter_index=idx,

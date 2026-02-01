@@ -35,10 +35,6 @@ class IntentErrorCode(str, Enum):
     INVALID_TIME_WINDOW = "INVALID_TIME_WINDOW"
     INVALID_GRANULARITY = "INVALID_GRANULARITY"
     
-    # Ambiguity errors
-    AMBIGUOUS_METRIC = "AMBIGUOUS_METRIC"
-    AMBIGUOUS_DIMENSION = "AMBIGUOUS_DIMENSION"
-    
     # Structural errors
     MALFORMED_INTENT = "MALFORMED_INTENT"
     INVALID_FILTER = "INVALID_FILTER"
@@ -235,52 +231,6 @@ class InvalidGranularityError(IntentValidationError):
         )
 
 
-# ============================================================================
-# AMBIGUITY ERRORS
-# ============================================================================
-
-class AmbiguousMetricError(IntentValidationError):
-    """
-    ERROR_CODE: AMBIGUOUS_METRIC
-    
-    Raised when a metric term matches multiple catalog items.
-    
-    Example:
-        User asks for "sales" which could mean "total_sales", "net_sales", "gross_sales"
-    """
-    ERROR_CODE = IntentErrorCode.AMBIGUOUS_METRIC
-    
-    def __init__(self, metric: str, matches: List[str]):
-        message = f"Ambiguous metric: '{metric}' matches multiple items: {', '.join(matches)}"
-        super().__init__(
-            message=message,
-            field="metric",
-            value=metric,
-            suggestions=matches,
-            metadata={"matches": matches}
-        )
-
-
-class AmbiguousDimensionError(IntentValidationError):
-    """
-    ERROR_CODE: AMBIGUOUS_DIMENSION
-    
-    Raised when a dimension term matches multiple catalog items.
-    
-    Example:
-        User asks to group by "type" which could mean "outlet_type", "distributor_type", "sales_type"
-    """
-    ERROR_CODE = IntentErrorCode.AMBIGUOUS_DIMENSION
-    
-    def __init__(self, dimension: str, matches: List[str], context: str = "group_by"):
-        message = f"Ambiguous dimension in {context}: '{dimension}' matches multiple items: {', '.join(matches)}"
-        super().__init__(
-            message=message,
-            field=context,
-            value=dimension,
-            suggestions=matches,
-            metadata={"context": context, "matches": matches}
-        )
 
 
 # ============================================================================

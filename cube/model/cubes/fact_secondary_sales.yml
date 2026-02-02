@@ -1,0 +1,44 @@
+cubes:
+  - name: fact_secondary_sales
+    sql_table: public.fact_secondary_sales
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: gross_value
+        sql: gross_value
+        type: string
+
+      - name: invoice_number
+        sql: invoice_number
+        type: string
+
+      - name: net_value
+        sql: net_value
+        type: string
+
+      - name: route_code
+        sql: route_code
+        type: string
+
+      - name: tax_amount
+        sql: tax_amount
+        type: string
+
+      - name: volume_qty
+        sql: volume_qty
+        type: string
+
+      - name: invoice_date
+        sql: invoice_date
+        type: time
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

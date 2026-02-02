@@ -1,0 +1,32 @@
+cubes:
+  - name: dim_product
+    sql_table: public.dim_product
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: brand_name
+        sql: brand_name
+        type: string
+
+      - name: category_name
+        sql: category_name
+        type: string
+
+      - name: sku_name
+        sql: sku_name
+        type: string
+
+      - name: uom
+        sql: uom
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

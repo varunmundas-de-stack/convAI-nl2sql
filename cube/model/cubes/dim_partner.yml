@@ -1,0 +1,24 @@
+cubes:
+  - name: dim_partner
+    sql_table: public.dim_partner
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: partner_name
+        sql: partner_name
+        type: string
+
+      - name: partner_type
+        sql: partner_type
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

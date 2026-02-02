@@ -1,0 +1,28 @@
+cubes:
+  - name: dim_geography
+    sql_table: public.dim_geography
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: city_name
+        sql: city_name
+        type: string
+
+      - name: state_name
+        sql: state_name
+        type: string
+
+      - name: zone_name
+        sql: zone_name
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

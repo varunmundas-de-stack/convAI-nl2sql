@@ -1,46 +1,84 @@
-# =====================================================
-# ABSOLUTE MINIMUM CATALOG FOR VALIDATION
-# Only what's needed to answer: "Does this exist?"
-# =====================================================
-
 metrics:
-  sales_fact.count: true
-  sales_fact.quantity: true
+  date_dim.count: true
+  date_dim.month_number: true
   distributors.count: true
   outlets.count: true
+  sales_fact.count: true
+  sales_fact.quantity: true
   skus.count: true
   territories.count: true
-
 dimensions:
-  sales_fact.sales_type: true
-  sales_fact.is_credit: true
-  sales_fact.sales_rep_code: true
-  sales_fact.invoice_number: true
-
-  skus.brand: true
-  skus.category: true
-  skus.sub_category: true
-  skus.sku_name: true
-  skus.pack_size: true
-
-  territories.region: true
-  territories.state: true
-  territories.zone: true
-  territories.territory_name: true
-
-  outlets.outlet_type: true
-  outlets.outlet_name: true
-  outlets.beat_code: true
-
+  date_dim.day_name: true
+  date_dim.is_weekend: true
+  date_dim.month_name: true
+  distributors.distributor_id: true
+  distributors.credit_limit: true
+  distributors.distributor_code: true
   distributors.distributor_name: true
   distributors.distributor_type: true
-
+  distributors.is_active: true
+  outlets.outlet_id: true
+  outlets.beat_code: true
+  outlets.is_active: true
+  outlets.outlet_code: true
+  outlets.outlet_name: true
+  outlets.outlet_type: true
+  sales_fact.sales_id: true
+  sales_fact.base_price: true
+  sales_fact.discount_amount: true
+  sales_fact.gross_amount: true
+  sales_fact.invoice_number: true
+  sales_fact.is_credit: true
+  sales_fact.net_amount: true
+  sales_fact.sales_rep_code: true
+  sales_fact.sales_type: true
+  sales_fact.scheme_discount: true
+  sales_fact.tax_amount: true
+  skus.sku_id: true
+  skus.brand: true
+  skus.category: true
+  skus.is_active: true
+  skus.mrp: true
+  skus.pack_size: true
+  skus.sku_code: true
+  skus.sku_name: true
+  skus.sub_category: true
+  territories.territory_id: true
+  territories.is_active: true
+  territories.region: true
+  territories.state: true
+  territories.territory_code: true
+  territories.territory_name: true
+  territories.zone: true
 time_dimensions:
-  sales_fact.invoice_date:
-    granularities: [day, week, month, quarter, year]
   date_dim.full_date:
-    granularities: [day, week, month, quarter, year]
-
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
+  distributors.onboarding_date:
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
+  outlets.onboarding_date:
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
+  sales_fact.invoice_date:
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
 time_windows:
   today: true
   yesterday: true

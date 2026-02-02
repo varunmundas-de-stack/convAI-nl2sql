@@ -30,5 +30,16 @@ services:
     depends_on:
       - postgres
 
+  catalog-generator:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "pip install pyyaml && python backend/app/utils/generate_catalog.py"
+    depends_on:
+      - cube
+    restart: "no"
+
 volumes:
   postgres_data:

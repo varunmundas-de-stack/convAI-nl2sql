@@ -267,6 +267,21 @@ python -m pytest app/tests/ -v
 
 ---
 
+## 🛠️ Development & Maintenance
+
+### Generating the Catalog
+
+If you modify the Cube.js schema files in `cube/model/cubes/`, you need to regenerate the `catalog.yaml` file so the NL2SQL validators are aware of the changes.
+
+```bash
+cd backend
+python -m app.utils.generate_catalog
+```
+
+This script parses the Cube YAML files and updates `backend/catalog/catalog.yaml` with the latest metrics, dimensions, and time dimensions.
+
+---
+
 ## 🔒 Design Principles
 
 1. **Separation of Concerns** - Each module has a single responsibility

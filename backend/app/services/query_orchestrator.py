@@ -52,6 +52,7 @@ from app.services.cube_client import (
 )
 from app.services.intent_normalizer import normalize_intent
 from app.services.catalog_manager import CatalogManager
+from app.services.data_visualizer import generate_visualization, VisualizationResult
 from app.models.intent import Intent
 
 
@@ -75,6 +76,7 @@ class PipelineStage:
     INTENT_VALIDATED = "intent_validated"
     CUBE_QUERY_BUILT = "cube_query_built"
     CUBE_EXECUTED = "cube_executed"
+    VISUALIZATION_GENERATED = "visualization_generated"
     COMPLETED = "completed"
 
 
@@ -126,6 +128,7 @@ class OrchestratorResponse:
     validated_intent: Optional[Dict[str, Any]] = None
     cube_query: Optional[Dict[str, Any]] = None
     data: Optional[List[Dict[str, Any]]] = None
+    visualization: Optional[Dict[str, Any]] = None
     
     # Error (None if success)
     error: Optional[OrchestratorError] = None
@@ -144,6 +147,7 @@ class OrchestratorResponse:
             "validated_intent": self.validated_intent,
             "cube_query": self.cube_query,
             "data": self.data,
+            "visualization": self.visualization,
             "error": self.error.to_dict() if self.error else None,
             "request_id": self.request_id,
         }
@@ -384,7 +388,44 @@ def execute_query(query: str) -> OrchestratorResponse:
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 6: Success - return everything
+    # STEP 6: Generate visualization
+    # -------------------------------------------------------------------------
+    try:
+        logger.info("Step 6: Generating visualization...")
+        visualization_type = validated_intent.visualization_type or "table"
+        
+        viz_result = generate_visualization(
+            visualization_type=visualization_type,
+            data=response.data,
+            metric=validated_intent.metric,
+            dimensions=validated_intent.group_by,
+            query=query,
+            output_format="plotly_json"
+        )
+        
+        response.visualization = {
+            "type": viz_result.visualization_type,
+            "format": viz_result.output_format,
+            "content": viz_result.content,
+            "title": viz_result.title,
+            "description": viz_result.description,
+        }
+        response.stage = PipelineStage.VISUALIZATION_GENERATED
+        logger.info(f"Visualization generated: {visualization_type}")
+        
+    except Exception as e:
+        # Visualization error is non-fatal - log but continue
+        logger.warning(f"Visualization generation failed (non-fatal): {e}")
+        response.visualization = {
+            "type": validated_intent.visualization_type or "table",
+            "format": "error",
+            "content": None,
+            "title": "Visualization Error",
+            "description": str(e),
+        }
+    
+    # -------------------------------------------------------------------------
+    # STEP 7: Success - return everything
     # -------------------------------------------------------------------------
     response.success = True
     response.stage = PipelineStage.COMPLETED

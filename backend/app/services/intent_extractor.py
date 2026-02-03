@@ -35,19 +35,9 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from app.services.llm_service import call_claude, count_tokens
 import anthropic
 
-# Load environment variables from .env file
-load_dotenv()
-
-# =============================================================================
-# CONFIGURATION (Explicit, loaded from environment)
-# =============================================================================
-
-MODEL_ID = os.getenv("ANTHROPIC_MODEL_ID", "claude-sonnet-4-5")
-TEMPERATURE = os.getenv("MODEL_TEMPERATURE", 0.0) # Deterministic: extraction is parsing, not generation
-MAX_TOKENS = os.getenv("MODEL_MAX_TOKENS", 2048) # Sufficient for intent JSON output
-TIMEOUT_SECONDS = os.getenv("MODEL_TIMEOUT_SECONDS", 30.0)
 
 # Paths
 PROMPT_TEMPLATE_PATH = Path(__file__).parent.parent / "prompts" / "intent_extraction.txt"
@@ -172,10 +162,6 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
         LLMTimeoutError: Request timed out
         EmptyResponseError: Empty response received
     """
-    client = anthropic.Anthropic(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        timeout=TIMEOUT_SECONDS)
-    
     attempt = 0
     max_attempts = 2 if retry_once else 1
     last_error: Exception | None = None
@@ -183,21 +169,11 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
     while attempt < max_attempts:
         attempt += 1
         try:
-            response = client.messages.create(
-                model=MODEL_ID,
-                max_tokens=MAX_TOKENS,
-                temperature=TEMPERATURE,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            response = call_claude(
+                prompt=prompt
             )
 
-            input_token_count = client.messages.count_tokens(
-                model=MODEL_ID,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
+            input_token_count = count_tokens(prompt)
            
             logger.info(f"Input token count: {input_token_count.input_tokens}")
             

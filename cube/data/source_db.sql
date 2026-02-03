@@ -5,161 +5,265 @@ DROP TABLE IF EXISTS dim_sales_hierarchy CASCADE;
 DROP TABLE IF EXISTS dim_product CASCADE;
 DROP TABLE IF EXISTS dim_geography CASCADE;
 
--- 1. Dimension: Geography (Supports the 6 Zones, 12 States requirement)
-CREATE TABLE dim_geography (
-    geo_id SERIAL PRIMARY KEY,
-    zone_name VARCHAR(50),      -- e.g., 'North Zone', 'South Zone'
-    state_name VARCHAR(50),     -- e.g., 'Delhi', 'Tamil Nadu'
-    city_name VARCHAR(50)
-);
 
--- 2. Dimension: Product (Supports "Cigarettes" vs "Groceries" & different UOMs)
-CREATE TABLE dim_product (
-    sku_id SERIAL PRIMARY KEY,
-    category_name VARCHAR(50),  -- e.g., 'Cigarettes', 'Staples', 'Oils'
-    brand_name VARCHAR(50),     -- e.g., 'Classic', 'Aashirwaad'
-    sku_name VARCHAR(100),      -- e.g., 'Aashirwaad Aata 5kg'
-    uom VARCHAR(20)             -- e.g., 'Packs', 'Kg', 'Ltr' (Critical for volume adaptation)
-);
-
--- 3. Dimension: Sales Hierarchy (Supports RBAC: SalesRep -> SO -> AM -> ZM)
--- This table defines the reporting structure. For RBAC, you would filter data based on these IDs.
-CREATE TABLE dim_sales_hierarchy (
-    hierarchy_id SERIAL PRIMARY KEY,
-    sales_rep_name VARCHAR(100),
-    sales_officer_name VARCHAR(100), -- Reports to
-    area_manager_name VARCHAR(100),  -- Reports to
-    zonal_manager_name VARCHAR(100), -- Reports to
-    zone_id INT REFERENCES dim_geography(geo_id)
-);
-
--- 4. Dimension: Partners (Warehouses, Distributors, Retailers)
-CREATE TABLE dim_partner (
-    partner_id SERIAL PRIMARY KEY,
-    partner_type VARCHAR(20),   -- 'Warehouse', 'Distributor', 'Retailer'
-    partner_name VARCHAR(100),
-    geo_id INT REFERENCES dim_geography(geo_id)
-);
-
--- 5. Fact Table: Primary Sales (Company Warehouse -> Distributor)
-CREATE TABLE fact_primary_sales (
-    transaction_id SERIAL PRIMARY KEY,
-    invoice_date DATE,
-    invoice_number VARCHAR(50),
-    
-    -- Links to Dimensions
-    warehouse_id INT REFERENCES dim_partner(partner_id), -- Source
-    distributor_id INT REFERENCES dim_partner(partner_id), -- Destination
-    sku_id INT REFERENCES dim_product(sku_id),
-    
-    -- Metrics
-    volume_qty DECIMAL(10, 2),  -- Quantity in UOM (e.g., 500 Kg or 1000 Packs)
-    gross_value DECIMAL(15, 2),
-    tax_amount DECIMAL(15, 2),
-    net_value DECIMAL(15, 2)
-);
-
--- 6. Fact Table: Secondary Sales (Distributor -> Retailer)
--- "Includes distributor and retailer info, route codes, SalesRep hierarchy"
 CREATE TABLE fact_secondary_sales (
-    transaction_id SERIAL PRIMARY KEY,
-    invoice_date DATE,
-    invoice_number VARCHAR(50),
-    
-    -- Links to Dimensions
-    distributor_id INT REFERENCES dim_partner(partner_id), -- Source
-    retailer_id INT REFERENCES dim_partner(partner_id),    -- Destination
-    sku_id INT REFERENCES dim_product(sku_id),
-    hierarchy_id INT REFERENCES dim_sales_hierarchy(hierarchy_id), -- Links transaction to specific SalesRep/Team
-    
-    -- Route & Logistics
-    route_code VARCHAR(50),
-    
-    -- Metrics (Flexible for different product types)
-    volume_qty DECIMAL(10, 2),   -- Dynamic interpretation based on dim_product.uom
-    gross_value DECIMAL(15, 2),
-    tax_amount DECIMAL(15, 2),
-    net_value DECIMAL(15, 2)
+  -- Partner info
+  distributor_code     VARCHAR(50),
+  distributor_name     VARCHAR(100),
+  retailer_code        VARCHAR(50),
+  retailer_name        VARCHAR(150),
+  retailer_type        VARCHAR(50), -- ModernTrade, GeneralTrade, Kirana, Wholesaler
+
+  -- Route & sales hierarchy
+  route_code           VARCHAR(50),
+  route_name           VARCHAR(100),
+
+  salesrep_code        VARCHAR(50),
+  salesrep_name        VARCHAR(100),
+  so_name              VARCHAR(100),
+  asm_name             VARCHAR(100),
+  zsm_name             VARCHAR(100),
+
+  -- Geography
+  city                 VARCHAR(100),
+  state                VARCHAR(100),
+  zone                 VARCHAR(50), -- South-1, South-2, Central, North-1, North-2, East
+
+  -- Invoice info
+  invoice_id           VARCHAR(50),
+  invoice_line_id      VARCHAR(50),
+  invoice_date         DATE,
+
+  -- Product info
+  sku_code             VARCHAR(50),
+  product_desc         VARCHAR(200),
+  brand                VARCHAR(100),
+  category             VARCHAR(100),
+  sub_category         VARCHAR(100),
+  pack_size            VARCHAR(50),
+
+  -- Volume metrics
+  billed_qty           INT,
+  billed_volume        DECIMAL(18,2), -- liters or packs
+  billed_weight        DECIMAL(18,2), -- kg
+
+  -- Value metrics
+  currency             VARCHAR(10),
+  gross_value          DECIMAL(18,2),
+  net_value            DECIMAL(18,2),
+  tax_value            DECIMAL(18,2),
+  tax_rate             DECIMAL(5,2),
+
+  -- Technical
+  created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE fact_primary_sales (
+  -- Company warehouse
+  companywh_code       VARCHAR(50),
+  companywh_name       VARCHAR(150),
+
+  -- Distributor
+  distributor_code     VARCHAR(50),
+  distributor_name     VARCHAR(150),
+
+  -- Geography
+  city                 VARCHAR(100),
+  state                VARCHAR(100),
+  zone                 VARCHAR(50),
+
+  -- Sales hierarchy
+  so_name              VARCHAR(100),
+  asm_name             VARCHAR(100),
+  zsm_name             VARCHAR(100),
+
+  -- Invoice info
+  invoice_id           VARCHAR(50),
+  invoice_line_id      VARCHAR(50),
+  invoice_date         DATE,
+
+  -- Product info
+  sku_code             VARCHAR(50),
+  product_desc         VARCHAR(200),
+  brand                VARCHAR(100),
+  category             VARCHAR(100),
+  sub_category         VARCHAR(100),
+  pack_size            VARCHAR(50),
+
+  -- Volume metrics
+  billed_qty           INT,
+  billed_volume        DECIMAL(18,2),
+  billed_weight        DECIMAL(18,2),
+
+  -- Value metrics
+  currency             VARCHAR(10),
+  gross_value          DECIMAL(18,2),
+  net_value            DECIMAL(18,2),
+  tax_value            DECIMAL(18,2),
+  tax_rate             DECIMAL(5,2),
+
+  created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 
+-- Secondary
+CREATE INDEX idx_sec_invoice_date ON fact_secondary_sales(invoice_date);
+CREATE INDEX idx_sec_zone ON fact_secondary_sales(zone);
+CREATE INDEX idx_sec_category ON fact_secondary_sales(category);
+CREATE INDEX idx_sec_salesrep ON fact_secondary_sales(salesrep_code);
 
--- 1. Populate Geography (6 Zones, 12 States)
-INSERT INTO dim_geography (zone_name, state_name, city_name)
-VALUES 
-('North Zone', 'Delhi', 'New Delhi'), ('North Zone', 'Punjab', 'Ludhiana'),
-('South Zone', 'Tamil Nadu', 'Chennai'), ('South Zone', 'Karnataka', 'Bangalore'),
-('East Zone', 'West Bengal', 'Kolkata'), ('East Zone', 'Odisha', 'Bhubaneswar'),
-('West Zone', 'Maharashtra', 'Mumbai'), ('West Zone', 'Gujarat', 'Ahmedabad'),
-('Central Zone', 'Madhya Pradesh', 'Indore'), ('Central Zone', 'Chhattisgarh', 'Raipur'),
-('North East Zone', 'Assam', 'Guwahati'), ('North East Zone', 'Meghalaya', 'Shillong');
+-- Primary
+CREATE INDEX idx_pri_invoice_date ON fact_primary_sales(invoice_date);
+CREATE INDEX idx_pri_zone ON fact_primary_sales(zone);
+CREATE INDEX idx_pri_category ON fact_primary_sales(category);
 
--- 2. Populate Products (Mixed Categories: Cigarettes & Staples)
-INSERT INTO dim_product (category_name, brand_name, sku_name, uom)
-VALUES 
-('Cigarettes', 'Classic', 'Classic Milds 20s', 'Packs'),
-('Cigarettes', 'Gold Flake', 'Gold Flake Kings', 'Packs'),
-('Staples', 'Aashirwaad', 'Aashirwaad Select Atta 5kg', 'Kg'),
-('Staples', 'Aashirwaad', 'Aashirwaad Salt 1kg', 'Kg'),
-('Oils', 'Sunfeast', 'Sunfeast YiPPee!', 'Packs'),
-('Oils', 'Fortune', 'Refined Soyabean Oil 1L', 'Ltr');
+-- ----------------------------------------------------------------------------
+-- Populate data
+-- ----------------------------------------------------------------------------
 
--- 3. Populate Sales Hierarchy (RBAC: SalesRep -> SO -> AM -> ZM)
--- Generating 10 hierarchies linked to random zones
-INSERT INTO dim_sales_hierarchy (sales_rep_name, sales_officer_name, area_manager_name, zonal_manager_name, zone_id)
+CREATE TEMP TABLE ref_zone_state (
+  zone TEXT,
+  state TEXT,
+  city TEXT
+);
+
+INSERT INTO ref_zone_state VALUES
+('South-1','Tamil Nadu','Chennai'),
+('South-1','Karnataka','Bangalore'),
+('South-2','Kerala','Kochi'),
+('North-1','Delhi','New Delhi'),
+('North-1','Punjab','Ludhiana'),
+('North-2','Uttar Pradesh','Lucknow'),
+('East','West Bengal','Kolkata'),
+('East','Odisha','Bhubaneswar'),
+('Central','Madhya Pradesh','Indore'),
+('Central','Chhattisgarh','Raipur'),
+('West','Maharashtra','Mumbai'),
+('West','Gujarat','Ahmedabad');
+
+-- Number the zone-state combinations for deterministic assignment
+CREATE TEMP TABLE ref_zone_numbered AS
 SELECT 
-    'SalesRep_' || seq, 
-    'SalesOfficer_' || (seq % 5 + 1), -- 1 SO manages multiple Reps
-    'AreaManager_' || (seq % 3 + 1),  -- 1 AM manages multiple SOs
-    'ZonalManager_' || (seq % 2 + 1), -- 1 ZM manages multiple AMs
-    (seq % 6 + 1) -- Assign to one of the 6 Zones roughly
-FROM generate_series(1, 20) AS seq;
+  zone, state, city,
+  ROW_NUMBER() OVER (ORDER BY zone, state) AS zone_idx
+FROM ref_zone_state;
 
--- 4. Populate Partners (Warehouses, Distributors, Retailers)
--- A. Company Warehouses (Sources for Primary Sales)
-INSERT INTO dim_partner (partner_type, partner_name, geo_id)
-SELECT 'Warehouse', 'Central Warehouse ' || seq, (seq % 12 + 1)
-FROM generate_series(1, 5) AS seq;
+CREATE TEMP TABLE ref_distributor AS
+SELECT
+  'D' || LPAD(g::TEXT,3,'0') AS distributor_code,
+  'Distributor ' || g AS distributor_name,
+  z.zone, z.state, z.city
+FROM generate_series(1,25) g
+JOIN ref_zone_numbered z ON z.zone_idx = ((g - 1) % 12) + 1;
 
--- B. Distributors (Targets for Primary, Sources for Secondary)
--- "25 Distributors" as requested
-INSERT INTO dim_partner (partner_type, partner_name, geo_id)
-SELECT 'Distributor', 'Distributor Agency ' || seq, (seq % 12 + 1)
-FROM generate_series(1, 25) AS seq;
 
--- C. Retailers (Targets for Secondary)
--- "100 Retailers per distributor" approx -> generating 2500 retailers
-INSERT INTO dim_partner (partner_type, partner_name, geo_id)
-SELECT 'Retailer', 'Retail Shop ' || seq, (seq % 12 + 1)
-FROM generate_series(1, 2500) AS seq;
+CREATE TEMP TABLE ref_retailer AS
+SELECT
+  d.distributor_code,
+  'R' || d.distributor_code || '_' || r AS retailer_code,
+  'Retailer ' || r || ' of ' || d.distributor_code AS retailer_name,
+  (ARRAY['ModernTrade','GeneralTrade','Kirana','Wholesaler'])[1 + floor(random()*4)] AS retailer_type,
+  d.zone, d.state, d.city
+FROM ref_distributor d,
+     generate_series(1,100) r;
 
--- 5. Generate Fact Data: Primary Sales (Warehouse -> Distributor)
-INSERT INTO fact_primary_sales (invoice_date, invoice_number, warehouse_id, distributor_id, sku_id, volume_qty, gross_value, tax_amount, net_value)
-SELECT 
-    CURRENT_DATE - (floor(random() * 30)::int), -- Random date in last 30 days
-    'INV-PRI-' || seq,
-    (SELECT partner_id FROM dim_partner WHERE partner_type = 'Warehouse' ORDER BY random() LIMIT 1),
-    (SELECT partner_id FROM dim_partner WHERE partner_type = 'Distributor' ORDER BY random() LIMIT 1),
-    (SELECT sku_id FROM dim_product ORDER BY random() LIMIT 1),
-    (random() * 1000)::int, -- Volume
-    (random() * 50000)::decimal(15,2), -- Gross Value
-    (random() * 5000)::decimal(15,2),  -- Tax
-    (random() * 55000)::decimal(15,2)  -- Net Value
-FROM generate_series(1, 500) AS seq; -- 500 Primary Invoices
 
--- 6. Generate Fact Data: Secondary Sales (Distributor -> Retailer)
--- This is the "Main" table for the PoC
-INSERT INTO fact_secondary_sales (invoice_date, invoice_number, distributor_id, retailer_id, sku_id, hierarchy_id, route_code, volume_qty, gross_value, tax_amount, net_value)
-SELECT 
-    CURRENT_DATE - (floor(random() * 30)::int),
-    'INV-SEC-' || seq,
-    (SELECT partner_id FROM dim_partner WHERE partner_type = 'Distributor' ORDER BY random() LIMIT 1),
-    (SELECT partner_id FROM dim_partner WHERE partner_type = 'Retailer' ORDER BY random() LIMIT 1),
-    (SELECT sku_id FROM dim_product ORDER BY random() LIMIT 1),
-    (SELECT hierarchy_id FROM dim_sales_hierarchy ORDER BY random() LIMIT 1), -- Link to a Sales Rep
-    'ROUTE-' || (floor(random() * 50 + 1)::int),
-    (random() * 50)::int, -- Smaller volume for retailer sales
-    (random() * 5000)::decimal(15,2),
-    (random() * 500)::decimal(15,2),
-    (random() * 5500)::decimal(15,2)
-FROM generate_series(1, 2000) AS seq; -- 2000 Secondary Invoices
+CREATE TEMP TABLE ref_product (
+  sku_code TEXT,
+  product_desc TEXT,
+  brand TEXT,
+  category TEXT,
+  sub_category TEXT,
+  pack_size TEXT
+);
+
+INSERT INTO ref_product VALUES
+('CIG001','Gold Flake Kings','Gold Flake','Cigarettes','Kings','20 sticks'),
+('CIG002','Navy Cut','Navy Cut','Cigarettes','Regular','20 sticks'),
+('ATA001','Aashirvaad Aata 1kg','Aashirvaad','Aata','Wheat','1 kg'),
+('ATA002','Aashirvaad Aata 5kg','Aashirvaad','Aata','Wheat','5 kg'),
+('OIL001','Fortune Oil 1L','Fortune','Oil','Sunflower','1 L'),
+('OIL002','Fortune Oil 2L','Fortune','Oil','Sunflower','2 L');
+
+CREATE TEMP TABLE ref_sales_hierarchy AS
+SELECT
+  'SR' || g AS salesrep_code,
+  'SalesRep ' || g AS salesrep_name,
+  'SO ' || ((g-1)/5 + 1) AS so_name,
+  'ASM ' || ((g-1)/10 + 1) AS asm_name,
+  'ZSM ' || ((g-1)/20 + 1) AS zsm_name
+FROM generate_series(1,60) g;
+
+INSERT INTO fact_primary_sales
+SELECT
+  'WH01',
+  'ITC Central WH',
+  d.distributor_code,
+  d.distributor_name,
+  d.city,
+  d.state,
+  d.zone,
+  h.so_name,
+  h.asm_name,
+  h.zsm_name,
+  'PRI-' || d.distributor_code || '-' || g AS invoice_id,
+  g::TEXT AS invoice_line_id,
+  CURRENT_DATE - (random()*90)::INT,
+  p.sku_code,
+  p.product_desc,
+  p.brand,
+  p.category,
+  p.sub_category,
+  p.pack_size,
+  (10 + random()*50)::INT,
+  CASE WHEN p.category='Oil' THEN random()*100 ELSE NULL END,
+  CASE WHEN p.category='Aata' THEN random()*200 ELSE NULL END,
+  'INR',
+  random()*50000,
+  random()*45000,
+  random()*5000,
+  18
+FROM ref_distributor d
+JOIN ref_product p ON true
+JOIN ref_sales_hierarchy h ON true
+JOIN generate_series(1,5) g ON true;
+
+INSERT INTO fact_secondary_sales
+SELECT
+  r.distributor_code,
+  d.distributor_name,
+  r.retailer_code,
+  r.retailer_name,
+  r.retailer_type,
+  'RT' || (random()*50)::INT,
+  'Route ' || (random()*50)::INT,
+  h.salesrep_code,
+  h.salesrep_name,
+  h.so_name,
+  h.asm_name,
+  h.zsm_name,
+  r.city,
+  r.state,
+  r.zone,
+  'SEC-' || r.retailer_code || '-' || g AS invoice_id,
+  g::TEXT AS invoice_line_id,
+  CURRENT_DATE - (random()*90)::INT,
+  p.sku_code,
+  p.product_desc,
+  p.brand,
+  p.category,
+  p.sub_category,
+  p.pack_size,
+  (1 + random()*20)::INT,
+  CASE WHEN p.category='Oil' THEN random()*20 ELSE NULL END,
+  CASE WHEN p.category='Aata' THEN random()*50 ELSE NULL END,
+  'INR',
+  random()*5000,
+  random()*4500,
+  random()*500,
+  18
+FROM ref_retailer r
+JOIN ref_distributor d ON d.distributor_code = r.distributor_code
+JOIN ref_product p ON true
+JOIN ref_sales_hierarchy h ON true
+JOIN generate_series(1,3) g ON true;

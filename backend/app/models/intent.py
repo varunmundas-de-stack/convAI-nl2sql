@@ -183,6 +183,11 @@ class Intent(BaseModel):
         description="The type of analytical query (SNAPSHOT or TREND)"
     )
     
+    sales_scope: Literal["PRIMARY", "SECONDARY"] = Field(
+        ...,
+        description="The sales scope (PRIMARY or SECONDARY)"
+    )
+    
     metric: str = Field(
         ...,
         description="The single metric to compute (e.g., 'total_quantity', 'transaction_count')"
@@ -206,6 +211,16 @@ class Intent(BaseModel):
     filters: Optional[List[Filter]] = Field(
         default=None,
         description="Filter conditions to apply"
+    )
+
+    visualization_type: Optional[str] = Field(
+        default=None,
+        description="Suggested visualization type (e.g., 'bar_chart', 'line_chart')"
+    )
+
+    limit: Optional[int] = Field(
+        default=None,
+        description="Maximum number of results to return (e.g., 'top 5' -> limit=5)"
     )
 
     @model_validator(mode='after')

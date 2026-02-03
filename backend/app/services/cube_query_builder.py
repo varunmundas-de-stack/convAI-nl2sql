@@ -140,7 +140,10 @@ def _build_order(intent: Intent) -> dict[str, str]:
     return {metric: "desc"}
 
 
-def _build_limit(_: Intent) -> int:
+def _build_limit(intent: Intent) -> int:
+    """Return the limit from intent, or default if not specified."""
+    if intent.limit is not None:
+        return intent.limit
     return DEFAULT_LIMIT
 
 

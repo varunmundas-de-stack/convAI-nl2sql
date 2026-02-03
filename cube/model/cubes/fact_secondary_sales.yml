@@ -6,29 +6,129 @@ cubes:
     joins: []
 
     dimensions:
+      - name: asm_name
+        sql: asm_name
+        type: string
+
+      - name: billed_volume
+        sql: billed_volume
+        type: string
+
+      - name: billed_weight
+        sql: billed_weight
+        type: string
+
+      - name: brand
+        sql: brand
+        type: string
+
+      - name: category
+        sql: category
+        type: string
+
+      - name: city
+        sql: city
+        type: string
+
+      - name: currency
+        sql: currency
+        type: string
+
+      - name: distributor_code
+        sql: distributor_code
+        type: string
+
+      - name: distributor_name
+        sql: distributor_name
+        type: string
+
       - name: gross_value
         sql: gross_value
         type: string
 
-      - name: invoice_number
-        sql: invoice_number
+      - name: invoice_id
+        sql: invoice_id
+        type: string
+
+      - name: invoice_line_id
+        sql: invoice_line_id
         type: string
 
       - name: net_value
         sql: net_value
         type: string
 
+      - name: pack_size
+        sql: pack_size
+        type: string
+
+      - name: product_desc
+        sql: product_desc
+        type: string
+
+      - name: retailer_code
+        sql: retailer_code
+        type: string
+
+      - name: retailer_name
+        sql: retailer_name
+        type: string
+
+      - name: retailer_type
+        sql: retailer_type
+        type: string
+
       - name: route_code
         sql: route_code
         type: string
 
-      - name: tax_amount
-        sql: tax_amount
+      - name: route_name
+        sql: route_name
         type: string
 
-      - name: volume_qty
-        sql: volume_qty
+      - name: salesrep_code
+        sql: salesrep_code
         type: string
+
+      - name: salesrep_name
+        sql: salesrep_name
+        type: string
+
+      - name: sku_code
+        sql: sku_code
+        type: string
+
+      - name: so_name
+        sql: so_name
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: sub_category
+        sql: sub_category
+        type: string
+
+      - name: tax_rate
+        sql: tax_rate
+        type: string
+
+      - name: tax_value
+        sql: tax_value
+        type: string
+
+      - name: zone
+        sql: zone
+        type: string
+
+      - name: zsm_name
+        sql: zsm_name
+        type: string
+
+      - name: created_at
+        sql: created_at
+        type: time
 
       - name: invoice_date
         sql: invoice_date
@@ -37,6 +137,10 @@ cubes:
     measures:
       - name: count
         type: count
+
+      - name: billed_qty
+        sql: billed_qty
+        type: sum
 
     pre_aggregations:
       # Pre-aggregation definitions go here.

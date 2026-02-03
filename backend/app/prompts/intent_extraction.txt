@@ -20,7 +20,7 @@ Output ONLY valid JSON. No explanation. No markdown.
 2. `metric` MUST be a metric, never a dimension.
 3. `group_by` MUST contain ONLY dimensions, never metrics.
 4. Metrics can NEVER appear in `group_by`.
-5. If the question mentions "Primary" or "Secondary", set `sales_scope` explicitly.
+5. If the question mentions "Primary" or "Secondary", set `sales_scope` explicitly. Default to "SECONDARY".
 6. If metric implies aggregation ("total", "sum", "value", "amount"), choose a VALUE metric.
 7. If metric implies counting ("how many", "count", "number of"), choose a COUNT metric.
 8. If the query mentions "top N" or "bottom N", set `limit` to N (e.g., "top 5" -> limit=5).
@@ -50,29 +50,55 @@ distribution: bar_chart (pie if mentioned)
 
 ### METRICS
 
-transaction_count          → count of transactions  
-net_sales_value            → total net sales value  
-gross_sales_value          → total gross sales value  
-tax_amount                 → total tax amount  
-volume_qty                 → total sales volume  
-active_partner_count       → count of unique partners  
+count                      → count of transactions  
+net_value                  → total net sales value  
+gross_value                → total gross sales value  
+tax_value                  → total tax amount  
+billed_qty                 → total sales quantity/volume
+volume_qty                 → alias for billed_qty (total quantity)
+quantity                   → alias for billed_qty
 
-### DIMENSIONS
+### DIMENSIONS (for group_by and filters)
+
+# Geography
 city
 state
-zone
-partner_name
-partner_type   (Warehouse, Distributor, Retailer)
-brand
-category
-sku
-uom
-sales_rep
-sales_officer
-area_manager
-zonal_manager
-route_code
-invoice_number
+zone                       (South-1, South-2, Central, North-1, North-2, East, West)
+territory                  → alias for zone
+region                     → alias for zone
+
+# Partners
+distributor_code
+distributor_name
+distributor                → alias for distributor_name
+retailer_code              (SECONDARY only)
+retailer_name              (SECONDARY only)
+retailer                   → alias for retailer_name
+retailer_type              (ModernTrade, GeneralTrade, Kirana, Wholesaler)
+
+# Products
+sku_code
+product_desc
+product                    → alias for product_desc
+brand                      (Gold Flake, Aashirvaad, Fortune, Navy Cut)
+category                   (Cigarettes, Aata, Oil)
+sub_category
+pack_size
+
+# Sales Hierarchy
+salesrep_code              (SECONDARY only)
+salesrep_name              (SECONDARY only)
+sales_rep                  → alias for salesrep_name
+so_name
+sales_officer              → alias for so_name
+asm_name
+area_manager               → alias for asm_name
+zsm_name
+zonal_manager              → alias for zsm_name
+
+# Routes
+route_code                 (SECONDARY only)
+route_name                 (SECONDARY only)
 
 
 ### TIME_DIMENSIONS
@@ -95,41 +121,29 @@ last_year
 equals, not_equals, in, not_in, contains
 
 ## EXAMPLES
-Query: Top 5 distributors by number of transactions last month. 
+
+Query: Top 5 zones by total quantity. 
 Output JSON: 
 {
   "intent_type": "ranking",
   "sales_scope": "SECONDARY",
-  "metric": "transaction_count",
-  "group_by": ["partner_name"],
-  "time_dimension": {
-    "dimension": "invoice_date",
-    "granularity": "month"
-  },
-  "time_range": {
-    "window": "last_month",
-    "start_date": null,
-    "end_date": null
-  },
-  "filters": [
-    {
-      "dimension": "partner_type",
-      "operator": "equals",
-      "value": "Distributor"
-    }
-  ],
+  "metric": "billed_qty",
+  "group_by": ["zone"],
+  "time_dimension": null,
+  "time_range": null,
+  "filters": null,
   "visualization_type": "bar_chart",
   "limit": 5
 }
 
 
-Query: Show the daily trend of Secondary Sales volume for the 'Oils' category over the last 30 days. 
+Query: Show the daily trend of Secondary Sales net value for the 'Oil' category over the last 30 days. 
 Output JSON: 
 {
   "intent_type": "trend",
   "sales_scope": "SECONDARY",
-  "metric": "transaction_count",
-  "group_by": ["volume_qty"],
+  "metric": "net_value",
+  "group_by": null,
   "time_dimension": {
     "dimension": "invoice_date",
     "granularity": "day"
@@ -143,51 +157,41 @@ Output JSON:
     {
       "dimension": "category",
       "operator": "equals",
-      "value": "Oils"
+      "value": "Oil"
     }
   ],
-  "visualization_type": "line_chart"
+  "visualization_type": "line_chart",
+  "limit": null
 }
 
 
-Query: Who are the top 5 Distributors by total Primary Sales net value? 
+Query: Which distributors have the highest gross value? 
 Output JSON: 
 {
   "intent_type": "ranking",
-  "sales_scope": "PRIMARY",
-  "metric": "transaction_count",
-  "group_by": ["partner_name", "net_value"],
+  "sales_scope": "SECONDARY",
+  "metric": "gross_value",
+  "group_by": ["distributor_name"],
   "time_dimension": null,
   "time_range": null,
-  "filters": [
-    {
-      "dimension": "partner_type",
-      "operator": "equals",
-      "value": "Distributor"
-    }
-  ],
-  "visualization_type": "bar_chart"
+  "filters": null,
+  "visualization_type": "bar_chart",
+  "limit": 10
 }
 
 
-
-Query: Compare the average tax amount paid by Retailers vs Distributors. 
+Query: What is the breakdown of sales by brand?
 Output JSON: 
 {
-  "intent_type": "comparison",
+  "intent_type": "distribution",
   "sales_scope": "SECONDARY",
-  "metric": "transaction_count",
-  "group_by": ["partner_type", "tax_amount"],
+  "metric": "net_value",
+  "group_by": ["brand"],
   "time_dimension": null,
   "time_range": null,
-  "filters": [
-    {
-      "dimension": "partner_type",
-      "operator": "in",
-      "value": ["Retailer", "Distributor"]
-    }
-  ],
-  "visualization_type": "bar_chart"
+  "filters": null,
+  "visualization_type": "bar_chart",
+  "limit": null
 }
 
 

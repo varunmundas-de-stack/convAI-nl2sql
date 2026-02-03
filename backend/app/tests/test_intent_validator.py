@@ -25,19 +25,23 @@ def catalog():
 # ------------------------------------------------------------------
 
 def test_valid_snapshot_intent(catalog):
+    """Test a valid snapshot intent with the new schema."""
     raw = {
         "intent_type": "snapshot",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
         "time_range": {"window": "last_7_days"},
     }
 
     intent = validate_intent(raw, catalog)
-    assert intent.metric == "sales_fact.quantity"
+    assert intent.metric == "fact_secondary_sales.billed_qty"
 
 
 def test_unknown_metric_raises(catalog):
+    """Test that non-catalog metrics are rejected."""
     raw = {
         "intent_type": "snapshot",
+        "sales_scope": "SECONDARY",
         "metric": "total_quantity",
     }
 
@@ -50,20 +54,24 @@ def test_unknown_metric_raises(catalog):
 # ------------------------------------------------------------------
 
 def test_valid_group_by(catalog):
+    """Test valid group_by with new schema dimensions."""
     raw = {
-        "intent_type": "snapshot",
-        "metric": "sales_fact.quantity",
-        "group_by": ["territories.region"],
+        "intent_type": "ranking",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
+        "group_by": ["fact_secondary_sales.zone"],
     }
 
     intent = validate_intent(raw, catalog)
-    assert intent.group_by == ["territories.region"]
+    assert intent.group_by == ["fact_secondary_sales.zone"]
 
 
 def test_unknown_group_by_dimension(catalog):
+    """Test that non-catalog dimensions are rejected."""
     raw = {
-        "intent_type": "snapshot",
-        "metric": "sales_fact.quantity",
+        "intent_type": "ranking",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
         "group_by": ["region"],
     }
 
@@ -76,11 +84,13 @@ def test_unknown_group_by_dimension(catalog):
 # ------------------------------------------------------------------
 
 def test_valid_trend_intent(catalog):
+    """Test a valid trend intent with new schema."""
     raw = {
         "intent_type": "trend",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.net_value",
         "time_dimension": {
-            "dimension": "sales_fact.invoice_date",
+            "dimension": "fact_secondary_sales.invoice_date",
             "granularity": "month",
         },
         "time_range": {"window": "last_30_days"},
@@ -91,9 +101,11 @@ def test_valid_trend_intent(catalog):
 
 
 def test_trend_missing_time_dimension(catalog):
+    """Test that trend intent requires time_dimension."""
     raw = {
         "intent_type": "trend",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
     }
 
     with pytest.raises(MalformedIntentError):
@@ -101,11 +113,13 @@ def test_trend_missing_time_dimension(catalog):
 
 
 def test_invalid_time_dimension(catalog):
+    """Test that non-normalized time dimensions are rejected."""
     raw = {
         "intent_type": "trend",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
         "time_dimension": {
-            "dimension": "invoice_date",
+            "dimension": "invoice_date",  # Not normalized
             "granularity": "month",
         },
         "time_range": {"window": "last_30_days"},
@@ -116,12 +130,14 @@ def test_invalid_time_dimension(catalog):
 
 
 def test_invalid_granularity(catalog):
+    """Test that invalid granularities are rejected."""
     raw = {
         "intent_type": "trend",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
         "time_dimension": {
-            "dimension": "sales_fact.invoice_date",
-            "granularity": "hour",
+            "dimension": "fact_secondary_sales.invoice_date",
+            "granularity": "hour",  # Not a valid granularity
         },
         "time_range": {"window": "last_30_days"},
     }
@@ -135,14 +151,16 @@ def test_invalid_granularity(catalog):
 # ------------------------------------------------------------------
 
 def test_valid_filter(catalog):
+    """Test valid filter with new schema dimensions."""
     raw = {
         "intent_type": "snapshot",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
         "filters": [
             {
-                "dimension": "territories.region",
+                "dimension": "fact_secondary_sales.zone",
                 "operator": "equals",
-                "value": "South",
+                "value": "South-1",
             }
         ],
     }
@@ -152,12 +170,14 @@ def test_valid_filter(catalog):
 
 
 def test_invalid_filter_dimension(catalog):
+    """Test that non-catalog filter dimensions are rejected."""
     raw = {
         "intent_type": "snapshot",
-        "metric": "sales_fact.quantity",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
         "filters": [
             {
-                "dimension": "region",
+                "dimension": "region",  # Not in catalog
                 "operator": "equals",
                 "value": "South",
             }
@@ -173,11 +193,31 @@ def test_invalid_filter_dimension(catalog):
 # ------------------------------------------------------------------
 
 def test_invalid_time_window(catalog):
+    """Test that non-catalog time windows are rejected."""
     raw = {
         "intent_type": "snapshot",
-        "metric": "sales_fact.quantity",
-        "time_range": {"window": "MTD"},
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
+        "time_range": {"window": "MTD"},  # Should be "month_to_date"
     }
 
     with pytest.raises(InvalidTimeWindowError):
         validate_intent(raw, catalog)
+
+
+# ------------------------------------------------------------------
+# RANKING WITH LIMIT
+# ------------------------------------------------------------------
+
+def test_ranking_with_limit(catalog):
+    """Test ranking intent with limit field (top N)."""
+    raw = {
+        "intent_type": "ranking",
+        "sales_scope": "SECONDARY",
+        "metric": "fact_secondary_sales.billed_qty",
+        "group_by": ["fact_secondary_sales.zone"],
+        "limit": 5,
+    }
+
+    intent = validate_intent(raw, catalog)
+    assert intent.limit == 5

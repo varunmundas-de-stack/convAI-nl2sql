@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# TEST QUERIES - 10+ queries covering various intent types
+# TEST QUERIES - Updated for new flat schema
 # =============================================================================
 
 TEST_QUERIES: List[Tuple[str, str, str]] = [
@@ -39,77 +39,79 @@ TEST_QUERIES: List[Tuple[str, str, str]] = [
     
     # RANKING QUERIES
     (
-        "What are the top 5 territories by total quantity?",
+        "What are the top 5 zones by total quantity?",
         "ranking",
-        "Simple ranking query with limit"
+        "Top zones by volume - tests zone dimension and billed_qty metric."
     ),
     (
-        "Which state has the highest number of active retail outlets?",
+        "Which distributors have the highest Secondary Sales net value?",
         "ranking",
-        "Ranking by outlet count"
+        "Top distributors by revenue."
     ),
     (
-        "List the top 3 territories in the South region based on Secondary sales volume.",
+        "List the top 3 brands by total quantity sold.",
         "ranking",
-        "Ranking with region filter"
+        "Brand ranking by volume."
     ),
-    
+
     # COMPARISON QUERIES
     (
-        "Compare the sales performance of Metro zones versus Rural zones for the Beverages category.",
+        "Compare the total Primary Sales volume vs Secondary Sales volume.",
         "comparison",
-        "Zone comparison with category filter"
+        "Channel fill (Primary) vs Offtake (Secondary) comparison."
     ),
     (
-        "What is the total Primary vs Secondary sales for the first quarter of 2024?",
+        "How does the gross value compare between Cigarettes and Aata categories?",
         "comparison",
-        "Sales type comparison with date range"
+        "Category comparison by gross value."
     ),
-    
+
     # SNAPSHOT QUERIES
     (
-        "How many transactions were recorded in the North region?",
+        "What is the total net value of secondary sales?",
         "snapshot",
-        "Simple count with region filter"
+        "Simple aggregation of net value."
     ),
     (
-        "What is the total quantity sold for the Snacks category?",
+        "How many transactions are there in the East zone?",
         "snapshot",
-        "Total quantity with category filter"
+        "Count query with filter."
     ),
-    
+    (
+        "What is the total billed quantity for the Fortune brand?",
+        "snapshot",
+        "Aggregation filtered by brand."
+    ),
+
     # TREND QUERIES
     (
-        "Show the monthly sales trend for the last 6 months.",
+        "Show the daily trend of Secondary Sales net value over the last 30 days.",
         "trend",
-        "Monthly trend with time window"
+        "Daily offtake trend."
     ),
     (
-        "How has the transaction count changed over the past quarter by week?",
+        "How has the total quantity changed month over month this year?",
         "trend",
-        "Weekly trend for quarterly data"
+        "Monthly volume trend."
     ),
-    
+
     # DISTRIBUTION QUERIES
     (
-        "What is the breakdown of sales by region?",
+        "What is the breakdown of Secondary Sales by zone?",
         "distribution",
-        "Regional distribution"
-    ),
-    
-    # COMPLEX QUERIES
-    (
-        "Find the sub-categories that are underperforming in the West region.",
-        "ranking",
-        "Ranking with region filter for sub-categories"
+        "Geographic distribution analysis."
     ),
     (
-        "What is the most popular pack size for FreshCo Cola across all Metro cities?",
-        "ranking",
-        "Ranking with brand and zone filter"
+        "Show the sales distribution by category.",
+        "distribution",
+        "Category contribution analysis."
+    ),
+    (
+        "Breakdown of gross value by state.",
+        "distribution",
+        "State-level distribution."
     ),
 ]
-
 
 # =============================================================================
 # FIXTURES
@@ -178,6 +180,7 @@ class TestQueryOrchestratorE2E:
         print(f"  Intent type: {actual_intent_type} (expected: {expected_intent_type})")
         print(f"  Metric: {response.raw_intent.get('metric')}")
         print(f"  Group by: {response.raw_intent.get('group_by')}")
+        print(f"  Limit: {response.raw_intent.get('limit')}")
         
         # Verify intent structure
         assert "intent_type" in response.raw_intent, "Intent should have intent_type"
@@ -249,8 +252,6 @@ class TestQueryOrchestratorE2E:
         print(f"  Rows returned: {len(response.data)}")
         if response.data and len(response.data) > 0:
             print(f"  First row: {response.data[0]}")
-            with open("data.json", "a") as f:
-                json.dump(response.data, f, indent=4)
             
         
         # =====================================================================

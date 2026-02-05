@@ -52,6 +52,10 @@ class VisualizationResult(BaseModel):
     error: str | None = None
 
 
+class VisualizationGenerationError(Exception):
+    """Exception raised when a data visualization cannot be generated."""
+    pass
+
 # =============================================================================
 # PROMPT TEMPLATES
 # =============================================================================

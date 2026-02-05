@@ -42,6 +42,11 @@ TIME_WINDOW_TO_CUBE_RANGE: dict[str, str] = {
     "last_year": "last year",
 }
 
+
+class CubeQueryBuildError(Exception):
+    """Exception raised when a Cube Query cannot be built."""
+    pass
+
 # =============================================================================
 # INTERNAL TRANSLATION FUNCTIONS 
 # =============================================================================

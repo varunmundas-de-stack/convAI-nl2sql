@@ -1,8 +1,5 @@
 """
-Query Orchestrator - Traffic control for the NL2SQL pipeline.
-
-This module is the COORDINATOR between components.
-It is NOT intelligent - it is TRAFFIC CONTROL.
+Query Orchestrator
 
 RESPONSIBILITIES:
 1. Receive query (no preprocessing, no cleanup)
@@ -12,21 +9,6 @@ RESPONSIBILITIES:
 5. Execute Cube Query (stop if Cube errors)
 6. Return structured response (everything for debugging)
 
-DESIGN PRINCIPLES:
-- Zero analytics
-- Zero guessing  
-- Zero fixing
-- Stop the pipeline if ANYTHING is wrong
-- Return EVERYTHING transparently (debuggable, auditable, demo-friendly)
-
-This module does NOT:
-- Preprocess or clean queries
-- Retry with modified prompts
-- Auto-fix validation errors
-- Infer missing fields
-- Mask internal errors
-
-Every failure is VISIBLE and EXPLICIT.
 """
 
 import logging
@@ -34,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from pathlib import Path
-
+import uuid
 from app.services.intent_extractor import (
     extract_intent,
     ExtractionError,
@@ -43,16 +25,19 @@ from app.services.intent_extractor import (
     JSONParseError,
 )
 from app.services.intent_validator import validate_intent
-from app.services.intent_errors import IntentValidationError
-from app.services.cube_query_builder import build_cube_query
+from app.services.intent_errors import IntentValidationError, IntentIncompleteError
+from app.services.cube_query_builder import build_cube_query, CubeQueryBuildError
 from app.services.cube_client import (
     CubeClient,
     CubeClientError,
     CubeResponse,
+    CubeQueryExecutionError,
 )
 from app.services.intent_normalizer import normalize_intent
 from app.services.catalog_manager import CatalogManager
-from app.services.data_visualizer import generate_visualization, VisualizationResult
+from app.services.data_visualizer import generate_visualization, VisualizationResult, VisualizationGenerationError
+from app.pipeline.pipeline_state import PipelineState
+from app.pipeline.state_store import save_state, load_state, delete_state, PipelineStateNotFound
 from app.models.intent import Intent
 
 
@@ -73,6 +58,7 @@ class PipelineStage:
     """
     RECEIVED = "received"
     INTENT_EXTRACTED = "intent_extracted"
+    CLARIFICATION_REQUESTED = "clarification_requested"
     INTENT_VALIDATED = "intent_validated"
     CUBE_QUERY_BUILT = "cube_query_built"
     CUBE_EXECUTED = "cube_executed"
@@ -125,16 +111,20 @@ class OrchestratorResponse:
     
     # Step outputs (None if step wasn't reached)
     raw_intent: Optional[Dict[str, Any]] = None
+    clarification: Optional[Dict[str, Any]] = None
     validated_intent: Optional[Dict[str, Any]] = None
     cube_query: Optional[Dict[str, Any]] = None
     data: Optional[List[Dict[str, Any]]] = None
     visualization: Optional[Dict[str, Any]] = None
     
+    
     # Error (None if success)
     error: Optional[OrchestratorError] = None
     
     # Metadata
-    request_id: Optional[str] = None
+    request_id: str = uuid.uuid4().hex
+    missing_fields: Optional[List[str]] = None
+    clarification_message: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dict."""
@@ -144,11 +134,14 @@ class OrchestratorResponse:
             "stage": self.stage,
             "duration_ms": self.duration_ms,
             "raw_intent": self.raw_intent,
+            "clarification": self.clarification,
+            "missing_fields": self.missing_fields,
+            "clarification_message": self.clarification_message,
             "validated_intent": self.validated_intent,
             "cube_query": self.cube_query,
             "data": self.data,
             "visualization": self.visualization,
-            "error": self.error.to_dict() if self.error else None,
+            "error": self.error,
             "request_id": self.request_id,
         }
         return result
@@ -191,21 +184,11 @@ def execute_query(query: str) -> OrchestratorResponse:
     5. Execute Cube query (HTTP call)
     6. Return structured response
     
-    Any failure STOPS the pipeline immediately.
-    No retries. No fixes. Just fail and report.
-    
     Args:
         query: Natural language query string (passed as-is, no cleanup)
         
     Returns:
         OrchestratorResponse with all intermediate outputs and any error
-        
-    Example:
-        >>> response = execute_query("What is the total sales this month?")
-        >>> if response.success:
-        ...     print(response.data)
-        ... else:
-        ...     print(response.error.message)
     """
     start_time = time.monotonic()
     
@@ -218,18 +201,173 @@ def execute_query(query: str) -> OrchestratorResponse:
     
     logger.info(f"Pipeline started: '{query[:100]}...'")
     
+ 
     # -------------------------------------------------------------------------
-    # STEP 1: Receive the query
+    # STEP 1: Extract intent (LLM call)
     # -------------------------------------------------------------------------
-    # No preprocessing. No cleanup. No spell correction.
-    # The query is used exactly as received.
+    response = _extract_intent(response, start_time)
+    if response.error:
+        return response
     
     # -------------------------------------------------------------------------
-    # STEP 2: Extract intent (LLM call)
+    # STEP 2: Validate intent
     # -------------------------------------------------------------------------
+    response = _validate_intent(response, start_time)
+    if response.error:
+        return response
+    if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
+        # Save state for later resumption
+        state = PipelineState(
+            request_id=response.request_id,
+            original_query=query,
+            intent=response.raw_intent,
+            missing_fields=response.missing_fields or [],
+        )
+        save_state(state)
+        logger.info(f"Clarification requested, saved state {response.request_id}")
+        return response
+    
+    # -------------------------------------------------------------------------
+    # STEP 3: Build Cube query
+    # -------------------------------------------------------------------------
+    response = _build_cube_query(response, start_time)
+    if response.error:
+        return response
+    
+    # -------------------------------------------------------------------------
+    # STEP 4: Execute Cube query
+    # -------------------------------------------------------------------------
+    response = _execute_cube_query(response, start_time)
+    if response.error:
+        return response
+    
+    # -------------------------------------------------------------------------
+    # STEP 5: Generate visualization
+    # -------------------------------------------------------------------------
+    response = _generate_visualization(response, start_time)
+    if response.error:
+        return response
+    
+    # -------------------------------------------------------------------------
+    # STEP 6: Complete pipeline
+    # -------------------------------------------------------------------------
+    response = _complete_pipeline(response, start_time)
+    
+    return response
+
+
+# =============================================================================
+# PUBLIC API - SIMPLE DICT WRAPPER
+# =============================================================================
+
+def execute_query_dict(query: str) -> Dict[str, Any]:
+    """
+    Execute a query and return a JSON-serializable dict.
+    
+    This is a convenience wrapper for execute_query() that returns a dict
+    instead of an OrchestratorResponse object.
+    
+    Args:
+        query: Natural language query string
+        
+    Returns:
+        Dict with all pipeline outputs (JSON-serializable)
+    """
+    response = execute_query(query)
+    return response.to_dict()
+
+
+def resume_query(request_id: str, clarification_answers: dict) -> dict:
+    start_time = time.monotonic()
+
     try:
-        logger.info("Step 2: Extracting intent...")
-        raw_intent = extract_intent(query)
+        state = load_state(request_id)
+    except PipelineStateNotFound:
+        logger.warning(
+            f"Pipeline state not found for request_id={request_id}. "
+            f"State may have expired (TTL) or server was restarted. "
+            f"Clarification answers received: {list(clarification_answers.keys())}"
+        )
+        return {
+            "success": False,
+            "stage": "invalid_request",
+            "request_id": request_id,
+            "error": {
+                "error_type": "PipelineStateNotFound",
+                "message": "Invalid or expired request_id. Please start a new query.",
+                "details": {
+                    "request_id": request_id,
+                    "hint": "Pipeline state expires after 1 hour or when server restarts"
+                }
+            }
+        }
+
+    # Merge user answers into existing intent
+    merged_intent = {
+        **state.intent,
+        **{k: v for k, v in clarification_answers.items() if k in state.missing_fields}
+    }
+
+    response = OrchestratorResponse(
+        query=state.original_query,
+        success=False,
+        stage=PipelineStage.INTENT_EXTRACTED,
+        raw_intent=merged_intent,
+        request_id=request_id,
+    )
+
+    try:
+        # Re-enter pipeline at validation (same as fresh run)
+        response = _validate_intent(response, start_time)
+        if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
+            save_state(PipelineState(
+                request_id=request_id,
+                original_query=state.original_query,
+                intent=merged_intent,
+                missing_fields=response.missing_fields or [],
+            ))
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
+            return response.to_dict()
+
+        response = _build_cube_query(response, start_time)
+        if response.error:
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
+            return response.to_dict()
+
+        response = _execute_cube_query(response, start_time)
+        if response.error:
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
+            return response.to_dict()
+
+        response = _generate_visualization(response, start_time)
+        if response.error:
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
+            return response.to_dict()
+
+        response = _complete_pipeline(response, start_time)
+
+        # Cleanup only after full success
+        delete_state(request_id)
+
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        return response.to_dict()
+
+    except IntentValidationError as e:
+        delete_state(request_id)
+        response.error = OrchestratorError(
+            stage=response.stage,
+            error_type=e.__class__.__name__,
+            message=str(e),
+            details=e.to_dict() if hasattr(e, "to_dict") else None
+        )
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        return response.to_dict()
+
+
+def _extract_intent(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
+    try:
+        logger.info("Step 1: Extracting intent...")
+        raw_intent = extract_intent(response.query)
         response.raw_intent = raw_intent
         response.stage = PipelineStage.INTENT_EXTRACTED
         logger.info(f"Intent extracted: {raw_intent}")
@@ -267,7 +405,7 @@ def execute_query(query: str) -> OrchestratorResponse:
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
-        
+
     except ExtractionError as e:
         # Generic extraction error - STOP
         logger.error(f"Extraction error: {e}")
@@ -279,67 +417,54 @@ def execute_query(query: str) -> OrchestratorResponse:
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
     
-    # -------------------------------------------------------------------------
-    # STEP 3: Validate intent
-    # -------------------------------------------------------------------------
+    return response
+
+    
+def _validate_intent(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
     try:
-        logger.info("Step 3: Validating intent...")
         catalog = _get_catalog()
-        raw_intent = normalize_intent(raw_intent)
-        logger.info(f"Intent normalized: {raw_intent}")
-        validated_intent = validate_intent(raw_intent, catalog)
-        response.validated_intent = validated_intent.model_dump()
+        logger.info("Step 2: Validating intent...")
+        normalized_intent = normalize_intent(response.raw_intent)
+        validated_intent = validate_intent(normalized_intent, catalog)
+        response.validated_intent = validated_intent
         response.stage = PipelineStage.INTENT_VALIDATED
-        logger.info(f"Intent validated: {validated_intent.intent_type}")
+        logger.info(f"Intent validated: {validated_intent}")
         
-    except IntentValidationError as e:
-        # Validation failed - STOP
-        logger.error(f"Validation error: {e}")
-        response.error = OrchestratorError(
-            stage=PipelineStage.INTENT_EXTRACTED,
-            error_type=e.__class__.__name__,
-            error_code=e.ERROR_CODE.value if hasattr(e.ERROR_CODE, 'value') else str(e.ERROR_CODE) if e.ERROR_CODE else None,
-            message=str(e),
-            details=e.to_dict()
-        )
+    except IntentIncompleteError as e:
+        # Incomplete intent - ask for clarification
+        logger.warning(f"Incomplete intent: {e}")
+        response.clarification = True
+        response.missing_fields = e.missing_fields
+        response.clarification_message = e.clarification_message
+        response.stage = PipelineStage.CLARIFICATION_REQUESTED
+        response.error = None
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
         
-    except Exception as e:
-        # Unexpected validation error - STOP
-        logger.error(f"Unexpected validation error: {e}")
+    except IntentValidationError as e:
+        # Invalid intent - STOP
+        logger.error(f"Intent validation failed: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.INTENT_EXTRACTED,
-            error_type=type(e).__name__,
+            error_type="IntentValidationError",
             message=str(e),
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
     
-    # -------------------------------------------------------------------------
-    # STEP 4: Build Cube query
-    # -------------------------------------------------------------------------
+    return response
+
+
+def _build_cube_query(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
     try:
-        logger.info("Step 4: Building Cube query...")
-        cube_query = build_cube_query(validated_intent)
+        logger.info("Step 3: Building Cube query...")
+        cube_query = build_cube_query(response.validated_intent)
         response.cube_query = cube_query
         response.stage = PipelineStage.CUBE_QUERY_BUILT
         logger.info(f"Cube query built: {cube_query}")
         
-    except KeyError as e:
-        # Missing mapping - STOP
-        logger.error(f"Cube query mapping error: {e}")
-        response.error = OrchestratorError(
-            stage=PipelineStage.INTENT_VALIDATED,
-            error_type="CubeQueryMappingError",
-            message=f"Failed to map intent to Cube query: missing mapping for {e}",
-            details={"missing_key": str(e)}
-        )
-        response.duration_ms = int((time.monotonic() - start_time) * 1000)
-        return response
-        
-    except Exception as e:
-        # Unexpected build error - STOP
+    except CubeQueryBuildError as e:
+        # Cube query build error - STOP
         logger.error(f"Cube query build error: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.INTENT_VALIDATED,
@@ -349,114 +474,92 @@ def execute_query(query: str) -> OrchestratorResponse:
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
     
-    # -------------------------------------------------------------------------
-    # STEP 5: Execute Cube query
-    # -------------------------------------------------------------------------
+    return response
+
+
+def _execute_cube_query(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
     try:
-        logger.info("Step 5: Executing Cube query...")
+        logger.info("Step 4: Executing Cube query...")
         cube_client = CubeClient()
-        cube_response = cube_client.load(cube_query)
+        cube_response = cube_client.load(response.cube_query)
         response.data = cube_response.data
-        response.request_id = cube_response.request_id
         response.stage = PipelineStage.CUBE_EXECUTED
-        logger.info(f"Cube query executed: {len(cube_response.data)} rows returned")
+        logger.info(f"Cube query executed, rows: {len(cube_response.data)}")
         
-    except CubeClientError as e:
-        # Cube execution error - STOP
-        logger.error(f"Cube error: {e}")
+    except CubeQueryExecutionError as e:
+        # Cube query execution error - STOP
+        logger.error(f"Cube query execution error: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.CUBE_QUERY_BUILT,
-            error_type=e.__class__.__name__,
-            message=str(e),
-            details={
-                "status_code": getattr(e, 'status_code', None),
-                "response_body": getattr(e, 'response_body', None),
-            }
-        )
-        response.duration_ms = int((time.monotonic() - start_time) * 1000)
-        return response
-        
-    except Exception as e:
-        # Unexpected Cube error - STOP
-        logger.error(f"Unexpected Cube error: {e}")
-        response.error = OrchestratorError(
-            stage=PipelineStage.CUBE_QUERY_BUILT,
-            error_type=type(e).__name__,
+            error_type="CubeQueryExecutionError",
             message=str(e),
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
-    
-    # -------------------------------------------------------------------------
-    # STEP 6: Generate visualization
-    # -------------------------------------------------------------------------
-    try:
-        logger.info("Step 6: Generating visualization...")
-        visualization_type = validated_intent.visualization_type or "table"
-        
-        viz_result = generate_visualization(
-            visualization_type=visualization_type,
-            data=response.data,
-            metric=validated_intent.metric,
-            dimensions=validated_intent.group_by,
-            query=query,
-            output_format="plotly_json"
-        )
-        
-        response.visualization = {
-            "type": viz_result.visualization_type,
-            "format": viz_result.output_format,
-            "content": viz_result.content,
-            "title": viz_result.title,
-            "description": viz_result.description,
-        }
-        response.stage = PipelineStage.VISUALIZATION_GENERATED
-        logger.info(f"Visualization generated: {visualization_type}")
-        
-    except Exception as e:
-        # Visualization error is non-fatal - log but continue
-        logger.warning(f"Visualization generation failed (non-fatal): {e}")
-        response.visualization = {
-            "type": validated_intent.visualization_type or "table",
-            "format": "error",
-            "content": None,
-            "title": "Visualization Error",
-            "description": str(e),
-        }
-    
-    # -------------------------------------------------------------------------
-    # STEP 7: Success - return everything
-    # -------------------------------------------------------------------------
-    response.success = True
-    response.stage = PipelineStage.COMPLETED
-    response.duration_ms = int((time.monotonic() - start_time) * 1000)
-    
-    logger.info(
-        f"Pipeline completed successfully in {response.duration_ms}ms: "
-        f"{len(response.data)} rows"
-    )
     
     return response
 
 
-# =============================================================================
-# CONVENIENCE FUNCTION FOR API
-# =============================================================================
-
-def execute_query_dict(query: str) -> Dict[str, Any]:
-    """
-    Execute a query and return a dict (for API responses).
-    
-    Same as execute_query but returns a dict instead of dataclass.
-    
-    Args:
-        query: Natural language query string
+def _generate_visualization(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
+    try:
+        logger.info("Step 5: Generating visualization...")
         
-    Returns:
-        Dict with all pipeline outputs (JSON-serializable)
-    """
-    response = execute_query(query)
-    return response.to_dict()
+        # Extract visualization parameters from intent
+        # Handle both Pydantic models and dicts
+        intent = response.validated_intent
+        if intent is None:
+            intent_dict = {}
+        elif hasattr(intent, 'model_dump'):
+            intent_dict = intent.model_dump()
+        else:
+            intent_dict = intent
+        
+        visualization_type = intent_dict.get("visualization_type", "table") or "table"
+        metric = intent_dict.get("metric")
+        dimensions = intent_dict.get("group_by", []) or []
+        
+        visualization = generate_visualization(
+            visualization_type=visualization_type,
+            data=response.data,
+            metric=metric,
+            dimensions=dimensions,
+            query=response.query,
+        )
+        response.visualization = visualization
+        response.stage = PipelineStage.VISUALIZATION_GENERATED
+        logger.info(f"Visualization generated: {visualization_type}")
+        
+    except VisualizationGenerationError as e:
+        # Visualization generation error - STOP
+        logger.error(f"Visualization generation error: {e}")
+        response.error = OrchestratorError(
+            stage=PipelineStage.CUBE_EXECUTED,
+            error_type="VisualizationGenerationError",
+            message=str(e),
+        )
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        return response
+    
+    return response
 
 
-
+def _complete_pipeline(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
+    try:
+        logger.info("Step 6: Completing pipeline...")
+        response.success = True
+        response.stage = PipelineStage.COMPLETED
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info(f"Pipeline completed in {response.duration_ms}ms")
+        
+    except Exception as e:
+        # Pipeline completion error - STOP
+        logger.error(f"Pipeline completion error: {e}")
+        response.error = OrchestratorError(
+            stage=PipelineStage.VISUALIZATION_GENERATED,
+            error_type="PipelineCompletionError",
+            message=str(e),
+        )
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        return response
+    
+    return response

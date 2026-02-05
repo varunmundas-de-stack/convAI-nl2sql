@@ -32,6 +32,7 @@ from app.services.intent_errors import (
     InvalidGranularityError,
     InvalidFilterError,
     InvalidTimeRangeError,
+    IntentIncompleteError,
 )
 from pydantic import ValidationError
 
@@ -88,26 +89,43 @@ class IntentValidator:
         """
         # Step 1: Parse raw dict into Intent model
         intent = self._parse_intent(raw_intent)
+        missing_fields: list[str] = []
+        clarification_questions: list[str] = []
         
         # Step 2: Validate metric exists
-        self._validate_metric(intent.metric)
+        if not intent.metric:
+            missing_fields.append("metric")
+            clarification_questions.append("What would you like to measure?")
+        else:
+            self._validate_metric(intent.metric)
         
         # Step 3: Validate group_by dimensions
         if intent.group_by:
             self._validate_dimensions(intent.group_by, context="group_by")
         
         # Step 4: Validate time dimension
-        if intent.time_dimension:
+        if not intent.time_dimension:
+            missing_fields.append("time_dimension")
+            clarification_questions.append("What time dimension would you like to use? eg. day, week, month, quarter, year")
+        else:
             self._validate_time_dimension(intent.time_dimension)
         
         # Step 5: Validate time range
-        if intent.time_range:
+        if not intent.time_range:
+            missing_fields.append("time_range")
+            clarification_questions.append("What time range would you like to use? eg. last 7 days, last 30 days, last 90 days, last 1 year")
+        else:
             self._validate_time_range(intent.time_range)
         
         # Step 6: Validate filters
         if intent.filters:
             self._validate_filters(intent.filters)
         
+        if missing_fields:
+            raise IntentIncompleteError(
+                missing_fields=missing_fields,
+                clarification_message=clarification_questions,
+            )
         return intent
     
     def _preprocess_intent(self, raw_intent: Dict[str, Any]) -> Dict[str, Any]:

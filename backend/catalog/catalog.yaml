@@ -1,110 +1,87 @@
 metrics:
-  # ----------------------------
-  # COUNT METRICS
-  # ----------------------------
   fact_primary_sales.count: true
-  fact_secondary_sales.count: true
-
-  # ----------------------------
-  # VOLUME METRICS
-  # ----------------------------
   fact_primary_sales.billed_qty: true
-  fact_primary_sales.billed_volume: true
-  fact_primary_sales.billed_weight: true
-
-  fact_secondary_sales.billed_qty: true
-  fact_secondary_sales.billed_volume: true
-  fact_secondary_sales.billed_weight: true
-
-  # ----------------------------
-  # VALUE METRICS
-  # ----------------------------
-  fact_primary_sales.net_value: true
   fact_primary_sales.gross_value: true
+  fact_primary_sales.net_value: true
   fact_primary_sales.tax_value: true
-
-  fact_secondary_sales.net_value: true
+  fact_secondary_sales.count: true
+  fact_secondary_sales.billed_qty: true
   fact_secondary_sales.gross_value: true
+  fact_secondary_sales.net_value: true
   fact_secondary_sales.tax_value: true
-
-
 dimensions:
-  # ----------------------------
-  # GEOGRAPHY (embedded in fact tables)
-  # ----------------------------
+  fact_primary_sales.asm_name: true
+  fact_primary_sales.brand: true
+  fact_primary_sales.category: true
   fact_primary_sales.city: true
-  fact_primary_sales.state: true
-  fact_primary_sales.zone: true
-
-  fact_secondary_sales.city: true
-  fact_secondary_sales.state: true
-  fact_secondary_sales.zone: true
-
-  # ----------------------------
-  # PARTNER / DISTRIBUTOR
-  # ----------------------------
-  fact_primary_sales.distributor_code: true
-  fact_primary_sales.distributor_name: true
   fact_primary_sales.companywh_code: true
   fact_primary_sales.companywh_name: true
-
+  fact_primary_sales.currency: true
+  fact_primary_sales.distributor_code: true
+  fact_primary_sales.distributor_name: true
+  fact_primary_sales.invoice_id: true
+  fact_primary_sales.invoice_line_id: true
+  fact_primary_sales.pack_size: true
+  fact_primary_sales.product_desc: true
+  fact_primary_sales.sku_code: true
+  fact_primary_sales.so_name: true
+  fact_primary_sales.state: true
+  fact_primary_sales.sub_category: true
+  fact_primary_sales.zone: true
+  fact_primary_sales.zsm_name: true
+  fact_secondary_sales.asm_name: true
+  fact_secondary_sales.brand: true
+  fact_secondary_sales.category: true
+  fact_secondary_sales.city: true
+  fact_secondary_sales.currency: true
   fact_secondary_sales.distributor_code: true
   fact_secondary_sales.distributor_name: true
+  fact_secondary_sales.invoice_id: true
+  fact_secondary_sales.invoice_line_id: true
+  fact_secondary_sales.pack_size: true
+  fact_secondary_sales.product_desc: true
   fact_secondary_sales.retailer_code: true
   fact_secondary_sales.retailer_name: true
   fact_secondary_sales.retailer_type: true
-
-  # ----------------------------
-  # PRODUCT
-  # ----------------------------
-  fact_primary_sales.sku_code: true
-  fact_primary_sales.product_desc: true
-  fact_primary_sales.brand: true
-  fact_primary_sales.category: true
-  fact_primary_sales.sub_category: true
-  fact_primary_sales.pack_size: true
-
-  fact_secondary_sales.sku_code: true
-  fact_secondary_sales.product_desc: true
-  fact_secondary_sales.brand: true
-  fact_secondary_sales.category: true
-  fact_secondary_sales.sub_category: true
-  fact_secondary_sales.pack_size: true
-
-  # ----------------------------
-  # SALES HIERARCHY
-  # ----------------------------
-  fact_primary_sales.so_name: true
-  fact_primary_sales.asm_name: true
-  fact_primary_sales.zsm_name: true
-
-  fact_secondary_sales.salesrep_code: true
-  fact_secondary_sales.salesrep_name: true
-  fact_secondary_sales.so_name: true
-  fact_secondary_sales.asm_name: true
-  fact_secondary_sales.zsm_name: true
-
-  # ----------------------------
-  # ROUTE
-  # ----------------------------
   fact_secondary_sales.route_code: true
   fact_secondary_sales.route_name: true
-
-  # ----------------------------
-  # INVOICE
-  # ----------------------------
-  fact_primary_sales.invoice_id: true
-  fact_secondary_sales.invoice_id: true
-
-
+  fact_secondary_sales.salesrep_code: true
+  fact_secondary_sales.salesrep_name: true
+  fact_secondary_sales.sku_code: true
+  fact_secondary_sales.so_name: true
+  fact_secondary_sales.state: true
+  fact_secondary_sales.sub_category: true
+  fact_secondary_sales.zone: true
+  fact_secondary_sales.zsm_name: true
 time_dimensions:
+  fact_primary_sales.created_at:
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
   fact_primary_sales.invoice_date:
-    granularities: [day, week, month, quarter, year]
-
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
+  fact_secondary_sales.created_at:
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
   fact_secondary_sales.invoice_date:
-    granularities: [day, week, month, quarter, year]
-
-
+    granularities:
+    - day
+    - week
+    - month
+    - quarter
+    - year
 time_windows:
   today: true
   yesterday: true

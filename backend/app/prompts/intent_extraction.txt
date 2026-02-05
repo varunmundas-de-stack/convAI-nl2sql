@@ -85,17 +85,6 @@ category                   (Cigarettes, Aata, Oil)
 sub_category
 pack_size
 
-# Sales Hierarchy
-salesrep_code              (SECONDARY only)
-salesrep_name              (SECONDARY only)
-sales_rep                  → alias for salesrep_name
-so_name
-sales_officer              → alias for so_name
-asm_name
-area_manager               → alias for asm_name
-zsm_name
-zonal_manager              → alias for zsm_name
-
 # Routes
 route_code                 (SECONDARY only)
 route_name                 (SECONDARY only)

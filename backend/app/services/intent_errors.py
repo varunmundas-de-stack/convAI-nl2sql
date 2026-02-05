@@ -44,6 +44,8 @@ class IntentErrorCode(str, Enum):
     OUT_OF_SCOPE_INTENT = "OUT_OF_SCOPE_INTENT"
     UNSUPPORTED_INTENT_TYPE = "UNSUPPORTED_INTENT_TYPE"
 
+    INCOMPLETE_INTENT = "INCOMPLETE_INTENT"
+
 
 class IntentValidationError(Exception):
     """
@@ -304,6 +306,36 @@ class InvalidTimeRangeError(IntentValidationError):
             metadata={"time_range": time_range}
         )
 
+
+class IntentIncompleteError(IntentValidationError):
+    """
+    ERROR_CODE: INTENT_INCOMPLETE
+    
+    Raised when an intent is missing required fields and needs user clarification.
+    """
+    ERROR_CODE = IntentErrorCode.INCOMPLETE_INTENT
+    
+    def __init__(
+        self,
+        missing_fields: List[str],
+        clarification_message: str,
+        partial_intent: Optional[Dict[str, Any]] = None
+    ):
+        self.missing_fields = missing_fields
+        self.clarification_message = clarification_message
+        self.partial_intent = partial_intent or {}
+        super().__init__(clarification_message)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert to structured dict for API responses.
+        """
+        return {
+            "error_code": self.ERROR_CODE.value,
+            "missing_fields": self.missing_fields,
+            "clarification_message": self.clarification_message,
+            "partial_intent": self.partial_intent,
+        }
 
 # ============================================================================
 # SCOPE ERRORS

@@ -83,6 +83,11 @@ class CubeQueryTooLarge(CubeClientError):
     pass
 
 
+class CubeQueryExecutionError(CubeClientError):
+    """Query would return too many rows."""
+    pass
+
+
 # =============================================================================
 # RESPONSE WRAPPER
 # =============================================================================

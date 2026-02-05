@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.services.query_orchestrator import execute_query as run_pipeline, PipelineStage
+from app.services.query_orchestrator import execute_query as run_pipeline, resume_query, PipelineStage
 from app.services.catalog_manager import CatalogManager
 
 # Load environment variables
@@ -133,6 +133,9 @@ class QueryRequest(BaseModel):
         json_schema_extra={"example": "Show me total sales by region for last 30 days"}
     )
 
+class ClarificationRequest(BaseModel):
+    request_id: str
+    answers: dict[str, Any]
 
 # =============================================================================
 # HELPER: MAP PIPELINE STAGE TO HTTP STATUS
@@ -191,10 +194,15 @@ async def execute_query(request: QueryRequest):
     # Convert to dict for JSON response
     response_dict = response.to_dict()
     
+    # Check for clarification request - this is NOT an error, return 200
+    if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
+        logger.info(f"Clarification requested: {response.missing_fields}")
+        return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
+    
     if not response.success:
         # Pipeline failed - return error with appropriate HTTP status
         error_type = response.error.error_type if response.error else "UnknownError"
-        stage = response.error.stage if response.error else PipelineStage.RECEIVED
+        stage = response.stage  # Use the actual stage from response, not from error
         http_status = _get_http_status_for_stage(stage, error_type)
         
         logger.warning(f"Pipeline failed at stage '{stage}': {error_type}")
@@ -258,6 +266,10 @@ async def list_time_windows():
             for w in windows
         ]
     }
+
+@app.post("/clarify")
+def clarify_endpoint(req: ClarificationRequest):
+    return resume_query(req.request_id, req.answers)
 
 
 # =============================================================================

@@ -10,14 +10,6 @@ cubes:
         sql: asm_name
         type: string
 
-      - name: billed_volume
-        sql: billed_volume
-        type: string
-
-      - name: billed_weight
-        sql: billed_weight
-        type: string
-
       - name: brand
         sql: brand
         type: string
@@ -42,20 +34,12 @@ cubes:
         sql: distributor_name
         type: string
 
-      - name: gross_value
-        sql: gross_value
-        type: string
-
       - name: invoice_id
         sql: invoice_id
         type: string
 
       - name: invoice_line_id
         sql: invoice_line_id
-        type: string
-
-      - name: net_value
-        sql: net_value
         type: string
 
       - name: pack_size
@@ -110,14 +94,6 @@ cubes:
         sql: sub_category
         type: string
 
-      - name: tax_rate
-        sql: tax_rate
-        type: string
-
-      - name: tax_value
-        sql: tax_value
-        type: string
-
       - name: zone
         sql: zone
         type: string
@@ -140,6 +116,18 @@ cubes:
 
       - name: billed_qty
         sql: billed_qty
+        type: sum
+
+      - name: gross_value
+        sql: gross_value
+        type: sum
+
+      - name: net_value
+        sql: net_value
+        type: sum
+
+      - name: tax_value
+        sql: tax_value
         type: sum
 
     pre_aggregations:

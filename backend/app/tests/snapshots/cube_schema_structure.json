@@ -1,0 +1,79 @@
+{
+  "fact_primary_sales.yml": [
+    {
+      "dimensions": [
+        "asm_name",
+        "brand",
+        "category",
+        "city",
+        "companywh_code",
+        "companywh_name",
+        "created_at",
+        "currency",
+        "distributor_code",
+        "distributor_name",
+        "invoice_date",
+        "invoice_id",
+        "invoice_line_id",
+        "pack_size",
+        "product_desc",
+        "sku_code",
+        "so_name",
+        "state",
+        "sub_category",
+        "uom",
+        "zone",
+        "zsm_name"
+      ],
+      "measures": [
+        "billed_qty",
+        "count",
+        "gross_value",
+        "net_value",
+        "tax_value"
+      ],
+      "name": "fact_primary_sales"
+    }
+  ],
+  "fact_secondary_sales.yml": [
+    {
+      "dimensions": [
+        "asm_name",
+        "brand",
+        "category",
+        "city",
+        "created_at",
+        "currency",
+        "distributor_code",
+        "distributor_name",
+        "invoice_date",
+        "invoice_id",
+        "invoice_line_id",
+        "pack_size",
+        "product_desc",
+        "retailer_code",
+        "retailer_name",
+        "retailer_type",
+        "route_code",
+        "route_name",
+        "salesrep_code",
+        "salesrep_name",
+        "sku_code",
+        "so_name",
+        "state",
+        "sub_category",
+        "uom",
+        "zone",
+        "zsm_name"
+      ],
+      "measures": [
+        "billed_qty",
+        "count",
+        "gross_value",
+        "net_value",
+        "tax_value"
+      ],
+      "name": "fact_secondary_sales"
+    }
+  ]
+}

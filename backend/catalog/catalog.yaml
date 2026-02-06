@@ -27,6 +27,7 @@ dimensions:
   fact_primary_sales.so_name: true
   fact_primary_sales.state: true
   fact_primary_sales.sub_category: true
+  fact_primary_sales.uom: true
   fact_primary_sales.zone: true
   fact_primary_sales.zsm_name: true
   fact_secondary_sales.asm_name: true
@@ -51,6 +52,7 @@ dimensions:
   fact_secondary_sales.so_name: true
   fact_secondary_sales.state: true
   fact_secondary_sales.sub_category: true
+  fact_secondary_sales.uom: true
   fact_secondary_sales.zone: true
   fact_secondary_sales.zsm_name: true
 time_dimensions:
@@ -94,3 +96,4 @@ time_windows:
   last_month: true
   last_quarter: true
   last_year: true
+  all_time: true

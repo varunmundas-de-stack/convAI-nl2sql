@@ -275,17 +275,33 @@ def normalize_intent(raw_intent: dict) -> dict:
     # -------------------------------------------------------------------------
     # Time dimension
     # -------------------------------------------------------------------------
-    if intent.get("time_dimension"):
-        td = intent["time_dimension"]
-        if isinstance(td, dict):
-            dim = td.get("dimension")
-            if dim in TIME_DIMENSION_MAP:
-                td["dimension"] = resolve_time_dimension(dim, intent["sales_scope"])
-        else:
-            dim = getattr(td, "dimension", None)
-            if dim in TIME_DIMENSION_MAP:
-                td.dimension = resolve_time_dimension(dim, intent["sales_scope"])
+        
+    time_range = intent.get("time_range")
+    time_dimension = intent.get("time_dimension")
 
+    # Case 1: time_dimension explicitly provided → resolve it
+    if time_dimension:
+        if isinstance(time_dimension, dict):
+            dim = time_dimension.get("dimension")
+            if dim in TIME_DIMENSION_MAP:
+                time_dimension["dimension"] = resolve_time_dimension(
+                    dim, intent["sales_scope"]
+                )
+        else:
+            dim = getattr(time_dimension, "dimension", None)
+            if dim in TIME_DIMENSION_MAP:
+                time_dimension.dimension = resolve_time_dimension(
+                    dim, intent["sales_scope"]
+                )
+
+    # Case 2: time_range exists but time_dimension missing → inject default
+    elif time_range and time_range.get("window") == "all_time":
+        intent["time_dimension"] = {
+            "dimension": resolve_time_dimension(
+                "invoice_date",
+                intent["sales_scope"]
+            )
+        }
 
     return intent
 

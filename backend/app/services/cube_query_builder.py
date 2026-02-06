@@ -26,21 +26,30 @@ DEFAULT_LIMIT = 1000
 DEFAULT_TIMEZONE = "Asia/Kolkata"
 
 
+def _today_str() -> str:
+    return date.today().isoformat()
 
 
-TIME_WINDOW_TO_CUBE_RANGE: dict[str, str] = {
-    "today": "today",
-    "yesterday": "yesterday",
-    "last_7_days": "last 7 days",
-    "last_30_days": "last 30 days",
-    "last_90_days": "last 90 days",
-    "month_to_date": "this month",
-    "quarter_to_date": "this quarter",
-    "year_to_date": "this year",
-    "last_month": "last month",
-    "last_quarter": "last quarter",
-    "last_year": "last year",
-}
+def _years_ago_str(years: int) -> str:
+    return date(date.today().year - years, 1, 1).isoformat()
+
+
+
+
+# TIME_WINDOW_TO_CUBE_RANGE: dict[str, str] = {
+#     "today": "today",
+#     "yesterday": "yesterday",
+#     "last_7_days": "last 7 days",
+#     "last_30_days": "last 30 days",
+#     "last_90_days": "last 90 days",
+#     "month_to_date": "this month",
+#     "quarter_to_date": "this quarter",
+#     "year_to_date": "this year",
+#     "last_month": "last month",
+#     "last_quarter": "last quarter",
+#     "last_year": "last year",
+#     "all_time": "all time",
+# }
 
 
 class CubeQueryBuildError(Exception):
@@ -97,46 +106,26 @@ def _build_filters(intent: Intent) -> list[dict[str, Any]] | None:
 
     return filters
 
-
 def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
     if intent.time_dimension is None and intent.time_range is None:
         return None
 
     td: dict[str, Any] = {}
 
-    if intent.time_dimension:
-        dim = intent.time_dimension.dimension
-        if "." not in dim:
-            raise ValueError(f"CubeQueryBuilder received non-normalized time dimension: {dim}")
-
-        td["dimension"] = dim
-
-        if intent.intent_type == IntentType.TREND:
-            td["granularity"] = intent.time_dimension.granularity
-    else:
-        # snapshot with time_range but no time_dimension
-        td["dimension"] = "sales_fact.invoice_date"
-
-    if intent.time_range:
+    if intent.time_dimension is not None:
+        td["dimension"] = intent.time_dimension.dimension
+        td["granularity"] = intent.time_dimension.granularity
+        
+    if intent.time_range is not None:
         if intent.time_range.window:
-            if intent.intent_type == IntentType.TREND:
-                td["dateRange"] = resolve_time_window(intent.time_range.window)
-            else:
-                cube_range = TIME_WINDOW_TO_CUBE_RANGE.get(intent.time_range.window)
-                if cube_range is None:
-                    raise ValueError(
-                        f"Unknown time window: {intent.time_range.window}"
-                    )
-                td["dateRange"] = cube_range
+            td["dateRange"] = resolve_time_window(intent.time_range.window)
         else:
-            # Explicit range must be TWO STRINGS
             td["dateRange"] = [
                 str(intent.time_range.start_date),
                 str(intent.time_range.end_date),
             ]
 
     return [td]
-
 
 def _build_order(intent: Intent) -> dict[str, str]:
     metric = intent.metric
@@ -205,8 +194,6 @@ def build_cube_query(intent: Intent) -> dict[str, Any]:
 
 # Helper function
 
-from datetime import date, timedelta
-
 def resolve_time_window(window: str) -> list[str]:
     today = date.today()
 
@@ -260,6 +247,10 @@ def resolve_time_window(window: str) -> list[str]:
     elif window == "last_year":
         start = date(today.year - 1, 1, 1)
         end = date(today.year - 1, 12, 31)
+
+    elif window == "all_time":
+        start = date(today.year - 25, 1, 1)
+        end = today
 
     else:
         raise ValueError(f"Unsupported TREND time window: {window}")

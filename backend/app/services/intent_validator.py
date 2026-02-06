@@ -147,7 +147,7 @@ class IntentValidator:
             # Pre-process to fix common LLM issues
             processed_intent = self._preprocess_intent(raw_intent)
             return Intent(**processed_intent)
-        except ValidationError as e:
+        except IntentValidationError as e:
             # Extract meaningful error message from Pydantic
             errors = e.errors()
             if errors:

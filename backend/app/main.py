@@ -207,13 +207,14 @@ async def execute_query(request: QueryRequest):
         
         logger.warning(f"Pipeline failed at stage '{stage}': {error_type}")
         
-        raise HTTPException(
-            status_code=http_status,
-            detail=response_dict,
-        )
+        # Convert the error object to a string or dict
+        if "error" in response_dict and isinstance(response_dict["error"], Exception):
+            response_dict["error"] = str(response_dict["error"]) 
+
+        raise HTTPException(status_code=http_status, detail=response_dict)
     
     logger.info(f"Query executed successfully in {response.duration_ms}ms, {len(response.data or [])} rows")
-    
+     
     # Success - return full response
     return JSONResponse(content=response_dict)
 

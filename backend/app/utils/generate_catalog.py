@@ -24,6 +24,7 @@ TIME_WINDOWS = {
     "last_month": True,
     "last_quarter": True,
     "last_year": True,
+    "all_time": True,
 }
 
 def load_yaml(path: Path):

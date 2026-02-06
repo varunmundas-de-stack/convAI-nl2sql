@@ -94,6 +94,10 @@ cubes:
         sql: sub_category
         type: string
 
+      - name: uom
+        sql: uom
+        type: string
+
       - name: zone
         sql: zone
         type: string

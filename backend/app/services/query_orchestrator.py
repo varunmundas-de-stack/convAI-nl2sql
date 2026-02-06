@@ -32,6 +32,7 @@ from app.services.cube_client import (
     CubeClientError,
     CubeResponse,
     CubeQueryExecutionError,
+    CubeHTTPError,
 )
 from app.services.intent_normalizer import normalize_intent
 from app.services.catalog_manager import CatalogManager
@@ -137,11 +138,18 @@ class OrchestratorResponse:
             "clarification": self.clarification,
             "missing_fields": self.missing_fields,
             "clarification_message": self.clarification_message,
-            "validated_intent": self.validated_intent,
+            "validated_intent": (
+                self.validated_intent.model_dump()
+                if self.validated_intent is not None
+                else None
+            ),
             "cube_query": self.cube_query,
             "data": self.data,
-            "visualization": self.visualization,
-            "error": self.error,
+            "visualization": (
+            self.visualization.model_dump()
+            if self.visualization else None
+            ),
+            "error": self.error.to_dict() if self.error else None,
             "request_id": self.request_id,
         }
         return result
@@ -307,7 +315,8 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
         **state.intent,
         **{k: v for k, v in clarification_answers.items() if k in state.missing_fields}
     }
-
+    logger.info(f"Merged intent: {merged_intent}")
+    delete_state(request_id)
     response = OrchestratorResponse(
         query=state.original_query,
         success=False,
@@ -353,6 +362,17 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
         return response.to_dict()
 
     except IntentValidationError as e:
+        delete_state(request_id)
+        response.error = OrchestratorError(
+            stage=response.stage,
+            error_type=e.__class__.__name__,
+            message=str(e),
+            details=e.to_dict() if hasattr(e, "to_dict") else None
+        )
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        return response.to_dict()
+
+    except Exception as e:
         delete_state(request_id)
         response.error = OrchestratorError(
             stage=response.stage,
@@ -481,8 +501,19 @@ def _execute_cube_query(response: OrchestratorResponse, start_time: float) -> Or
     try:
         logger.info("Step 4: Executing Cube query...")
         cube_client = CubeClient()
-        cube_response = cube_client.load(response.cube_query)
-        response.data = cube_response.data
+        try:
+            cube_response = cube_client.load(response.cube_query)
+            response.data = cube_response.data
+        except CubeHTTPError as e:
+            response.error = OrchestratorError(
+                stage=PipelineStage.CUBE_QUERY_BUILT,
+                error_type="CubeHTTPError",
+                message="Cube query failed",
+                details=e.to_dict() if hasattr(e, "to_dict") else None
+            )
+            response.success = False
+            return response
+
         response.stage = PipelineStage.CUBE_EXECUTED
         logger.info(f"Cube query executed, rows: {len(cube_response.data)}")
         

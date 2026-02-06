@@ -81,9 +81,11 @@ class RedisStateStore:
     def save(self, state: PipelineState) -> None:
         """Save pipeline state to Redis with TTL."""
         r = self._get_redis()
+
         
         if r is None:
             # Fallback to in-memory
+            logger.warning("Redis is not available, using in-memory fallback")
             self._fallback_store[state.request_id] = state
             logger.info(f"Saved state {state.request_id} to in-memory fallback (missing_fields={state.missing_fields})")
             return
@@ -142,7 +144,7 @@ class RedisStateStore:
         try:
             key = self._key(request_id)
             r.delete(key)
-            logger.debug(f"Deleted state {request_id}")
+            logger.info(f"Deleted state {request_id}")
         except redis.RedisError as e:
             logger.error(f"Redis delete failed: {e}")
             self._fallback_store.pop(request_id, None)

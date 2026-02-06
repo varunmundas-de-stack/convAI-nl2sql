@@ -54,7 +54,7 @@ count                      → count of transactions
 net_value                  → total net sales value  
 gross_value                → total gross sales value  
 tax_value                  → total tax amount  
-billed_qty                 → total sales quantity/volume
+billed_qty                 → total sales quantity
 volume_qty                 → alias for billed_qty (total quantity)
 quantity                   → alias for billed_qty
 
@@ -91,7 +91,11 @@ route_name                 (SECONDARY only)
 
 
 ### TIME_DIMENSIONS
-invoice_date (day, week, month, quarter, year)
+- invoice_date
+- created_at
+
+If user does not specify, ALWAYS use invoice_date.
+
 
 ### TIME_WINDOWS
 today
@@ -105,6 +109,7 @@ year_to_date
 last_month
 last_quarter
 last_year
+all_time
 
 ### FILTER OPERATORS
 equals, not_equals, in, not_in, contains

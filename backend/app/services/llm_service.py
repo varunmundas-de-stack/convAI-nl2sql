@@ -18,7 +18,7 @@ TIMEOUT_SECONDS = os.getenv("MODEL_TIMEOUT_SECONDS", 30.0)
 logger = logging.getLogger(__name__)
 
 
-def call_claude(prompt: str) -> anthropic.Message:
+def call_claude(prompt: str) -> anthropic.types.Message:
     """
     Call Claude with explicit configuration.
     

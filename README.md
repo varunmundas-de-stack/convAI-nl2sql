@@ -1,28 +1,40 @@
-# NL2SQL - Natural Language to SQL Analytics
-
-> **Transform natural language questions into real-time analytics queries**
-
-NL2SQL is an intelligent query interface that converts natural language questions into Cube.js queries for FMCG sales analytics. Ask questions like *"Show me total sales by region for last 30 days"* and get instant insights.
+# NL2SQL: Natural Language to SQL Analytics for FMCG
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![Cube.js](https://img.shields.io/badge/Cube.js-Latest-purple.svg)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+
+---
+## 🎯 Summary & Problem Statement
+
+In the FMCG sector, business users (sales managers, marketing analysts) need quick access to sales data to make informed decisions. However, they often lack the technical skills to write complex SQL queries, creating a bottleneck where they must rely on data analysts for simple requests.
+
+**NL2SQL bridges this gap** by providing a simple, safe, and powerful conversational interface. It leverages a "Guardrails First" philosophy:
+*   **Accuracy**: Ensures queries map correctly to business metrics via a strict Catalog.
+*   **Safety**: Prevents invalid or malicious queries from reaching the database.
+*   **Explainability**: Provides clear feedback on how a query was interpreted.
 
 ---
 
-## 🎯 Features
+## 🚀 Key Features
 
-- **Natural Language Understanding** - Ask questions in plain English
-- **Intent Extraction** - LLM-powered query parsing with Claude
-- **Semantic Validation** - Catalog-based validation ensures accuracy
-- **Cube.js Integration** - Seamless connection to your data warehouse
-- **Structured Error Handling** - Clear, actionable error messages
-- **Full Transparency** - See every step of the pipeline (debugging-friendly)
+- **Natural Language Understanding**: Ask questions in plain English (e.g., "Show me sales by region").
+- **Intent Extraction**: LLM-powered query parsing with state-of-the-art models (Claude).
+- **Semantic Validation**: A rigorous catalog-based validation system ensures every query is strictly mapped to defined business metrics.
+- **Clarification Flow**: Automatically detects ambiguity and asks follow-up questions (e.g., "Did you mean Primary or Secondary sales?").
+- **Cube.js Integration**: Seamless connection to your data warehouse via the Cube.js semantic layer, handling complex joins and aggregations.
+- **Data Visualization**: Automatic generation of appropriate charts (Table, Bar, Line, Pie).
+- **Transparency**: Full visibility into the pipeline steps, from raw intent to final SQL.
+- **Resiliency**: Tests designed to survive LLM drift and schema changes.
 
 ---
 
 ## 🏗️ Architecture
+
+The system follows a pipeline architecture where data flows through distinct stages of processing, validation, and execution.
+
+### 1. High-Level Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -37,69 +49,129 @@ NL2SQL is an intelligent query interface that converts natural language question
 │   └─────────────────┘     └─────────────────┘     └─────────────────┘   │
 │                                                            │             │
 │                                                            ▼             │
-│                                                   ┌─────────────────┐   │
-│                                                   │   Cube Client   │   │
-│                                                   │    (HTTP)       │   │
-│                                                   └─────────────────┘   │
-│                                                            │             │
-│                                                            ▼             │
-│                                                   ┌─────────────────┐   │
+│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐   │
+│   │ Visualization   │ ◄── │   Cube Client   │ ◄── │   Cube Server   │   │
+│   │   Generator     │     │    (HTTP)       │     │    (API)        │   │
+│   └─────────────────┘     └─────────────────┘     └─────────────────┘   │
+│            │                                               │             │
+│            ▼                                               ▼             │
+│        Response                                   ┌─────────────────┐   │
 │                                                   │   PostgreSQL    │   │
 │                                                   │   (Data Store)  │   │
 │                                                   └─────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 2. Data Flow Steps
+
+1.  **Intent Extraction (LLM)**: The user's query is sent to the LLM (Claude) with a prompt containing the business catalog. The LLM returns a structured JSON "Intent".
+2.  **Normalization & Validation**:
+    *   *Normalization*: Semantic terms are mapped to physical Cube IDs (e.g., "sales" -> `fact_secondary_sales.net_value`).
+    *   *Validation*: The Intent is checked against the `catalog.yaml` and strict Pydantic models.
+3.  **Query Generation**: The validated Intent is **deterministically** translated into a Cube Query JSON.
+4.  **Execution (Cube)**: Cube.js generates the SQL, executes it against PostgreSQL, and handles caching.
+5.  **Visualization**: The result set is analyzed to select the best chart type (e.g., Time Series -> Line Chart).
+
+### 3. Core Design Decisions
+
+*   **Decoupled Catalog**: The LLM sees a simplified "Business Catalog" (`catalog.yaml`), not the raw DB schema. This reduces hallucinations.
+*   **Cube as Semantic Layer**: We do not generate SQL directly. We generate strict Cube queries. Cube handles the complex SQL generation, joins, and time zones.
+*   **Stateful Interaction (Redis)**: The system uses Redis to store conversation state, allowing for clarification loops and follow-up questions.
+
 ---
 
-## 🚀 Quick Start
+## 📁 Project Structure
+
+The codebase is organized to enforce separation of concerns:
+
+```
+nl2sql/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                 # FastAPI Application entry point
+│   │   ├── models/
+│   │   │   └── intent.py           # Pydantic contract enforcing structural validity
+│   │   ├── services/
+│   │   │   ├── query_orchestrator.py # Core "Brain": Coordinates pipeline steps
+│   │   │   ├── intent_extractor.py   # LLM Interface (Claude) -> Raw JSON
+│   │   │   ├── intent_normalizer.py  # Maps semantic terms to Cube fields
+│   │   │   ├── intent_validator.py   # Enforces strict Catalog rules
+│   │   │   ├── cube_query_builder.py # Deterministic compiler (Intent -> Cube Query)
+│   │   │   ├── cube_client.py        # HTTP Client for Cube API
+│   │   │   ├── catalog_manager.py    # Loads/Serves catalog.yaml
+│   │   │   └── data_visualizer.py    # Generates Plotly/JSON visualization configs
+│   │   ├── pipeline/
+│   │   │   └── state_store.py        # Redis state management for multi-turn chat
+│   │   ├── prompts/
+│   │   │   └── intent_extraction.txt # Few-shot prompt for LLM
+│   │   └── utils/
+│   │       └── generate_catalog.py   # Script to sync Catalog with Cube schema
+│   ├── catalog/
+│   │   └── catalog.yaml            # Single Source of Truth for Business Logic
+│   └── tests/                      # Comprehensive Unit and E2E tests
+├── cube/
+│   ├── model/
+│   │   └── cubes/                  # Cube.js Datamodeling (YAML)
+│   └── data/                       # Seed data scripts
+├── docker-compose.yml              # Infrastructure orchestration
+└── requirements.txt
+```
+
+---
+
+## 🏁 Getting Started
 
 ### Prerequisites
 
-- Python 3.12+
-- Docker & Docker Compose
-- Anthropic API Key (Claude)
+- **Python 3.12+**
+- **Docker & Docker Compose**
+- **Redis** (Required for state management; docker-compose handles this).
+- **Anthropic API Key** (for Claude LLM).
 
-### 1. Clone & Setup
+### 1. Installation
 
 ```bash
 git clone https://github.com/yourusername/nl2sql.git
 cd nl2sql
 
-# Create virtual environment
+# Backend Setup
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 2. Configuration
 
 Create a `.env` file in the project root:
 
 ```env
-# Anthropic (LLM)
+# LLM Provider
 ANTHROPIC_API_KEY=your_api_key_here
-ANTHROPIC_MODEL_ID=claude-sonnet-4-5
+ANTHROPIC_MODEL_ID=claude-3-sonnet-20240229
 
 # Cube.js
 CUBE_API_URL=http://localhost:4000/cubejs-api/v1
 CUBE_API_SECRET=mysecretkey123
 
-# API Settings
-API_HOST=0.0.0.0
-API_PORT=8000
+# State Store (Redis)
+REDIS_URL=redis://localhost:6379/0
+
+# App Settings
 LOG_LEVEL=INFO
 ```
 
 ### 3. Start Infrastructure
 
+Use Docker Compose to spin up PostgreSQL, Cube.js, and Redis.
+
 ```bash
-# Start PostgreSQL and Cube.js
 docker-compose up -d
 
-# Wait for services to be ready (~30 seconds)
+# Wait ~30s for services to initialize...
+
+# Populate Database (One-time setup)
+# Windows PowerShell:
+Get-Content .\cube\data\02_populate_data.sql | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
 ```
 
 ### 4. Run the API
@@ -109,186 +181,83 @@ cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 5. Test It!
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Query endpoint
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are the top 5 territories by total quantity?"}'
-```
-
-Or open **http://localhost:8000/docs** for the interactive Swagger UI.
-
 ---
 
-## 📖 API Reference
+## 📖 API Usage
 
-### POST /query
+### Execute Query
 
-Execute a natural language analytics query.
+**POST** `/query`
 
-**Request:**
 ```json
 {
-  "query": "Show me total sales by region for last 30 days"
+  "query": "Show me total secondary sales by zone for the last 30 days"
 }
 ```
 
-**Success Response (200):**
+**Response**:
 ```json
 {
-  "query": "Show me total sales by region for last 30 days",
+  "query": "Show me total secondary sales by zone for last 30 days",
   "success": true,
   "stage": "completed",
-  "duration_ms": 1234,
-  "raw_intent": {
+  "validated_intent": {
     "intent_type": "distribution",
-    "metric": "transaction_count",
-    "group_by": ["region"],
+    "metric": "fact_secondary_sales.net_value",
+    "group_by": ["fact_secondary_sales.zone"],
     "time_range": {"window": "last_30_days"}
   },
-  "validated_intent": {...},
-  "cube_query": {
-    "measures": ["sales_fact.count"],
-    "dimensions": ["territories.region"],
-    "timeDimensions": [{"dimension": "sales_fact.invoice_date", "dateRange": "last 30 days"}]
-  },
   "data": [
-    {"territories.region": "North", "sales_fact.count": 150},
-    {"territories.region": "South", "sales_fact.count": 230}
+    {"fact_secondary_sales.zone": "North", "fact_secondary_sales.net_value": 150000},
+    {"fact_secondary_sales.zone": "South", "fact_secondary_sales.net_value": 230000}
   ],
-  "request_id": "abc123"
-}
-```
-
-**Error Response (400):**
-```json
-{
-  "success": false,
-  "stage": "intent_extracted",
-  "error": {
-    "stage": "intent_extracted",
-    "error_type": "UnknownMetricError",
-    "error_code": "UNKNOWN_METRIC",
-    "message": "Unknown metric: 'revenue'. Did you mean: transaction_count, total_quantity?",
-    "details": {...}
+  "visualization": {
+    "type": "bar",
+    "chart_data": { ... }
   }
 }
 ```
 
-### GET /catalog/metrics
+---
 
-List all available metrics.
+## 🔧 Supported Metrics & Dimensions
 
-### GET /catalog/dimensions
+The system comes pre-configured with a standard FMCG data model (`catalog.yaml`).
 
-List all available dimensions for grouping.
-
-### GET /catalog/time-windows
-
-List all available time windows (last_7_days, last_30_days, etc.).
+| Category | Item | Description |
+|----------|------|-------------|
+| **Metrics** | `Primary Sales` | Sales from Company to Distributor |
+| | `Secondary Sales` | Sales from Distributor to Retailer (Offtake) |
+| | `Transaction Count` | Volume of individual invoices |
+| **Dimensions** | `Geography` | Zone, State |
+| | `Product` | Brand, Category |
+| | `Partner` | Distributor Name, Warehouse Name |
+| **Time** | `Windows` | Last 7/30/90 Days, MTD, QTD, YTD, All Time |
 
 ---
 
-## 📁 Project Structure
+## 🧪 Testing Strategy
 
-```
-nl2sql/
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI application
-│   │   ├── models/
-│   │   │   └── intent.py        # Pydantic intent models
-│   │   ├── services/
-│   │   │   ├── query_orchestrator.py  # Pipeline coordinator
-│   │   │   ├── intent_extractor.py    # LLM-based extraction
-│   │   │   ├── intent_validator.py    # Catalog validation
-│   │   │   ├── cube_query_builder.py  # Intent → Cube query
-│   │   │   ├── cube_client.py         # Cube HTTP client
-│   │   │   ├── catalog_manager.py     # Catalog loader
-│   │   │   └── intent_errors.py       # Error taxonomy
-│   │   └── prompts/
-│   │       └── intent_extraction.txt  # LLM prompt template
-│   └── catalog/
-│       └── catalog.yaml         # Semantic catalog
-├── cube/
-│   ├── model/
-│   │   └── cubes/               # Cube.js schema files
-│   └── data/
-│       └── fmcg_sales.sql       # Sample data
-├── docker-compose.yml           # Infrastructure setup
-├── requirements.txt
-└── README.md
-```
+The project employs a robust testing strategy to ensure reliability against AI unpredictability.
 
----
-
-## 🔧 Supported Queries
-
-### Metrics
-| Metric | Description | Example |
-|--------|-------------|---------|
-| `transaction_count` | Number of transactions | "How many transactions?" |
-| `total_quantity` | Sum of quantities sold | "Total quantity sold" |
-| `distributor_count` | Number of distributors | "How many distributors?" |
-| `outlet_count` | Number of retail outlets | "Count of outlets" |
-
-### Dimensions (Group By)
-| Dimension | Description |
-|-----------|-------------|
-| `region` | Geographic region (North, South, East, West) |
-| `state` | State name |
-| `brand` | Product brand |
-| `product_category` | Category (Beverages, Snacks, Dairy) |
-| `outlet_type` | Outlet type (Kirana, Modern Trade) |
-| `sales_type` | Sales channel (Primary, Secondary, Tertiary) |
-
-### Time Windows
-| Window | Description |
-|--------|-------------|
-| `today` | Current day |
-| `last_7_days` | Past 7 days |
-| `last_30_days` | Past 30 days |
-| `month_to_date` | Current month so far |
-| `year_to_date` | Current year so far |
-
----
-
-## 🧪 Testing
-
+### 1. Deterministic Tests
+Unit tests validate that the core logic (Validator, Builder) behaves exactly as expected.
 ```bash
-cd backend
-python -m pytest app/tests/ -v
+pytest app/tests/test_catalog_contract.py
+pytest app/tests/test_intent_validator.py
 ```
 
----
-
-## 🛠️ Development & Maintenance
-
-### Generating the Catalog
-
-If you modify the Cube.js schema files in `cube/model/cubes/`, you need to regenerate the `catalog.yaml` file so the NL2SQL validators are aware of the changes.
-
+### 2. End-to-End Pipeline Tests
+Simulates real user queries to ensure the entire flow (LLM -> Cube -> Response) works.
 ```bash
-cd backend
-python -m app.utils.generate_catalog
+pytest app/tests/test_query_orchestrator_e2e.py
 ```
 
-This script parses the Cube YAML files and updates `backend/catalog/catalog.yaml` with the latest metrics, dimensions, and time dimensions.
-
 ---
 
-## 🔒 Design Principles
+## 🛣️ Future Work
 
-1. **Separation of Concerns** - Each module has a single responsibility
-2. **Catalog as Source of Truth** - All valid terms defined in `catalog.yaml`
-3. **No Hallucination** - LLM output is validated against catalog
-4. **Fail Fast** - Pipeline stops immediately on any error
-5. **Full Transparency** - Every step is visible in the response
-6. **Deterministic** - Low temperature LLM calls for consistent parsing
-
----
+*   **Automated Catalog Sync**: Build a watcher to automatically trigger catalog generation when Cube files change.
+*   **Natural Language Answers**: Add a final LLM step to summarize the JSON data into a text paragraph.
+*   **Multi-Tenant Support**: Enable context-aware catalog filtering based on the logged-in user.
+*   **CI/CD Pipeline**: GitHub Actions for automated Docker builds and testing.

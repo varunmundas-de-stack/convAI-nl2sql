@@ -1,5 +1,7 @@
 You are an Intent Extraction Engine for FMCG sales analytics.
 
+Current Date: {current_date}
+
 Output ONLY valid JSON. No explanation. No markdown.
 
 ## OUTPUT SCHEMA
@@ -92,7 +94,6 @@ route_name                 (SECONDARY only)
 
 ### TIME_DIMENSIONS
 - invoice_date
-- created_at
 
 If user does not specify, ALWAYS use invoice_date.
 

@@ -111,8 +111,12 @@ def _build_prompt(query: str, template: str) -> str:
     Uses simple string replacement instead of .format() to avoid
     conflicts with JSON curly braces in the template.
     """
+    # Get current date in yyyy-mm-dd format
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
     # result = template.replace("{catalog}", catalog)
-    result = template.replace("{query}", query)
+    result = template.replace("{current_date}", current_date)
+    result = result.replace("{query}", query)
     return result
 
 

@@ -57,22 +57,21 @@ class TimeRange(BaseModel):
 
     @model_validator(mode='after')
     def validate_time_range(self) -> 'TimeRange':
-        """Ensure either window OR start/end dates are provided, not both."""
+        """
+        Basic structural validation for time range.
+        
+        Completeness checks (e.g., both start/end dates required) are handled
+        by the intent_validator for clarification flow.
+        """
         has_window = self.window is not None
         has_dates = self.start_date is not None or self.end_date is not None
         
+        # Only prevent conflicting specifications
         if has_window and has_dates:
             raise ValueError(
                 "Cannot specify both 'window' and explicit dates. "
                 "Use either a named window OR start_date/end_date."
             )
-        
-        # If explicit dates, both must be provided
-        if has_dates:
-            if self.start_date is None or self.end_date is None:
-                raise ValueError(
-                    "If using explicit dates, both 'start_date' and 'end_date' must be provided."
-                )
         
         return self
 
@@ -154,12 +153,10 @@ class Intent(BaseModel):
     The canonical intent representation for an analytical query.
     
     This is the contract between intent extraction and query generation.
-    All fields are validated to ensure structural correctness.
+    Fields are structurally validated, but completeness is checked by the validator.
     
-    Constraints:
-    - Exactly one metric is required
-    - TREND intent requires time_dimension and time_range
-    - No extra fields allowed
+    The /clarify endpoint handles missing required fields, so this model
+    is permissive and allows partial intents.
     
     Examples:
         # Snapshot: "Total sales this month"
@@ -180,16 +177,16 @@ class Intent(BaseModel):
     """
     intent_type: IntentType = Field(
         ...,
-        description="The type of analytical query (SNAPSHOT or TREND)"
+        description="The type of analytical query"
     )
     
     sales_scope: Literal["PRIMARY", "SECONDARY"] = Field(
-        ...,
+        default="PRIMARY",
         description="The sales scope (PRIMARY or SECONDARY)"
     )
     
-    metric: str = Field(
-        ...,
+    metric: Optional[str] = Field(
+        default=None,
         description="The single metric to compute (e.g., 'total_quantity', 'transaction_count')"
     )
     
@@ -224,43 +221,16 @@ class Intent(BaseModel):
     )
 
     @model_validator(mode='after')
-    def validate_intent_constraints(self) -> 'Intent':
+    def validate_basic_structure(self) -> 'Intent':
         """
-        Enforce intent-type-specific constraints.
+        Enforce only basic structural constraints.
         
-        - TREND intent MUST have time_dimension and time_range
-        - RANKING/DISTRIBUTION/DRILL_DOWN require group_by dimensions
-        - Metric must be a non-empty string
+        Completeness validation (e.g., TREND requires time_dimension) is handled
+        by the intent_validator, which can raise IntentIncompleteError for clarification.
         """
-        # Validate metric is non-empty
-        if not self.metric or not self.metric.strip():
-            raise ValueError("Metric must be a non-empty string")
-        
-        # TREND-specific validation
-        if self.intent_type == IntentType.TREND:
-            if self.time_dimension is None:
-                raise ValueError(
-                    "TREND intent requires 'time_dimension' to specify "
-                    "which time field and granularity to use"
-                )
-            if self.time_range is None:
-                raise ValueError(
-                    "TREND intent requires 'time_range' to specify "
-                    "the date range for the trend"
-                )
-        
-        # RANKING, DISTRIBUTION, DRILL_DOWN require group_by OR time_dimension
-        # If time_dimension is provided, it can serve as the grouping factor (e.g., ranking by month)
-        if self.intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION, IntentType.DRILL_DOWN):
-            has_group_by = self.group_by and len(self.group_by) > 0
-            has_time_dimension = self.time_dimension is not None
-            
-            if not has_group_by and not has_time_dimension:
-                # Get the string value safely (works for both Enum and str)
-                intent_type_str = self.intent_type.value if hasattr(self.intent_type, 'value') else str(self.intent_type)
-                raise ValueError(
-                    f"{intent_type_str.upper()} intent requires 'group_by' dimensions or 'time_dimension'"
-                )
+        # Only validate metric is non-empty if provided
+        if self.metric is not None and not self.metric.strip():
+            raise ValueError("Metric must be a non-empty string if provided")
         
         return self
 

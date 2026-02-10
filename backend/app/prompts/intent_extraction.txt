@@ -190,5 +190,16 @@ Output JSON:
 }
 
 
+{previous_context}
+
+## CONTEXT-AWARE RULES (when previous context is provided)
+1. If the user explicitly mentions a metric, scope, time range, or dimension → USE THEIR VALUE.
+2. If the user's query is vague on a field (e.g. no metric mentioned) and previous context exists → you MAY infer from context.
+3. If the user says "now show by X" or "break down by X" → override group_by with X, keep other fields from context.
+4. If the user says "drill into X" → add X as a filter, keep other fields from context.
+5. If the user provides a new time range → override the previous one completely.
+6. The new query ALWAYS takes priority over previous context.
+7. If there is no previous context, treat the query as a standalone question.
+
 Now extract from this query:
 {query}

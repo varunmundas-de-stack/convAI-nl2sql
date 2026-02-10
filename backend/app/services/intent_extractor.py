@@ -32,10 +32,11 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from app.services.llm_service import call_claude, count_tokens
+from app.models.qco import QueryContextObject
 import anthropic
 
 
@@ -103,7 +104,7 @@ def _compute_prompt_hash(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()[:12]
 
 
-def _build_prompt(query: str, template: str) -> str:
+def _build_prompt(query: str, template: str, previous_context: str = "") -> str:
     """
     Inject runtime values into prompt template.
     
@@ -114,8 +115,15 @@ def _build_prompt(query: str, template: str) -> str:
     # Get current date in yyyy-mm-dd format
     current_date = datetime.now().strftime("%Y-%m-%d")
     
+    # Build the previous context block
+    if previous_context:
+        context_block = f"## PREVIOUS QUERY CONTEXT\n{previous_context}"
+    else:
+        context_block = ""
+    
     # result = template.replace("{catalog}", catalog)
     result = template.replace("{current_date}", current_date)
+    result = result.replace("{previous_context}", context_block)
     result = result.replace("{query}", query)
     return result
 
@@ -299,7 +307,7 @@ def _init_log_db() -> None:
 # PUBLIC INTERFACE
 # =============================================================================
 
-def extract_intent(query: str) -> dict[str, Any]:
+def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None) -> dict[str, Any]:
     """
     Extract intent from natural language query.
     
@@ -307,6 +315,7 @@ def extract_intent(query: str) -> dict[str, Any]:
     
     Args:
         query: Natural language user query
+        previous_qco: Optional QCO from the previous query in this session
         
     Returns:
         Raw intent dict (UNTRUSTED, semantically unvalidated)
@@ -326,6 +335,9 @@ def extract_intent(query: str) -> dict[str, Any]:
     error = None
     prompt_hash = None
     
+    # Format previous context from QCO (empty string if no QCO)
+    previous_context = previous_qco.to_prompt_context() if previous_qco else ""
+    
     try:
         # Load external resources
         template = _load_prompt_template()
@@ -333,7 +345,7 @@ def extract_intent(query: str) -> dict[str, Any]:
         
         # Build prompt (pure substitution, no logic)
         # prompt = _build_prompt(query=query, catalog=catalog, template=template)
-        prompt = _build_prompt(query=query, template=template)
+        prompt = _build_prompt(query=query, template=template, previous_context=previous_context)
         prompt_hash = _compute_prompt_hash(prompt)
         
         # Log raw input

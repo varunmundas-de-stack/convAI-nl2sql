@@ -1,13 +1,18 @@
 """
 Query Orchestrator
 
-RESPONSIBILITIES:
-1. Receive query (no preprocessing, no cleanup)
-2. Call Intent Extractor (stop if LLM fails or JSON malformed)
-3. Validate Intent (stop if validation fails)
-4. Build Cube Query (stop if mapping fails)
-5. Execute Cube Query (stop if Cube errors)
-6. Return structured response (everything for debugging)
+PIPELINE FLOW:
+1. Receive query + session_id
+2. Retrieve previous QCO (if any) from session
+3. Call Intent Extractor (QCO injected as LLM context)
+4. Merge extracted intent with previous QCO (override rules)
+5. Normalize intent (semantic → Cube IDs)
+6. Validate intent (Pydantic + catalog)
+7. Build Cube Query (mechanical translation)
+8. Execute Cube Query (HTTP call to Cube)
+9. Generate visualization
+10. Resolve QCO (save snapshot for next query)
+11. Return structured response
 
 """
 
@@ -35,11 +40,15 @@ from app.services.cube_client import (
     CubeHTTPError,
 )
 from app.services.intent_normalizer import normalize_intent
+from app.services.intent_merger import merge_intent
+from app.services.qco_resolver import resolve_qco
 from app.services.catalog_manager import CatalogManager
 from app.services.data_visualizer import generate_visualization, VisualizationResult, VisualizationGenerationError
 from app.pipeline.pipeline_state import PipelineState
 from app.pipeline.state_store import save_state, load_state, delete_state, PipelineStateNotFound
+from app.pipeline.qco_store import save_qco, load_qco
 from app.models.intent import Intent
+from app.models.qco import QueryContextObject
 
 
 # =============================================================================
@@ -58,12 +67,15 @@ class PipelineStage:
     Explicit stage names for tracking where the pipeline stopped.
     """
     RECEIVED = "received"
+    QCO_LOADED = "qco_loaded"
     INTENT_EXTRACTED = "intent_extracted"
+    INTENT_MERGED = "intent_merged"
     CLARIFICATION_REQUESTED = "clarification_requested"
     INTENT_VALIDATED = "intent_validated"
     CUBE_QUERY_BUILT = "cube_query_built"
     CUBE_EXECUTED = "cube_executed"
     VISUALIZATION_GENERATED = "visualization_generated"
+    QCO_RESOLVED = "qco_resolved"
     COMPLETED = "completed"
 
 
@@ -108,10 +120,15 @@ class OrchestratorResponse:
     # Pipeline state
     success: bool
     stage: str                          # Final stage reached
+    
+    # Optional context
+    session_id: Optional[str] = None
     duration_ms: int = 0               # Total pipeline time
     
     # Step outputs (None if step wasn't reached)
+    previous_qco: Optional[QueryContextObject] = None
     raw_intent: Optional[Dict[str, Any]] = None
+    merged_intent: Optional[Dict[str, Any]] = None
     clarification: Optional[Dict[str, Any]] = None
     validated_intent: Optional[Dict[str, Any]] = None
     cube_query: Optional[Dict[str, Any]] = None
@@ -131,10 +148,13 @@ class OrchestratorResponse:
         """Convert to JSON-serializable dict."""
         result = {
             "query": self.query,
+            "session_id": self.session_id,
             "success": self.success,
             "stage": self.stage,
             "duration_ms": self.duration_ms,
+            "has_previous_context": self.previous_qco is not None,
             "raw_intent": self.raw_intent,
+            "merged_intent": self.merged_intent,
             "clarification": self.clarification,
             "missing_fields": self.missing_fields,
             "clarification_message": self.clarification_message,
@@ -178,22 +198,27 @@ def _get_catalog() -> CatalogManager:
 # ORCHESTRATOR - THE MAIN FUNCTION
 # =============================================================================
 
-def execute_query(query: str) -> OrchestratorResponse:
+def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorResponse:
     """
     Execute a natural language query through the complete pipeline.
     
     This is the ONLY public function in this module.
     
     Pipeline steps:
-    1. Receive query (no preprocessing)
-    2. Extract intent (LLM call)
-    3. Validate intent (Pydantic + catalog)
-    4. Build Cube query (mechanical translation)
-    5. Execute Cube query (HTTP call)
-    6. Return structured response
+    1. Receive query + session_id
+    2. Load previous QCO from session (if any)
+    3. Extract intent (LLM call, QCO injected as context)
+    4. Merge extracted intent with previous QCO
+    5. Normalize + Validate intent
+    6. Build Cube query (mechanical translation)
+    7. Execute Cube query (HTTP call)
+    8. Generate visualization
+    9. Resolve QCO and save for next query
+    10. Return structured response
     
     Args:
         query: Natural language query string (passed as-is, no cleanup)
+        session_id: Optional session identifier for conversational context
         
     Returns:
         OrchestratorResponse with all intermediate outputs and any error
@@ -203,61 +228,102 @@ def execute_query(query: str) -> OrchestratorResponse:
     # Initialize response with input
     response = OrchestratorResponse(
         query=query,
+        session_id=session_id,
         success=False,
         stage=PipelineStage.RECEIVED,
     )
     
-    logger.info(f"Pipeline started: '{query[:100]}...'")
+    logger.info(f"Pipeline started: '{query[:100]}...' (session={session_id})")
     
- 
     # -------------------------------------------------------------------------
-    # STEP 1: Extract intent (LLM call)
+    # STEP 1: Load previous QCO (non-fatal if missing)
     # -------------------------------------------------------------------------
-    response = _extract_intent(response, start_time)
+    previous_qco = None
+    if session_id:
+        try:
+            previous_qco = load_qco(session_id)
+            if previous_qco:
+                response.previous_qco = previous_qco
+                response.stage = PipelineStage.QCO_LOADED
+                logger.info(f"Loaded previous QCO for session {session_id}: "
+                            f"metric={previous_qco.metric}, scope={previous_qco.sales_scope}")
+            else:
+                logger.info(f"No previous QCO for session {session_id} (first query)")
+        except Exception as e:
+            logger.warning(f"Failed to load QCO for session {session_id}: {e}")
+    
+    # -------------------------------------------------------------------------
+    # STEP 2: Extract intent (LLM call, with QCO context)
+    # -------------------------------------------------------------------------
+    response = _extract_intent(response, start_time, previous_qco=previous_qco)
     if response.error:
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 2: Validate intent
+    # STEP 3: Merge intent with previous QCO
+    # -------------------------------------------------------------------------
+    if previous_qco and response.raw_intent:
+        response.merged_intent = merge_intent(response.raw_intent, previous_qco)
+        response.stage = PipelineStage.INTENT_MERGED
+        logger.info(f"Intent merged with previous QCO")
+    else:
+        response.merged_intent = response.raw_intent
+    
+    # -------------------------------------------------------------------------
+    # STEP 4: Validate intent (uses merged intent)
     # -------------------------------------------------------------------------
     response = _validate_intent(response, start_time)
     if response.error:
         return response
     if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
-        # Save state for later resumption
+        # Save state for later resumption (including session_id)
         state = PipelineState(
             request_id=response.request_id,
             original_query=query,
-            intent=response.raw_intent,
+            intent=response.merged_intent or response.raw_intent,
             missing_fields=response.missing_fields or [],
+            session_id=session_id,
         )
         save_state(state)
         logger.info(f"Clarification requested, saved state {response.request_id}")
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 3: Build Cube query
+    # STEP 5: Build Cube query
     # -------------------------------------------------------------------------
     response = _build_cube_query(response, start_time)
     if response.error:
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 4: Execute Cube query
+    # STEP 6: Execute Cube query
     # -------------------------------------------------------------------------
     response = _execute_cube_query(response, start_time)
     if response.error:
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 5: Generate visualization
+    # STEP 7: Generate visualization
     # -------------------------------------------------------------------------
     response = _generate_visualization(response, start_time)
     if response.error:
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 6: Complete pipeline
+    # STEP 8: Resolve QCO and save for next query
+    # -------------------------------------------------------------------------
+    if session_id and response.validated_intent:
+        try:
+            qco = resolve_qco(response.validated_intent, query)
+            save_qco(session_id, qco)
+            response.stage = PipelineStage.QCO_RESOLVED
+            logger.info(f"QCO resolved and saved for session {session_id}")
+        except Exception as e:
+            # QCO resolution failure is non-fatal
+            logger.warning(f"Failed to resolve/save QCO: {e}")
+    
+    # -------------------------------------------------------------------------
+    # STEP 9: Complete pipeline
     # -------------------------------------------------------------------------
     response = _complete_pipeline(response, start_time)
     
@@ -268,7 +334,7 @@ def execute_query(query: str) -> OrchestratorResponse:
 # PUBLIC API - SIMPLE DICT WRAPPER
 # =============================================================================
 
-def execute_query_dict(query: str) -> Dict[str, Any]:
+def execute_query_dict(query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Execute a query and return a JSON-serializable dict.
     
@@ -277,15 +343,16 @@ def execute_query_dict(query: str) -> Dict[str, Any]:
     
     Args:
         query: Natural language query string
+        session_id: Optional session identifier for conversational context
         
     Returns:
         Dict with all pipeline outputs (JSON-serializable)
     """
-    response = execute_query(query)
+    response = execute_query(query, session_id=session_id)
     return response.to_dict()
 
 
-def resume_query(request_id: str, clarification_answers: dict) -> dict:
+def resume_query(request_id: str, clarification_answers: dict, session_id: Optional[str] = None) -> dict:
     start_time = time.monotonic()
 
     try:
@@ -300,6 +367,7 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
             "success": False,
             "stage": "invalid_request",
             "request_id": request_id,
+            "session_id": session_id,
             "error": {
                 "error_type": "PipelineStateNotFound",
                 "message": "Invalid or expired request_id. Please start a new query.",
@@ -309,6 +377,9 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
                 }
             }
         }
+
+    # Recover session_id from state if not provided by caller
+    resolved_session_id = session_id or state.session_id
 
     # Merge user answers into existing intent
     merged_intent = {
@@ -322,7 +393,9 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
         success=False,
         stage=PipelineStage.INTENT_EXTRACTED,
         raw_intent=merged_intent,
+        merged_intent=merged_intent,
         request_id=request_id,
+        session_id=resolved_session_id,
     )
 
     try:
@@ -334,6 +407,7 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
                 original_query=state.original_query,
                 intent=merged_intent,
                 missing_fields=response.missing_fields or [],
+                session_id=resolved_session_id,
             ))
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
@@ -352,6 +426,15 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
         if response.error:
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
+
+        # Save QCO on successful completion
+        if resolved_session_id and response.validated_intent:
+            try:
+                qco = resolve_qco(response.validated_intent, state.original_query)
+                save_qco(resolved_session_id, qco)
+                logger.info(f"QCO resolved and saved for session {resolved_session_id} (via clarification)")
+            except Exception as e:
+                logger.warning(f"Failed to resolve/save QCO after clarification: {e}")
 
         response = _complete_pipeline(response, start_time)
 
@@ -384,10 +467,10 @@ def resume_query(request_id: str, clarification_answers: dict) -> dict:
         return response.to_dict()
 
 
-def _extract_intent(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
+def _extract_intent(response: OrchestratorResponse, start_time: float, previous_qco: Optional[QueryContextObject] = None) -> OrchestratorResponse:
     try:
-        logger.info("Step 1: Extracting intent...")
-        raw_intent = extract_intent(response.query)
+        logger.info("Step 2: Extracting intent...")
+        raw_intent = extract_intent(response.query, previous_qco=previous_qco)
         response.raw_intent = raw_intent
         response.stage = PipelineStage.INTENT_EXTRACTED
         logger.info(f"Intent extracted: {raw_intent}")
@@ -443,8 +526,10 @@ def _extract_intent(response: OrchestratorResponse, start_time: float) -> Orches
 def _validate_intent(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
     try:
         catalog = _get_catalog()
-        logger.info("Step 2: Validating intent...")
-        normalized_intent = normalize_intent(response.raw_intent)
+        logger.info("Step 4: Validating intent...")
+        # Use merged_intent if available, otherwise fall back to raw_intent
+        intent_to_validate = response.merged_intent or response.raw_intent
+        normalized_intent = normalize_intent(intent_to_validate)
         validated_intent = validate_intent(normalized_intent, catalog)
         response.validated_intent = validated_intent
         response.stage = PipelineStage.INTENT_VALIDATED

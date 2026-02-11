@@ -11,11 +11,6 @@ This enables follow-up queries like:
 - "now show by brand"     → inherits metric, scope, time_range; overrides group_by
 - "for last 7 days"       → inherits metric, scope, group_by; overrides time_range
 - "drill into Mumbai"     → inherits metric, scope, time; adds city filter
-
-DESIGN PRINCIPLES:
-- Pure function: (new_intent_dict, previous_qco) → merged_intent_dict
-- No LLM calls, no validation, no side effects
-- Operates on raw dicts (pre-normalization)
 """
 
 import copy

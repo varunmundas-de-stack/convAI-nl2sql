@@ -43,7 +43,8 @@ from app.services.intent_normalizer import normalize_intent
 from app.services.intent_merger import merge_intent
 from app.services.qco_resolver import resolve_qco
 from app.services.catalog_manager import CatalogManager
-from app.services.data_visualizer import generate_visualization, VisualizationResult, VisualizationGenerationError
+from app.services.insight_engine import generate_insights, InsightResult, InsightEngineError
+from app.services.visual_spec_generator import generate_visual_spec, VisualSpec, VisualSpecError
 from app.pipeline.pipeline_state import PipelineState
 from app.pipeline.state_store import save_state, load_state, delete_state, PipelineStateNotFound
 from app.pipeline.qco_store import save_qco, load_qco
@@ -74,7 +75,8 @@ class PipelineStage:
     INTENT_VALIDATED = "intent_validated"
     CUBE_QUERY_BUILT = "cube_query_built"
     CUBE_EXECUTED = "cube_executed"
-    VISUALIZATION_GENERATED = "visualization_generated"
+    INSIGHTS_GENERATED = "insights_generated"
+    VISUAL_SPEC_GENERATED = "visual_spec_generated"
     QCO_RESOLVED = "qco_resolved"
     COMPLETED = "completed"
 
@@ -133,7 +135,8 @@ class OrchestratorResponse:
     validated_intent: Optional[Dict[str, Any]] = None
     cube_query: Optional[Dict[str, Any]] = None
     data: Optional[List[Dict[str, Any]]] = None
-    visualization: Optional[Dict[str, Any]] = None
+    insights: Optional[Any] = None        # InsightResult from insight engine
+    visual_spec: Optional[Any] = None     # VisualSpec from visual spec generator
     
     
     # Error (None if success)
@@ -165,9 +168,13 @@ class OrchestratorResponse:
             ),
             "cube_query": self.cube_query,
             "data": self.data,
-            "visualization": (
-            self.visualization.model_dump()
-            if self.visualization else None
+            "insights": (
+                self.insights.model_dump()
+                if self.insights else None
+            ),
+            "visual_spec": (
+                self.visual_spec.model_dump()
+                if self.visual_spec else None
             ),
             "error": self.error.to_dict() if self.error else None,
             "request_id": self.request_id,
@@ -303,9 +310,9 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
         return response
     
     # -------------------------------------------------------------------------
-    # STEP 7: Generate visualization
+    # STEP 7: Generate insights + visual spec
     # -------------------------------------------------------------------------
-    response = _generate_visualization(response, start_time)
+    response = _generate_insights_and_spec(response, start_time, previous_qco=previous_qco)
     if response.error:
         return response
     
@@ -422,7 +429,7 @@ def resume_query(request_id: str, clarification_answers: dict, session_id: Optio
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
 
-        response = _generate_visualization(response, start_time)
+        response = _generate_insights_and_spec(response, start_time)
         if response.error:
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
@@ -616,45 +623,69 @@ def _execute_cube_query(response: OrchestratorResponse, start_time: float) -> Or
     return response
 
 
-def _generate_visualization(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
+def _generate_insights_and_spec(
+    response: OrchestratorResponse, 
+    start_time: float,
+    previous_qco: Optional[QueryContextObject] = None,
+) -> OrchestratorResponse:
+    """
+    Two-step intelligence + presentation pipeline:
+    1. Insight Engine: analyze data → machine-readable insights
+    2. Visual Spec Generator: insights + data → declarative visual spec
+    """
     try:
-        logger.info("Step 5: Generating visualization...")
+        logger.info("Step 7a: Generating insights...")
         
-        # Extract visualization parameters from intent
-        # Handle both Pydantic models and dicts
         intent = response.validated_intent
+        
+        # Extract chart type hint from intent
         if intent is None:
-            intent_dict = {}
-        elif hasattr(intent, 'model_dump'):
-            intent_dict = intent.model_dump()
+            chart_type_hint = "table"
+        elif hasattr(intent, 'visualization_type'):
+            chart_type_hint = intent.visualization_type or "table"
+        elif isinstance(intent, dict):
+            chart_type_hint = intent.get("visualization_type", "table") or "table"
         else:
-            intent_dict = intent
+            chart_type_hint = "table"
         
-        visualization_type = intent_dict.get("visualization_type", "table") or "table"
-        metric = intent_dict.get("metric")
-        dimensions = intent_dict.get("group_by", []) or []
+        # Step 7a: Insight Engine (pure math, no LLM)
+        insight_result = generate_insights(
+            data=response.data or [],
+            intent=intent,
+            previous_qco=previous_qco,
+        )
+        response.insights = insight_result
+        response.stage = PipelineStage.INSIGHTS_GENERATED
+        logger.info(f"Insights generated: {len(insight_result.insights)} insights, "
+                     f"primary={insight_result.primary_insight.label if insight_result.primary_insight else 'none'}")
         
-        visualization = generate_visualization(
-            visualization_type=visualization_type,
-            data=response.data,
-            metric=metric,
-            dimensions=dimensions,
+        # Step 7b: Visual Spec Generator (declarative spec, no rendering)
+        logger.info("Step 7b: Generating visual spec...")
+        visual_spec = generate_visual_spec(
+            data=response.data or [],
+            insights=insight_result,
+            chart_type_hint=chart_type_hint,
             query=response.query,
         )
-        response.visualization = visualization
-        response.stage = PipelineStage.VISUALIZATION_GENERATED
-        logger.info(f"Visualization generated: {visualization_type}")
+        response.visual_spec = visual_spec
+        response.stage = PipelineStage.VISUAL_SPEC_GENERATED
+        logger.info(f"Visual spec generated: chart_type={visual_spec.chart_type}, "
+                     f"{len(visual_spec.annotations)} annotations, {len(visual_spec.markers)} markers")
         
-    except VisualizationGenerationError as e:
-        # Visualization generation error - STOP
-        logger.error(f"Visualization generation error: {e}")
+    except (InsightEngineError, VisualSpecError) as e:
+        logger.error(f"Insight/Spec generation error: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.CUBE_EXECUTED,
-            error_type="VisualizationGenerationError",
+            error_type=e.__class__.__name__,
             message=str(e),
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
+    
+    except Exception as e:
+        # Non-fatal: log but don't kill the pipeline
+        logger.warning(f"Insight/Spec generation failed (non-fatal): {e}")
+        # Pipeline continues without insights/spec
     
     return response
 

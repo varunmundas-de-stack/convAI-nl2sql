@@ -213,7 +213,17 @@ def generate_insights(
     # 5. TREND: Direction analysis (for time-series data)
     # -------------------------------------------------------------------------
     if intent_type == "trend" and len(data) > 2:
-        trend_insights = _analyze_trend(data, metric_key)
+        # Extract time dimension for proper sorting
+        time_col = None
+        td = intent_dict.get("time_dimension")
+        if td:
+             # handle both dict (from model_dump) and object
+            if isinstance(td, dict):
+                time_col = td.get("dimension")
+            elif hasattr(td, "dimension"):
+                time_col = td.dimension
+        
+        trend_insights = _analyze_trend(data, metric_key, time_col)
         result.insights.extend(trend_insights)
     
     # Set primary insight to highest severity
@@ -379,7 +389,7 @@ def _detect_outliers(
                 direction=direction,
                 dimension=dimension_key,
                 dimension_value=dim_val,
-                confidence=min(1.0, abs(z_score) / 4.0),
+                confidence=min(1.0, (abs(z_score) / 4.0) * (min(len(values), 30) / 30.0)),
             ))
     
     return insights
@@ -425,14 +435,22 @@ def _compare_to_baseline(
 def _analyze_trend(
     data: list[dict[str, Any]],
     metric_key: str,
+    time_col: Optional[str] = None,
 ) -> list[Insight]:
     """
     Analyze time-series direction using simple linear regression.
     """
     insights = []
     
+    # Sort by time dimension if known
+    sorted_data = data
+    if time_col:
+        # Check if time_col exists in the first row to confirm
+        if data and _extract_dimension_value(data[0], time_col):
+             sorted_data = sorted(data, key=lambda row: _extract_dimension_value(row, time_col) or "")
+
     values = []
-    for row in data:
+    for row in sorted_data:
         val = _extract_numeric(row, metric_key)
         if val is not None:
             values.append(val)
@@ -506,12 +524,6 @@ def _extract_numeric(row: dict[str, Any], metric_key: str) -> Optional[float]:
     for key, val in row.items():
         if key.endswith(f".{metric_key}") or metric_key.endswith(f".{key}"):
             return _to_float(val)
-    
-    # Fallback: first numeric value
-    for key, val in row.items():
-        result = _to_float(val)
-        if result is not None:
-            return result
     
     return None
 

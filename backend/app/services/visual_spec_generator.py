@@ -1,7 +1,5 @@
 """
-Visual Spec Generator - Declarative Visual Specification Layer
-
-This is NOT a visualizer. It does NOT render anything.
+Visual Spec Generator
 
 WHAT IT DOES:
 - Translates data + insights into a declarative visual specification
@@ -14,16 +12,6 @@ WHAT IT OUTPUTS:
 - Color emphasis rules (which data points to highlight)
 - Markers for outliers, trends, thresholds
 - Title, subtitle, axis labels
-
-The ACTUAL RENDERING is the frontend's job.
-This layer just decides: what chart, what data, what emphasis.
-
-DESIGN PRINCIPLES:
-- Input: InsightResult + data + intent
-- Output: Declarative VisualSpec (JSON-serializable)
-- No rendering libraries (no Plotly, no SVG, no HTML)
-- No LLM calls
-- Pure transformation: insights + data → spec
 """
 
 import logging

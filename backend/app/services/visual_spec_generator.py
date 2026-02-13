@@ -64,6 +64,7 @@ class DataSeries(BaseModel):
     values: list[Any]
     emphasis: EmphasisLevel = EmphasisLevel.NONE
     color_hint: Optional[str] = None  # Semantic hint: "positive", "negative", "primary", "muted"
+    point_emphasis: Optional[list[EmphasisLevel]] = None
 
 
 class Axis(BaseModel):
@@ -311,6 +312,7 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
         values=y_values,
         emphasis=EmphasisLevel.NONE,
         color_hint="primary",
+        point_emphasis=[emphasis_map.get(x, EmphasisLevel.NONE) for x in x_values],
     )
     spec.series = [series]
     

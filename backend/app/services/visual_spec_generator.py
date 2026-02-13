@@ -65,6 +65,7 @@ class DataSeries(BaseModel):
     emphasis: EmphasisLevel = EmphasisLevel.NONE
     color_hint: Optional[str] = None  # Semantic hint: "positive", "negative", "primary", "muted"
     point_emphasis: Optional[list[EmphasisLevel]] = None
+    point_colors: Optional[list[str]] = None  # Per-point color mapping (e.g., ["#ff0000", "#00ff00"])
 
 
 class Axis(BaseModel):
@@ -72,6 +73,7 @@ class Axis(BaseModel):
     label: str
     values: Optional[list[Any]] = None
     format: Optional[str] = None  # "number", "currency", "percent", "date"
+    axis_type: Optional[str] = None  # "time", "categorical", "linear" - helps frontend choose scale
 
 
 class Marker(BaseModel):
@@ -127,6 +129,7 @@ class VisualSpec(BaseModel):
     total_rows: int = 0
     metric: Optional[str] = None
     empty: bool = False
+    trend_slope: Optional[float] = None  # For trend visuals: normalized slope percentage
 
 
 class VisualSpecError(Exception):
@@ -295,26 +298,49 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
         x_values.append(x_val)
         y_values.append(y_val)
     
+    # Determine axis type based on dimension
+    axis_type = "categorical"
+    if dim_key and any(kw in dim_key.lower() for kw in ["date", "time", "month", "year", "quarter"]):
+        axis_type = "time"
+    
     spec.x_axis = Axis(
-        label=_format_label(dim_key) if dim_key else "Category",
+        label=_clean_label(dim_key) if dim_key else "Category",
         values=x_values,
+        axis_type=axis_type,
     )
     spec.y_axis = Axis(
-        label=_format_label(metric_key),
+        label=_clean_label(metric_key),
         format="number",
+        axis_type="linear",
     )
     
     # Determine emphasis per bar based on insights
     emphasis_map = _build_emphasis_map(insights, x_values)
     
+    # Determine contextual colors per bar based on insights
+    color_map = _build_color_map(insights, x_values)
+    
     series = DataSeries(
-        label=_format_label(metric_key),
+        label=_clean_label(metric_key),
         values=y_values,
         emphasis=EmphasisLevel.NONE,
         color_hint="primary",
         point_emphasis=[emphasis_map.get(x, EmphasisLevel.NONE) for x in x_values],
+        point_colors=[color_map.get(x) for x in x_values] if any(color_map.values()) else None,
     )
     spec.series = [series]
+    
+    # Populate primary/secondary values for non-table visuals
+    if insights.total_value is not None:
+        spec.primary_value = insights.total_formatted
+        spec.primary_label = f"Total {_clean_label(metric_key)}"
+        
+        # If there's a top contributor, add as secondary
+        for insight in insights.insights:
+            if insight.label == "top_contributor" and insight.dimension_value:
+                spec.secondary_value = insight.metric_formatted or ""
+                spec.secondary_label = f"{insight.dimension_value} (Top)"
+                break
     
     return spec
 
@@ -335,30 +361,51 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
         x_values.append(x_val)
         y_values.append(y_val)
     
+    # Determine axis type
+    axis_type = "categorical"
+    if dim_key and any(kw in dim_key.lower() for kw in ["date", "time", "month", "year", "quarter"]):
+        axis_type = "time"
+    
     spec.x_axis = Axis(
-        label=_format_label(dim_key) if dim_key else "Time",
+        label=_clean_label(dim_key) if dim_key else "Time",
         values=x_values,
-        format="date" if dim_key and "date" in dim_key.lower() else None,
+        format="date" if axis_type == "time" else None,
+        axis_type=axis_type,
     )
     spec.y_axis = Axis(
-        label=_format_label(metric_key),
+        label=_clean_label(metric_key),
         format="number",
+        axis_type="linear",
     )
     
-    # Determine color hint from trend insight
+    # Determine color hint and trend slope from trend insight
     color_hint = "primary"
+    trend_slope = None
     for insight in insights.insights:
         if insight.insight_type == InsightType.TREND:
             if insight.direction == Direction.UP:
                 color_hint = "positive"
             elif insight.direction == Direction.DOWN:
                 color_hint = "negative"
+            # Extract slope from change_pct
+            if insight.change_pct is not None:
+                trend_slope = insight.change_pct
+            break
     
     spec.series = [DataSeries(
-        label=_format_label(metric_key),
+        label=_clean_label(metric_key),
         values=y_values,
         color_hint=color_hint,
     )]
+    
+    # Add trend slope to spec
+    if trend_slope is not None:
+        spec.trend_slope = trend_slope
+    
+    # Populate primary/secondary values
+    if insights.total_value is not None:
+        spec.primary_value = insights.total_formatted
+        spec.primary_label = f"Total {_clean_label(metric_key)}"
     
     return spec
 
@@ -431,6 +478,17 @@ def _insights_to_markers(insights: InsightResult) -> list[Marker]:
                 value=insight.metric_value,
                 emphasis=EmphasisLevel.STRONG if insight.severity == Severity.HIGH else EmphasisLevel.SUBTLE,
             ))
+
+            # Add threshold marker at mean value for outlier reference (only once)
+            if insight.comparison_value is not None:
+                has_threshold = any(m.marker_type == MarkerType.THRESHOLD for m in markers)
+                if not has_threshold:
+                    markers.append(Marker(
+                        marker_type=MarkerType.THRESHOLD,
+                        label=f"Average: {_format_number(insight.comparison_value)}",
+                        value=insight.comparison_value,
+                        emphasis=EmphasisLevel.SUBTLE,
+                    ))
         
         elif insight.insight_type == InsightType.TREND:
             markers.append(Marker(
@@ -529,3 +587,73 @@ def _format_label(key: Optional[str]) -> str:
     if "." in key:
         key = key.split(".")[-1]
     return key.replace("_", " ").title()
+
+
+def _clean_label(key: Optional[str]) -> str:
+    """
+    Clean label by removing common prefixes and formatting.
+    
+    Examples:
+        "fact_secondary_sales.total_sales" -> "Total Sales"
+        "dim_product.product_name" -> "Product Name"
+    """
+    if not key:
+        return "Value"
+    
+    # Strip common table prefixes
+    prefixes_to_strip = ["fact_", "dim_", "fact_secondary_sales.", "dim_product.", "dim_region."]
+    for prefix in prefixes_to_strip:
+        if key.startswith(prefix):
+            key = key[len(prefix):]
+        elif f".{prefix}" in key:
+            key = key.split(f".{prefix}")[-1]
+    
+    # Remove remaining dots and format
+    if "." in key:
+        key = key.split(".")[-1]
+    
+    return key.replace("_", " ").title()
+
+
+def _build_color_map(insights: Any, x_values: list) -> dict[str, Optional[str]]:
+    """
+    Build a color map for data points based on insights.
+    
+    Returns a dict mapping dimension values to color codes.
+    """
+    color_map = {x: None for x in x_values}
+    
+    for insight in insights.insights:
+        if not insight.dimension_value or insight.dimension_value not in x_values:
+            continue
+        
+        # Top contributor -> highlight color
+        if insight.label == "top_contributor":
+            color_map[insight.dimension_value] = "#10b981"  # Green
+        
+        # Outlier -> warning/danger color based on severity
+        elif insight.insight_type == InsightType.OUTLIER:
+            if insight.severity in (Severity.HIGH, Severity.CRITICAL):
+                color_map[insight.dimension_value] = "#ef4444"  # Red
+            else:
+                color_map[insight.dimension_value] = "#f59e0b"  # Amber
+        
+        # Bottom performer -> muted color
+        elif insight.label == "bottom_performer":
+            color_map[insight.dimension_value] = "#94a3b8"  # Slate
+    
+    return color_map
+
+
+def _format_number(value: float) -> str:
+    """Format a number for human display."""
+    if abs(value) >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.1f}B"
+    elif abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    elif abs(value) >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    elif isinstance(value, float) and value != int(value):
+        return f"{value:,.2f}"
+    else:
+        return f"{int(value):,}"

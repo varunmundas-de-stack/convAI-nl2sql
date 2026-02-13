@@ -44,6 +44,7 @@ from app.services.intent_merger import merge_intent
 from app.services.qco_resolver import resolve_qco
 from app.services.catalog_manager import CatalogManager
 from app.services.insight_engine import generate_insights, InsightResult, InsightEngineError
+from app.services.insight_refiner import refine_insights, RefinedInsightResult, InsightRefinerError
 from app.services.visual_spec_generator import generate_visual_spec, VisualSpec, VisualSpecError
 from app.pipeline.pipeline_state import PipelineState
 from app.pipeline.state_store import save_state, load_state, delete_state, PipelineStateNotFound
@@ -76,6 +77,7 @@ class PipelineStage:
     CUBE_QUERY_BUILT = "cube_query_built"
     CUBE_EXECUTED = "cube_executed"
     INSIGHTS_GENERATED = "insights_generated"
+    INSIGHTS_REFINED = "insights_refined"
     VISUAL_SPEC_GENERATED = "visual_spec_generated"
     QCO_RESOLVED = "qco_resolved"
     COMPLETED = "completed"
@@ -136,6 +138,7 @@ class OrchestratorResponse:
     cube_query: Optional[Dict[str, Any]] = None
     data: Optional[List[Dict[str, Any]]] = None
     insights: Optional[Any] = None        # InsightResult from insight engine
+    refined_insights: Optional[Any] = None  # RefinedInsightResult from insight refiner
     visual_spec: Optional[Any] = None     # VisualSpec from visual spec generator
     
     
@@ -171,6 +174,10 @@ class OrchestratorResponse:
             "insights": (
                 self.insights.model_dump()
                 if self.insights else None
+            ),
+            "refined_insights": (
+                self.refined_insights.model_dump()
+                if self.refined_insights else None
             ),
             "visual_spec": (
                 self.visual_spec.model_dump()
@@ -629,9 +636,10 @@ def _generate_insights_and_spec(
     previous_qco: Optional[QueryContextObject] = None,
 ) -> OrchestratorResponse:
     """
-    Two-step intelligence + presentation pipeline:
-    1. Insight Engine: analyze data → machine-readable insights
-    2. Visual Spec Generator: insights + data → declarative visual spec
+    Three-step intelligence + presentation pipeline:
+    1. Insight Engine: analyze data → machine-readable insights (deterministic)
+    2. Insight Refiner: insights → refined insights (LLM-enhanced)
+    3. Visual Spec Generator: refined insights + data → declarative visual spec
     """
     try:
         logger.info("Step 7a: Generating insights...")
@@ -659,11 +667,31 @@ def _generate_insights_and_spec(
         logger.info(f"Insights generated: {len(insight_result.insights)} insights, "
                      f"primary={insight_result.primary_insight.label if insight_result.primary_insight else 'none'}")
         
-        # Step 7b: Visual Spec Generator (declarative spec, no rendering)
-        logger.info("Step 7b: Generating visual spec...")
+        # Step 7b: Insight Refiner (LLM-enhanced interpretation)
+        logger.info("Step 7b: Refining insights with LLM...")
+        try:
+            refined_insight_result = refine_insights(
+                insight_result=insight_result,
+                data=response.data or [],
+                query=response.query,
+                previous_qco=previous_qco,
+            )
+            response.refined_insights = refined_insight_result
+            response.stage = PipelineStage.INSIGHTS_REFINED
+            logger.info(f"Insights refined: {len(refined_insight_result.insights)} insights, "
+                         f"executive_summary={'present' if refined_insight_result.executive_summary else 'none'}")
+        except Exception as e:
+            # Refinement failure is non-fatal, fall back to original insights
+            logger.warning(f"Insight refinement failed (non-fatal): {e}, using original insights")
+            response.refined_insights = None
+        
+        # Step 7c: Visual Spec Generator (declarative spec, no rendering)
+        logger.info("Step 7c: Generating visual spec...")
+        # Use refined insights if available, otherwise fall back to original
+        insights_for_spec = response.refined_insights or insight_result
         visual_spec = generate_visual_spec(
             data=response.data or [],
-            insights=insight_result,
+            insights=insights_for_spec,
             chart_type_hint=chart_type_hint,
             query=response.query,
         )

@@ -15,7 +15,7 @@ WHAT IT OUTPUTS:
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -140,7 +140,7 @@ class VisualSpecError(Exception):
 
 def generate_visual_spec(
     data: list[dict[str, Any]],
-    insights: InsightResult,
+    insights: Any,  # InsightResult or RefinedInsightResult (duck-typed)
     chart_type_hint: Optional[str] = None,
     query: Optional[str] = None,
 ) -> VisualSpec:
@@ -151,7 +151,7 @@ def generate_visual_spec(
     
     Args:
         data: Raw query result rows
-        insights: InsightResult from the insight engine
+        insights: InsightResult or RefinedInsightResult from insight engine/refiner
         chart_type_hint: Suggested chart type from intent (can be overridden)
         query: Original NL query for title generation
         

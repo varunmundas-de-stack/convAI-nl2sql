@@ -479,18 +479,22 @@ def _analyze_trend(
         normalized_slope = 0
     
     # Determine direction
-    if abs(normalized_slope) < 1:
+    abs_slope = abs(normalized_slope)
+    
+    if abs_slope <= 0.5:
         direction = Direction.FLAT
-        headline = f"{_format_label(metric_key)} is relatively flat over the period"
+        headline = f"{_format_label(metric_key)} is flat ({normalized_slope:.1f}%)"
         severity = Severity.LOW
-    elif normalized_slope > 0:
-        direction = Direction.UP
-        headline = f"{_format_label(metric_key)} is trending upward ({normalized_slope:.1f}% per period)"
-        severity = Severity.MEDIUM if normalized_slope > 5 else Severity.LOW
+    elif abs_slope <= 2.0:
+        direction = Direction.UP if normalized_slope > 0 else Direction.DOWN
+        trend = "mild upward" if normalized_slope > 0 else "mild downward"
+        headline = f"{_format_label(metric_key)} shows a {trend} trend ({normalized_slope:.1f}%)"
+        severity = Severity.LOW
     else:
-        direction = Direction.DOWN
-        headline = f"{_format_label(metric_key)} is trending downward ({abs(normalized_slope):.1f}% per period)"
-        severity = Severity.HIGH if abs(normalized_slope) > 10 else Severity.MEDIUM
+        direction = Direction.UP if normalized_slope > 0 else Direction.DOWN
+        trend = "upward" if normalized_slope > 0 else "downward"
+        headline = f"{_format_label(metric_key)} is trending {trend} ({normalized_slope:.1f}%)"
+        severity = Severity.HIGH if abs_slope > 10 else Severity.MEDIUM
     
     # R² for confidence
     ss_res = sum((y - (slope * x + (y_mean - slope * x_mean))) ** 2 for x, y in zip(x_vals, values))

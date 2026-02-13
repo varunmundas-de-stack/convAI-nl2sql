@@ -32,11 +32,23 @@ function transformBackendResponse(backendResponse: any): ChatResponse {
         };
     }
 
-    // Handle successful data response
+    // Handle successful data response with NEW visual_spec format
+    if (backendResponse.success && backendResponse.visual_spec) {
+        return {
+            type: "chart",
+            chartType: backendResponse.visual_spec.chart_type || "bar",
+            data: {
+                visual_spec: backendResponse.visual_spec,
+                refined_insights: backendResponse.refined_insights || null,
+            },
+        };
+    }
+
+    // Handle successful data response with LEGACY visualization format
     if (backendResponse.success && backendResponse.data) {
         const data = backendResponse.data;
 
-        // Check if visualization exists
+        // Check if visualization exists (legacy)
         if (backendResponse.visualization) {
             const viz = backendResponse.visualization;
 

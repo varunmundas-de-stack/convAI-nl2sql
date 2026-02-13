@@ -688,7 +688,8 @@ def _generate_insights_and_spec(
         # Step 7c: Visual Spec Generator (declarative spec, no rendering)
         logger.info("Step 7c: Generating visual spec...")
         # Use refined insights if available, otherwise fall back to original
-        insights_for_spec = response.refined_insights or insight_result
+        # insights_for_spec = response.refined_insights or insight_result
+        insights_for_spec = response.refined_insights
         visual_spec = generate_visual_spec(
             data=response.data or [],
             insights=insights_for_spec,

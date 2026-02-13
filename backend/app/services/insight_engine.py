@@ -100,6 +100,7 @@ class InsightResult(BaseModel):
     
     # Recommended emphasis
     primary_insight: Optional[Insight] = None
+    secondary_insight: Optional[Insight] = None
     
     # Context echoed back
     metric: Optional[str] = None
@@ -167,6 +168,7 @@ def generate_insights(
             headline="No data returned for this query",
         ))
         result.primary_insight = result.insights[0]
+        result.secondary_insight = result.insights[1]
         return result
     
     # -------------------------------------------------------------------------

@@ -2,6 +2,34 @@ import { ChatResponse } from "@/types/chat";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
+// Store session ID in memory for the current conversation
+let currentSessionId: string | null = null;
+
+/**
+ * Get the current session ID (if any)
+ */
+export function getCurrentSessionId(): string | null {
+    return currentSessionId;
+}
+
+/**
+ * Store the session ID received from backend
+ */
+export function setSessionId(sessionId: string): void {
+    if (sessionId && sessionId !== currentSessionId) {
+        currentSessionId = sessionId;
+        console.log(`[Session] Session ID updated: ${sessionId}`);
+    }
+}
+
+/**
+ * Clear the current session (start a new conversation)
+ */
+export function resetSession(): void {
+    currentSessionId = null;
+    console.log("[Session] Session reset - new conversation started");
+}
+
 export async function healthCheck() {
     const res = await fetch(`${API_BASE}/health`);
     if (!res.ok) throw new Error("Backend unavailable");
@@ -106,19 +134,36 @@ function transformBackendResponse(backendResponse: any): ChatResponse {
 export async function sendQuery(query: string): Promise<{
     response: ChatResponse;
     raw: any;
+    sessionId: string;
 }> {
+    const requestBody: any = { query };
+
+    // Include session_id if we have one (for follow-up queries)
+    if (currentSessionId) {
+        requestBody.session_id = currentSessionId;
+        console.log(`[Session] Sending query with existing session_id: ${currentSessionId}`);
+    } else {
+        console.log(`[Session] Sending first query - backend will generate session_id`);
+    }
+
     const res = await fetch(`${API_BASE}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify(requestBody),
     });
 
     const backendResponse = await res.json();
+
+    // Extract and store session_id from backend response
+    if (backendResponse.session_id) {
+        setSessionId(backendResponse.session_id);
+    }
 
     // Transform the backend response to frontend format
     return {
         response: transformBackendResponse(backendResponse),
         raw: backendResponse,
+        sessionId: backendResponse.session_id || currentSessionId || "unknown",
     };
 }
 
@@ -128,19 +173,32 @@ export async function clarify(payload: {
 }): Promise<{
     response: ChatResponse;
     raw: any;
+    sessionId: string;
 }> {
+    console.log(`[Session] Sending clarification for request_id: ${payload.request_id}`);
+
     const res = await fetch(`${API_BASE}/clarify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+            request_id: payload.request_id,
+            answers: payload.answers,
+            // Note: session_id is NOT needed here - it's tracked via request_id
+        }),
     });
 
     const backendResponse = await res.json();
+
+    // Extract and store session_id from backend response if present
+    if (backendResponse.session_id) {
+        setSessionId(backendResponse.session_id);
+    }
 
     // Transform the backend response to frontend format
     return {
         response: transformBackendResponse(backendResponse),
         raw: backendResponse,
+        sessionId: backendResponse.session_id || currentSessionId || "unknown",
     };
 }
 

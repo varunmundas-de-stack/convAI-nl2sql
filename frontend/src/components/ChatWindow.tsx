@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { sendQuery, clarify, healthCheck } from "@/services/api";
+import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
 import { parseClarificationAnswers } from "@/utils/clarificationParser";
@@ -10,6 +10,7 @@ export default function ChatWindow() {
     const [input, setInput] = useState("");
     const [isBackendAvailable, setIsBackendAvailable] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
+    const [sessionId, setSessionId] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const {
@@ -18,6 +19,7 @@ export default function ChatWindow() {
         backendResponse,
         addUserMessage,
         handleResponse,
+        clearMessages,
     } = useConversation();
 
     // Check backend health on mount
@@ -42,6 +44,17 @@ export default function ChatWindow() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    // Sync session ID from API
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const currentSession = getCurrentSessionId();
+            if (currentSession !== sessionId) {
+                setSessionId(currentSession);
+            }
+        }, 500);
+        return () => clearInterval(interval);
+    }, [sessionId]);
+
     async function onSend() {
         if (!input.trim() || isLoading || !isBackendAvailable) return;
 
@@ -64,6 +77,10 @@ export default function ChatWindow() {
                 });
             } else {
                 result = await sendQuery(userInput);
+                // Update session ID from response
+                if (result.sessionId) {
+                    setSessionId(result.sessionId);
+                }
             }
 
             handleResponse(result.response, result.raw);
@@ -75,6 +92,14 @@ export default function ChatWindow() {
             });
         } finally {
             setIsLoading(false);
+        }
+    }
+
+    function handleNewConversation() {
+        if (confirm("Start a new conversation? This will clear the current chat history.")) {
+            resetSession();
+            setSessionId(null);
+            clearMessages();
         }
     }
 
@@ -92,14 +117,33 @@ export default function ChatWindow() {
             <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
                 <div className="flex items-center justify-between">
                     <h1 className="text-xl font-semibold text-gray-900">NL2SQL Chat</h1>
-                    <div className="flex items-center gap-2">
-                        <div
-                            className={`w-2 h-2 rounded-full ${isBackendAvailable ? "bg-green-500" : "bg-red-500"
-                                }`}
-                        />
-                        <span className="text-sm text-gray-600">
-                            {isBackendAvailable ? "Connected" : "Disconnected"}
-                        </span>
+                    <div className="flex items-center gap-4">
+                        {/* Session Indicator */}
+                        {sessionId && (
+                            <div className="flex items-center gap-2 text-xs">
+                                <span className="text-gray-500">Session:</span>
+                                <code className="bg-gray-100 px-2 py-1 rounded text-gray-700 font-mono">
+                                    {sessionId}
+                                </code>
+                                <button
+                                    onClick={handleNewConversation}
+                                    className="text-blue-600 hover:text-blue-700 underline"
+                                    title="Start a new conversation"
+                                >
+                                    New
+                                </button>
+                            </div>
+                        )}
+                        {/* Backend Status */}
+                        <div className="flex items-center gap-2">
+                            <div
+                                className={`w-2 h-2 rounded-full ${isBackendAvailable ? "bg-green-500" : "bg-red-500"
+                                    }`}
+                            />
+                            <span className="text-sm text-gray-600">
+                                {isBackendAvailable ? "Connected" : "Disconnected"}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>

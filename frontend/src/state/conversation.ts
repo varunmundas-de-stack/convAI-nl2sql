@@ -53,11 +53,18 @@ export function useConversation() {
         }
     }
 
+    function clearMessages() {
+        setMessages([]);
+        setPendingClarification(null);
+        setBackendResponse(null);
+    }
+
     return {
         messages,
         pendingClarification,
         backendResponse,
         addUserMessage,
         handleResponse,
+        clearMessages,
     };
 }

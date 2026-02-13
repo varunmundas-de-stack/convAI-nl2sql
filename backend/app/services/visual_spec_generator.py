@@ -516,7 +516,7 @@ def _insights_to_markers(insights: InsightResult) -> list[Marker]:
 def _make_title(query: Optional[str], insights: InsightResult) -> str:
     """Generate a title for the visual."""
     if query:
-        return query[:80] if len(query) <= 80 else query[:77] + "..."
+        return query
     
     metric_label = _format_label(insights.metric) if insights.metric else "Data"
     if insights.dimensions:

@@ -135,7 +135,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
 
             {/* Primary/Secondary Values for Number Cards and Snapshots */}
             {chart_type === "number_card" && primary_value && (
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-lg border border-blue-200">
                     <div className="space-y-4">
                         <div>
                             <p className="text-sm text-gray-600 mb-1">{primary_label || "Value"}</p>
@@ -143,8 +143,8 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                                 <p className="text-4xl font-bold text-gray-900">{primary_value}</p>
                                 {direction && direction !== "unknown" && trend_slope !== undefined && (
                                     <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${direction === "up" ? "bg-green-100 text-green-700" :
-                                            direction === "down" ? "bg-red-100 text-red-700" :
-                                                "bg-gray-100 text-gray-700"
+                                        direction === "down" ? "bg-red-100 text-red-700" :
+                                            "bg-gray-100 text-gray-700"
                                         }`}>
                                         {direction === "up" && <TrendingUp className="h-4 w-4" />}
                                         {direction === "down" && <TrendingDown className="h-4 w-4" />}
@@ -269,10 +269,13 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
 
     const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
     const chartHeight = 300;
+    const topPadding = 40;
+    const bottomPadding = 40;
+    const totalHeight = chartHeight + topPadding + bottomPadding;
     const barWidth = Math.min(60, (600 / yValues.length) * 0.8);
 
     return (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
             {spec.primary_value && (
                 <div className="mb-4 flex items-baseline gap-4">
                     <div>
@@ -292,12 +295,12 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
                     <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
                     <span className="text-gray-400">Max: {maxValue.toLocaleString()}</span>
                 </div>
-                <svg width="100%" height={chartHeight + 40} viewBox={`0 0 ${xValues.length * (barWidth + 10)} ${chartHeight + 40}`}>
+                <svg width="100%" height={totalHeight} viewBox={`0 0 ${xValues.length * (barWidth + 10)} ${totalHeight}`}>
                     {/* Bars */}
                     {yValues.map((value, idx) => {
                         const height = (value / maxValue) * chartHeight;
                         const x = idx * (barWidth + 10) + 5;
-                        const y = chartHeight - height;
+                        const y = topPadding + (chartHeight - height);
 
                         // Determine color
                         let fillColor = pointColors[idx] || "#3b82f6"; // Default blue
@@ -329,7 +332,7 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
                                 </text>
                                 <text
                                     x={x + barWidth / 2}
-                                    y={chartHeight + 20}
+                                    y={topPadding + chartHeight + 20}
                                     textAnchor="middle"
                                     className="text-xs fill-gray-500"
                                 >
@@ -341,7 +344,7 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
 
                     {/* Threshold markers */}
                     {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx) => {
-                        const y = chartHeight - ((marker.value || 0) / maxValue) * chartHeight;
+                        const y = topPadding + (chartHeight - ((marker.value || 0) / maxValue) * chartHeight);
                         return (
                             <g key={`threshold-${idx}`}>
                                 <line
@@ -380,6 +383,9 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
     const minValue = Math.min(...yValues.map(v => typeof v === 'number' ? v : 0));
     const chartHeight = 300;
+    const topPadding = 40;
+    const bottomPadding = 40;
+    const totalHeight = chartHeight + topPadding + bottomPadding;
     const chartWidth = 600;
     const pointSpacing = chartWidth / (yValues.length - 1 || 1);
 
@@ -387,7 +393,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     const pathData = yValues
         .map((value, idx) => {
             const x = idx * pointSpacing;
-            const y = chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight;
+            const y = topPadding + (chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight);
             return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
         })
         .join(' ');
@@ -396,7 +402,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
         series?.color_hint === "negative" ? "#ef4444" : "#3b82f6";
 
     return (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
             {spec.primary_value && (
                 <div className="mb-4 flex items-baseline gap-4">
                     <div>
@@ -405,8 +411,8 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                     </div>
                     {spec.trend_slope !== undefined && (
                         <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${spec.trend_slope > 0 ? "bg-green-100 text-green-700" :
-                                spec.trend_slope < 0 ? "bg-red-100 text-red-700" :
-                                    "bg-gray-100 text-gray-700"
+                            spec.trend_slope < 0 ? "bg-red-100 text-red-700" :
+                                "bg-gray-100 text-gray-700"
                             }`}>
                             {spec.trend_slope > 0 && <TrendingUp className="h-4 w-4" />}
                             {spec.trend_slope < 0 && <TrendingDown className="h-4 w-4" />}
@@ -420,7 +426,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                 <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
                 </div>
-                <svg width="100%" height={chartHeight + 40} viewBox={`0 0 ${chartWidth} ${chartHeight + 40}`}>
+                <svg width="100%" height={totalHeight} viewBox={`0 0 ${chartWidth} ${totalHeight}`}>
                     {/* Line path */}
                     <path
                         d={pathData}
@@ -434,7 +440,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                     {/* Points */}
                     {yValues.map((value, idx) => {
                         const x = idx * pointSpacing;
-                        const y = chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight;
+                        const y = topPadding + (chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight);
 
                         return (
                             <circle
@@ -455,7 +461,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                             <text
                                 key={idx}
                                 x={x}
-                                y={chartHeight + 20}
+                                y={topPadding + chartHeight + 20}
                                 textAnchor="middle"
                                 className="text-xs fill-gray-500"
                             >
@@ -499,7 +505,7 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
     });
 
     return (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
             <div className="flex flex-col md:flex-row gap-6">
                 <div className="flex-1">
                     <svg width="300" height="300" viewBox="-150 -150 300 300">

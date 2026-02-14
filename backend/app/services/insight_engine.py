@@ -1,8 +1,6 @@
 """
 Insight Engine - Intelligence Layer
 
-This is NOT about charts. This is about THINKING.
-
 INPUTS:
 - Validated intent (current query's resolved parameters)
 - Query Context Object (previous intent, resolved entities, time ranges)
@@ -228,15 +226,31 @@ def generate_insights(
         trend_insights = _analyze_trend(data, metric_key, time_col)
         result.insights.extend(trend_insights)
     
-    # Set primary insight to highest severity
+    # Analyze and rank insights
     if result.insights:
-        result.primary_insight = max(
+        # Define severity weights
+        severity_rank = {
+            Severity.CRITICAL: 4,
+            Severity.HIGH: 3,
+            Severity.MEDIUM: 2,
+            Severity.LOW: 1
+        }
+        
+        # Sort by Severity (desc) -> Confidence (desc)
+        sorted_insights = sorted(
             result.insights,
             key=lambda i: (
-                ["low", "medium", "high", "critical"].index(i.severity),
-                i.confidence,
-            )
+                severity_rank.get(i.severity, 0),
+                i.confidence
+            ),
+            reverse=True
         )
+        
+        result.primary_insight = sorted_insights[0]
+        
+        # Assign secondary insight if available
+        if len(sorted_insights) > 1:
+            result.secondary_insight = sorted_insights[1]
     
     logger.info(f"Generated {len(result.insights)} insights, primary: {result.primary_insight.label if result.primary_insight else 'none'}")
     return result

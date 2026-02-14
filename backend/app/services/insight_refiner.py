@@ -210,7 +210,7 @@ def _build_prompt(
                 "metric": previous_qco.metric,
                 "sales_scope": previous_qco.sales_scope,
                 "time_range": previous_qco.time_range,
-                "previous_query": previous_qco.previous_query,
+                "previous_query": previous_qco.original_query,
             }
             if previous_qco
             else None

@@ -23,6 +23,11 @@ from app.services.insight_engine import InsightResult, Direction, Severity, Insi
 
 logger = logging.getLogger(__name__)
 
+# Constants
+MAX_TITLE_LENGTH = 80
+TABLE_THRESHOLD = 20
+AXIS_TICK_COUNT = 5  # Target number of ticks for numeric axes
+
 
 # =============================================================================
 # SPEC TYPES
@@ -54,9 +59,20 @@ class MarkerType(str, Enum):
     TROUGH = "trough"
 
 
+class ColorPalette:
+    """Standard color palette for visuals."""
+    PRIMARY = "#3b82f6"     # Blue
+    POSITIVE = "#10b981"    # Green
+    NEGATIVE = "#ef4444"    # Red
+    WARNING = "#f59e0b"     # Amber
+    MUTED = "#94a3b8"       # Slate
+    NEUTRAL = "#64748b"     # Gray
+
+
 # =============================================================================
 # SPEC MODELS
 # =============================================================================
+
 
 class DataSeries(BaseModel):
     """A single data series to be plotted."""
@@ -65,13 +81,27 @@ class DataSeries(BaseModel):
     emphasis: EmphasisLevel = EmphasisLevel.NONE
     color_hint: Optional[str] = None  # Semantic hint: "positive", "negative", "primary", "muted"
     point_emphasis: Optional[list[EmphasisLevel]] = None
-    point_colors: Optional[list[str]] = None  # Per-point color mapping (e.g., ["#ff0000", "#00ff00"])
+    point_colors: Optional[list[Optional[str]]] = None  # Per-point color mapping (e.g., ["#ff0000", "#00ff00"])
 
 
 class Axis(BaseModel):
-    """Axis specification."""
+    """
+    Axis specification.
+    
+    The 'values' field contains:
+    - For categorical/time axes: Explicit tick labels (e.g., ["Jan", "Feb", "Mar"])
+    - For numeric/linear axes: Computed tick positions (e.g., [0, 500, 1000, 1500, 2000])
+    
+    Note: For numeric axes, values are TICK POSITIONS, not the data itself.
+    The actual data points are in series.values.
+    
+    Example:
+        Data points: [2100, 2500, 2800]
+        axis.values: [0, 500, 1000, 1500, 2000, 2500, 3000] (nice round numbers)
+        series.values: [2100, 2500, 2800] (actual data)
+    """
     label: str
-    values: Optional[list[Any]] = None
+    values: Optional[list[Any]] = None  # Categorical labels OR numeric tick positions
     format: Optional[str] = None  # "number", "currency", "percent", "date"
     axis_type: Optional[str] = None  # "time", "categorical", "linear" - helps frontend choose scale
 
@@ -132,9 +162,7 @@ class VisualSpec(BaseModel):
     trend_slope: Optional[float] = None  # For trend visuals: normalized slope percentage
 
 
-class VisualSpecError(Exception):
-    """Raised when visual spec generation fails."""
-    pass
+
 
 
 # =============================================================================
@@ -143,7 +171,7 @@ class VisualSpecError(Exception):
 
 def generate_visual_spec(
     data: list[dict[str, Any]],
-    insights: Any,  # InsightResult or RefinedInsightResult (duck-typed)
+    insights: InsightResult,  # InsightResult or RefinedInsightResult (duck-typed for compatibility)
     chart_type_hint: Optional[str] = None,
     query: Optional[str] = None,
 ) -> VisualSpec:
@@ -155,11 +183,15 @@ def generate_visual_spec(
     Args:
         data: Raw query result rows
         insights: InsightResult or RefinedInsightResult from insight engine/refiner
-        chart_type_hint: Suggested chart type from intent (can be overridden)
-        query: Original NL query for title generation
+        chart_type_hint: Suggested chart type from intent (e.g., "bar_chart", "line_chart", "pie_chart", 
+                        "number_card", "table", "horizontal_bar_chart", "stacked_bar_chart"). Can be overridden.
+        query: Original NL query for title generation. If None, title will be generated from metric/dimensions.
         
     Returns:
         VisualSpec — declarative spec for the frontend to render
+        
+    Raises:
+        Exception: If spec generation fails critically (logged but not raised for non-fatal errors)
     """
     logger.info(f"Generating visual spec: {len(data)} rows, hint={chart_type_hint}")
     
@@ -182,19 +214,18 @@ def generate_visual_spec(
         )
     
     # Dispatch to type-specific builder
-    match chart_type:
-        case ChartType.NUMBER_CARD:
-            spec = _build_number_card_spec(data, insights)
-        case ChartType.TABLE:
-            spec = _build_table_spec(data, insights)
-        case ChartType.BAR | ChartType.HORIZONTAL_BAR | ChartType.STACKED_BAR:
-            spec = _build_bar_spec(data, insights, chart_type)
-        case ChartType.LINE:
-            spec = _build_line_spec(data, insights)
-        case ChartType.PIE:
-            spec = _build_pie_spec(data, insights)
-        case _:
-            spec = _build_table_spec(data, insights)
+    if chart_type == ChartType.NUMBER_CARD:
+        spec = _build_number_card_spec(data, insights)
+    elif chart_type == ChartType.TABLE:
+        spec = _build_table_spec(data, insights)
+    elif chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR, ChartType.STACKED_BAR):
+        spec = _build_bar_spec(data, insights, chart_type)
+    elif chart_type == ChartType.LINE:
+        spec = _build_line_spec(data, insights)
+    elif chart_type == ChartType.PIE:
+        spec = _build_pie_spec(data, insights)
+    else:
+        spec = _build_table_spec(data, insights)
     
     # Enrich with insights
     spec.title = _make_title(query, insights)
@@ -233,16 +264,18 @@ def _resolve_chart_type(hint: Optional[str], insights: InsightResult, data: list
     if len(data) == 1 and not insights.dimensions:
         return ChartType.NUMBER_CARD
     
-    if insights.intent_type == "trend":
+    # Check intent_type safely (may not exist on all insight types)
+    intent_type = getattr(insights, 'intent_type', None)
+    if intent_type == "trend":
         return ChartType.LINE
     
-    if insights.intent_type == "distribution":
+    if intent_type == "distribution":
         return ChartType.PIE
     
-    if insights.intent_type == "ranking":
+    if intent_type == "ranking":
         return ChartType.HORIZONTAL_BAR
     
-    if len(data) > 20:
+    if len(data) > TABLE_THRESHOLD:
         return ChartType.TABLE
     
     return ChartType.BAR
@@ -257,12 +290,13 @@ def _build_number_card_spec(data: list[dict], insights: InsightResult) -> Visual
     spec = VisualSpec(chart_type=ChartType.NUMBER_CARD)
     
     spec.primary_value = insights.total_formatted or "N/A"
-    spec.primary_label = _format_label(insights.metric) if insights.metric else "Value"
+    spec.primary_label = _clean_label(insights.metric) if insights.metric else "Value"
     
     # If there's a comparison insight, add secondary value
     for insight in insights.insights:
         if insight.insight_type == InsightType.COMPARISON:
-            spec.secondary_value = f"{'+' if (insight.change_pct or 0) > 0 else ''}{insight.change_pct:.1f}%"
+            change_pct = insight.change_pct if insight.change_pct is not None else 0.0
+            spec.secondary_value = f"{'+' if change_pct > 0 else ''}{change_pct:.1f}%"
             spec.secondary_label = "vs previous period"
             spec.direction = insight.direction
             break
@@ -275,7 +309,7 @@ def _build_table_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     spec = VisualSpec(chart_type=ChartType.TABLE)
     
     if data:
-        spec.columns = [_format_label(col) for col in data[0].keys()]
+        spec.columns = [_clean_label(col) for col in data[0].keys()]
         spec.rows = data
     
     return spec
@@ -286,7 +320,7 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     spec = VisualSpec(chart_type=chart_type)
     
     metric_key = insights.metric or ""
-    dim_key = insights.dimensions[0] if insights.dimensions else None
+    dim_key = insights.dimensions[0] if insights.dimensions and len(insights.dimensions) > 0 else None
     
     # Extract x-axis (dimension values) and y-axis (metric values)
     x_values = []
@@ -310,6 +344,7 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     )
     spec.y_axis = Axis(
         label=_clean_label(metric_key),
+        values=_compute_axis_range(y_values),
         format="number",
         axis_type="linear",
     )
@@ -350,7 +385,7 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     spec = VisualSpec(chart_type=ChartType.LINE)
     
     metric_key = insights.metric or ""
-    dim_key = insights.dimensions[0] if insights.dimensions else None
+    dim_key = insights.dimensions[0] if insights.dimensions and len(insights.dimensions) > 0 else None
     
     x_values = []
     y_values = []
@@ -374,6 +409,7 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     )
     spec.y_axis = Axis(
         label=_clean_label(metric_key),
+        values=_compute_axis_range(y_values),
         format="number",
         axis_type="linear",
     )
@@ -415,7 +451,7 @@ def _build_pie_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     spec = VisualSpec(chart_type=ChartType.PIE)
     
     metric_key = insights.metric or ""
-    dim_key = insights.dimensions[0] if insights.dimensions else None
+    dim_key = insights.dimensions[0] if insights.dimensions and len(insights.dimensions) > 0 else None
     
     labels = []
     values = []
@@ -428,7 +464,7 @@ def _build_pie_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     
     spec.x_axis = Axis(label="Category", values=labels)
     spec.series = [DataSeries(
-        label=_format_label(metric_key),
+        label=_clean_label(metric_key),
         values=values,
         color_hint="primary",
     )]
@@ -516,11 +552,11 @@ def _insights_to_markers(insights: InsightResult) -> list[Marker]:
 def _make_title(query: Optional[str], insights: InsightResult) -> str:
     """Generate a title for the visual."""
     if query:
-        return query
+        return query[:MAX_TITLE_LENGTH] if len(query) <= MAX_TITLE_LENGTH else query[:MAX_TITLE_LENGTH - 3] + "..."
     
-    metric_label = _format_label(insights.metric) if insights.metric else "Data"
-    if insights.dimensions:
-        dim_label = _format_label(insights.dimensions[0])
+    metric_label = _clean_label(insights.metric) if insights.metric else "Data"
+    if insights.dimensions and len(insights.dimensions) > 0:
+        dim_label = _clean_label(insights.dimensions[0])
         return f"{metric_label} by {dim_label}"
     return metric_label
 
@@ -546,6 +582,75 @@ def _build_emphasis_map(insights: InsightResult, x_values: list) -> dict[str, Em
     return emphasis
 
 
+def _compute_axis_range(values: list[float], target_ticks: int = AXIS_TICK_COUNT) -> list[float]:
+    """
+    Compute nice axis tick positions for numeric data.
+    
+    Args:
+        values: The data values to compute range for
+        target_ticks: Target number of ticks (actual may vary)
+        
+    Returns:
+        List of tick positions, e.g., [0, 500, 1000, 1500, 2000, 2500, 3000]
+        
+    Examples:
+        [2100, 2500, 2800] -> [0, 500, 1000, 1500, 2000, 2500, 3000]
+        [10, 20, 30] -> [0, 10, 20, 30, 40]
+        [95, 98, 102] -> [90, 95, 100, 105, 110]
+    """
+    if not values or all(v == 0 for v in values):
+        return [0, 1, 2, 3, 4, 5]
+    
+    min_val = min(values)
+    max_val = max(values)
+    
+    # If all values are the same, create a range around that value
+    if min_val == max_val:
+        if min_val == 0:
+            return [0, 1, 2, 3, 4, 5]
+        center = min_val
+        step = max(1, abs(center) * 0.1)
+        return [center - step * 2, center - step, center, center + step, center + step * 2]
+    
+    # Calculate range
+    data_range = max_val - min_val
+    
+    # For positive data, prefer starting from 0 to give full context
+    # This helps users understand the actual magnitude of values
+    if min_val >= 0:
+        min_val = 0
+    
+    # Add padding to max (about 10-20% headroom)
+    max_val = max_val * 1.1
+    
+    # Calculate nice step size
+    raw_step = (max_val - min_val) / target_ticks
+    
+    # Round step to a "nice" number (1, 2, 5, 10, 20, 50, 100, etc.)
+    magnitude = 10 ** (len(str(int(raw_step))) - 1)
+    nice_step = magnitude
+    
+    if raw_step <= magnitude * 1:
+        nice_step = magnitude * 1
+    elif raw_step <= magnitude * 2:
+        nice_step = magnitude * 2
+    elif raw_step <= magnitude * 5:
+        nice_step = magnitude * 5
+    else:
+        nice_step = magnitude * 10
+    
+    # Generate ticks
+    ticks = []
+    current = (min_val // nice_step) * nice_step  # Floor to step
+    max_tick = ((max_val // nice_step) + 1) * nice_step  # Ceil to step
+    
+    while current <= max_tick:
+        ticks.append(float(current))
+        current += nice_step
+    
+    return ticks
+
+
 def _get_dim_value(row: dict, dim_key: Optional[str]) -> str:
     """Extract dimension value from a row."""
     if not dim_key:
@@ -559,34 +664,32 @@ def _get_dim_value(row: dict, dim_key: Optional[str]) -> str:
 
 
 def _get_metric_value(row: dict, metric_key: str) -> float:
-    """Extract metric value from a row."""
+    """Extract metric value from a row, returning 0.0 for missing or invalid values."""
     if metric_key in row:
         try:
-            return float(row[metric_key])
-        except (ValueError, TypeError):
-            pass
+            val = row[metric_key]
+            if val is None:
+                return 0.0
+            return float(val)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to convert metric '{metric_key}' value '{row[metric_key]}' to float: {e}")
+            return 0.0
+            
     for key in row:
         if key.endswith(f".{metric_key}") or metric_key.endswith(f".{key}"):
             try:
-                return float(row[key])
-            except (ValueError, TypeError):
-                pass
-    # Fallback: first numeric
-    for val in row.values():
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            continue
+                val = row[key]
+                if val is None:
+                    return 0.0
+                return float(val)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Failed to convert metric '{key}' value '{row[key]}' to float: {e}")
+                return 0.0
+    
+    logger.debug(f"Metric key '{metric_key}' not found in row, returning 0.0")
     return 0.0
 
 
-def _format_label(key: Optional[str]) -> str:
-    """Format a column key into a human-readable label."""
-    if not key:
-        return "Value"
-    if "." in key:
-        key = key.split(".")[-1]
-    return key.replace("_", " ").title()
 
 
 def _clean_label(key: Optional[str]) -> str:
@@ -596,32 +699,40 @@ def _clean_label(key: Optional[str]) -> str:
     Examples:
         "fact_secondary_sales.total_sales" -> "Total Sales"
         "dim_product.product_name" -> "Product Name"
+        "total_sales" -> "Total Sales"
     """
     if not key:
         return "Value"
     
-    # Strip common table prefixes
-    prefixes_to_strip = ["fact_", "dim_", "fact_secondary_sales.", "dim_product.", "dim_region."]
+    # Strip common table prefixes (check for exact prefix or after dot)
+    prefixes_to_strip = [
+        "fact_secondary_sales.",
+        "dim_product.",
+        "dim_region.",
+        "fact_",
+        "dim_",
+    ]
+    
     for prefix in prefixes_to_strip:
         if key.startswith(prefix):
             key = key[len(prefix):]
-        elif f".{prefix}" in key:
-            key = key.split(f".{prefix}")[-1]
+            break
     
-    # Remove remaining dots and format
+    # Remove remaining dots by taking the last segment
     if "." in key:
         key = key.split(".")[-1]
     
+    # Format: replace underscores with spaces and title case
     return key.replace("_", " ").title()
 
 
-def _build_color_map(insights: Any, x_values: list) -> dict[str, Optional[str]]:
+def _build_color_map(insights: InsightResult, x_values: list) -> dict[str, Optional[str]]:
     """
     Build a color map for data points based on insights.
     
     Returns a dict mapping dimension values to color codes.
     """
-    color_map = {x: None for x in x_values}
+    color_map: dict[str, Optional[str]] = {x: None for x in x_values}
     
     for insight in insights.insights:
         if not insight.dimension_value or insight.dimension_value not in x_values:
@@ -629,20 +740,21 @@ def _build_color_map(insights: Any, x_values: list) -> dict[str, Optional[str]]:
         
         # Top contributor -> highlight color
         if insight.label == "top_contributor":
-            color_map[insight.dimension_value] = "#10b981"  # Green
+            color_map[insight.dimension_value] = ColorPalette.POSITIVE
         
         # Outlier -> warning/danger color based on severity
         elif insight.insight_type == InsightType.OUTLIER:
             if insight.severity in (Severity.HIGH, Severity.CRITICAL):
-                color_map[insight.dimension_value] = "#ef4444"  # Red
+                color_map[insight.dimension_value] = ColorPalette.NEGATIVE
             else:
-                color_map[insight.dimension_value] = "#f59e0b"  # Amber
+                color_map[insight.dimension_value] = ColorPalette.WARNING
         
         # Bottom performer -> muted color
         elif insight.label == "bottom_performer":
-            color_map[insight.dimension_value] = "#94a3b8"  # Slate
+            color_map[insight.dimension_value] = ColorPalette.MUTED
     
     return color_map
+
 
 
 def _format_number(value: float) -> str:

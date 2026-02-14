@@ -45,7 +45,7 @@ from app.services.qco_resolver import resolve_qco
 from app.services.catalog_manager import CatalogManager
 from app.services.insight_engine import generate_insights, InsightResult, InsightEngineError
 from app.services.insight_refiner import refine_insights, RefinedInsightResult, InsightRefinerError
-from app.services.visual_spec_generator import generate_visual_spec, VisualSpec, VisualSpecError
+from app.services.visual_spec_generator import generate_visual_spec, VisualSpec
 from app.pipeline.pipeline_state import PipelineState
 from app.pipeline.state_store import save_state, load_state, delete_state, PipelineStateNotFound
 from app.pipeline.qco_store import save_qco, load_qco
@@ -700,7 +700,7 @@ def _generate_insights_and_spec(
         logger.info(f"Visual spec generated: chart_type={visual_spec.chart_type}, "
                      f"{len(visual_spec.annotations)} annotations, {len(visual_spec.markers)} markers")
         
-    except (InsightEngineError, VisualSpecError) as e:
+    except InsightEngineError as e:
         logger.error(f"Insight/Spec generation error: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.CUBE_EXECUTED,

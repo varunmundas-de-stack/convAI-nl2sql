@@ -7,3 +7,4 @@ GEMINI.md
 .env
 data.json
 logs/*
+.planning/*

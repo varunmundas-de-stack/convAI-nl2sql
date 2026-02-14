@@ -309,7 +309,9 @@ def _build_table_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     spec = VisualSpec(chart_type=ChartType.TABLE)
     
     if data:
-        spec.columns = [_clean_label(col) for col in data[0].keys()]
+        # Keep original column names (not cleaned) so they match the row dict keys
+        # Frontend will handle display formatting
+        spec.columns = list(data[0].keys())
         spec.rows = data
     
     return spec

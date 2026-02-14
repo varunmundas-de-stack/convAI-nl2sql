@@ -26,14 +26,14 @@ interface VisualSpec {
 
 interface Axis {
     label: string;
-    values?: any[];
+    values?: any[];  // For categorical/time: labels; For linear: tick positions
     format?: string;
     axis_type?: "time" | "categorical" | "linear";
 }
 
 interface DataSeries {
     label: string;
-    values: any[];
+    values: any[];  // Actual data values
     emphasis?: string;
     color_hint?: string;
     point_emphasis?: string[];
@@ -115,18 +115,20 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                     <button
                         onClick={() => setShowInsights(!showInsights)}
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-blue-100 transition-colors"
+                        aria-expanded={showInsights}
+                        aria-controls="executive-summary"
                     >
                         <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-blue-900">Executive Summary</span>
                         </div>
                         {showInsights ? (
-                            <ChevronUp className="h-4 w-4 text-blue-700" />
+                            <ChevronUp className="h-4 w-4 text-blue-700" aria-hidden="true" />
                         ) : (
-                            <ChevronDown className="h-4 w-4 text-blue-700" />
+                            <ChevronDown className="h-4 w-4 text-blue-700" aria-hidden="true" />
                         )}
                     </button>
                     {showInsights && (
-                        <div className="px-4 py-3 border-t border-blue-200">
+                        <div id="executive-summary" className="px-4 py-3 border-t border-blue-200">
                             <p className="text-sm text-blue-900">{refined_insights.executive_summary}</p>
                         </div>
                     )}
@@ -135,7 +137,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
 
             {/* Primary/Secondary Values for Number Cards and Snapshots */}
             {chart_type === "number_card" && primary_value && (
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-lg border border-blue-200">
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
                     <div className="space-y-4">
                         <div>
                             <p className="text-sm text-gray-600 mb-1">{primary_label || "Value"}</p>
@@ -146,9 +148,9 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                                         direction === "down" ? "bg-red-100 text-red-700" :
                                             "bg-gray-100 text-gray-700"
                                         }`}>
-                                        {direction === "up" && <TrendingUp className="h-4 w-4" />}
-                                        {direction === "down" && <TrendingDown className="h-4 w-4" />}
-                                        {direction === "flat" && <Minus className="h-4 w-4" />}
+                                        {direction === "up" && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
+                                        {direction === "down" && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
+                                        {direction === "flat" && <Minus className="h-4 w-4" aria-hidden="true" />}
                                         <span>{Math.abs(trend_slope).toFixed(1)}%</span>
                                     </div>
                                 )}
@@ -174,7 +176,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
             ) : chart_type === "pie" ? (
                 <PieChartRenderer spec={visual_spec} />
             ) : chart_type !== "number_card" ? (
-                <div className="bg-white p-6 rounded-lg border border-gray-200">
+                <div className="bg-white p-2 rounded-lg border border-gray-200">
                     <p className="text-gray-500">Unsupported chart type: {chart_type}</p>
                 </div>
             ) : null}
@@ -188,10 +190,11 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                             <div
                                 key={idx}
                                 className={`px-4 py-3 rounded-lg border ${getSeverityStyles(annotation.severity)}`}
+                                role="alert"
                             >
                                 <div className="flex items-start gap-2">
                                     {annotation.direction && annotation.direction !== "unknown" && (
-                                        <div className="mt-0.5">
+                                        <div className="mt-0.5" aria-hidden="true">
                                             {annotation.direction === "up" && <TrendingUp className="h-4 w-4" />}
                                             {annotation.direction === "down" && <TrendingDown className="h-4 w-4" />}
                                             {annotation.direction === "flat" && <Minus className="h-4 w-4" />}
@@ -222,46 +225,197 @@ function getSeverityStyles(severity: string): string {
     }
 }
 
+// Helper to format numbers consistently
+function formatNumber(value: number): string {
+    if (value >= 1_000_000_000) {
+        return `${(value / 1_000_000_000).toFixed(1)}B`;
+    } else if (value >= 1_000_000) {
+        return `${(value / 1_000_000).toFixed(1)}M`;
+    } else if (value >= 1_000) {
+        return `${(value / 1_000).toFixed(1)}K`;
+    } else if (value % 1 !== 0) {
+        return value.toFixed(2);
+    } else {
+        return value.toString();
+    }
+}
+
+// Clean column name for display (remove table prefixes, format nicely)
+function cleanColumnName(col: string): string {
+    if (!col) return "Value";
+    
+    // Remove table prefixes like "fact_secondary_sales.", "dim_product.", etc.
+    let cleaned = col;
+    
+    // Strip common table prefixes
+    const prefixes = [
+        "fact_secondary_sales.",
+        "fact_primary_sales.",
+        "fact secondary sales.",
+        "fact primary sales.",
+        "dim_product.",
+        "dim_region.",
+        "dim_time.",
+        "fact_",
+        "dim_",
+    ];
+    
+    for (const prefix of prefixes) {
+        if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
+            cleaned = cleaned.substring(prefix.length);
+            break;
+        }
+    }
+    
+    // Remove any remaining dots by taking the last segment
+    if (cleaned.includes(".")) {
+        const parts = cleaned.split(".");
+        cleaned = parts[parts.length - 1];
+    }
+    
+    // Replace underscores with spaces and title case
+    return cleaned.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Format cell values with proper number and date formatting
+function formatCellValue(value: any): string {
+    if (value === null || value === undefined || value === "") {
+        return "-";
+    }
+    
+    // Handle date strings (ISO 8601 format)
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+        try {
+            const date = new Date(value);
+            // Format as: DD MMM YYYY (e.g., "01 Oct 2025")
+            return date.toLocaleDateString('en-GB', { 
+                day: '2-digit', 
+                month: 'short', 
+                year: 'numeric' 
+            });
+        } catch {
+            return String(value);
+        }
+    }
+    
+    // Handle numbers - add comma separators for large numbers
+    if (typeof value === "number") {
+        // For integers or numbers with less than 2 decimal places, show as integer
+        if (Number.isInteger(value) || Math.abs(value) > 100) {
+            return value.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+        }
+        // For small decimal numbers, show 2 decimal places
+        return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    
+    return String(value);
+}
+
+// Detect if a column contains numeric data (for right alignment)
+function isNumericColumn(rows: any[], columnName: string): boolean {
+    if (rows.length === 0) return false;
+    
+    // Check first 5 non-null values
+    const samples = rows
+        .slice(0, 5)
+        .map(row => row[columnName])
+        .filter(val => val !== null && val !== undefined);
+    
+    if (samples.length === 0) return false;
+    
+    // If any sample is a number, consider it numeric
+    return samples.some(val => typeof val === "number");
+}
+
 // Table Renderer
 function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
+    // Determine which columns are numeric for alignment
+    const numericColumns = new Set(
+        columns.filter(col => isNumericColumn(rows, col))
+    );
+    
     return (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            {columns.map((col, idx) => (
-                                <th
-                                    key={idx}
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                                >
-                                    {col}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {rows.map((row, rowIdx) => (
-                            <tr key={rowIdx} className="hover:bg-gray-50">
-                                {columns.map((col, colIdx) => (
-                                    <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {row[col] !== undefined ? String(row[col]) : "-"}
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+        <div className="space-y-3">
+            {/* Row count indicator */}
+            <div className="flex items-center justify-between text-xs text-gray-500">
+                <span>{rows.length} {rows.length === 1 ? 'row' : 'rows'}</span>
+                {rows.length > 100 && (
+                    <span className="text-amber-600 font-medium">
+                        Large dataset - scroll to view all
+                    </span>
+                )}
+            </div>
+            
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <div className="max-h-[600px] overflow-y-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                <tr>
+                                    {columns.map((col, idx) => (
+                                        <th
+                                            key={idx}
+                                            scope="col"
+                                            className={`px-6 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200 ${
+                                                numericColumns.has(col) ? 'text-right' : 'text-left'
+                                            }`}
+                                        >
+                                            {cleanColumnName(col)}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {rows.length === 0 ? (
+                                    <tr>
+                                        <td 
+                                            colSpan={columns.length} 
+                                            className="px-6 py-8 text-center text-sm text-gray-500"
+                                        >
+                                            No data available
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    rows.map((row, rowIdx) => (
+                                        <tr 
+                                            key={rowIdx} 
+                                            className="hover:bg-gray-50 transition-colors duration-150"
+                                        >
+                                            {columns.map((col, colIdx) => {
+                                                const value = row[col];
+                                                const isNumeric = numericColumns.has(col);
+                                                
+                                                return (
+                                                    <td
+                                                        key={colIdx}
+                                                        className={`px-6 py-4 text-sm text-gray-900 ${
+                                                            isNumeric 
+                                                                ? 'text-right font-mono' 
+                                                                : 'text-left'
+                                                        }`}
+                                                    >
+                                                        {formatCellValue(value)}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     );
 }
 
-// Bar Chart Renderer (Simple SVG implementation)
+// Bar Chart Renderer (SVG implementation)
 function BarChartRenderer({ spec }: { spec: VisualSpec }) {
     const series = spec.series?.[0];
-    const xValues = spec.x_axis?.values || [];
-    const yValues = series?.values || [];
+    const xLabels = spec.x_axis?.values || [];  // Category labels
+    const yValues = series?.values || [];       // Actual data values
+    const yAxisTicks = spec.y_axis?.values || [];  // Y-axis tick positions
     const pointColors = series?.point_colors || [];
     const pointEmphasis = series?.point_emphasis || [];
 
@@ -270,9 +424,20 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
     const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
     const chartHeight = 300;
     const topPadding = 40;
-    const bottomPadding = 40;
+    const bottomPadding = 60;
+    const leftPadding = 60;  // Space for Y-axis labels
+    const rightPadding = 20;
     const totalHeight = chartHeight + topPadding + bottomPadding;
-    const barWidth = Math.min(60, (600 / yValues.length) * 0.8);
+    const chartWidth = Math.max(600, xLabels.length * 70);
+    const totalWidth = chartWidth + leftPadding + rightPadding;
+    const barWidth = Math.min(60, (chartWidth / yValues.length) * 0.8);
+
+    // Use backend tick values if available, otherwise compute
+    const tickValues = yAxisTicks.length > 0
+        ? yAxisTicks
+        : [0, maxValue * 0.25, maxValue * 0.5, maxValue * 0.75, maxValue];
+
+    const maxTickValue = Math.max(...tickValues.map(v => typeof v === 'number' ? v : 0));
 
     return (
         <div className="bg-white p-8 rounded-lg border border-gray-200">
@@ -293,90 +458,168 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
             <div className="space-y-4">
                 <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
-                    <span className="text-gray-400">Max: {maxValue.toLocaleString()}</span>
                 </div>
-                <svg width="100%" height={totalHeight} viewBox={`0 0 ${xValues.length * (barWidth + 10)} ${totalHeight}`}>
-                    {/* Bars */}
-                    {yValues.map((value, idx) => {
-                        const height = (value / maxValue) * chartHeight;
-                        const x = idx * (barWidth + 10) + 5;
-                        const y = topPadding + (chartHeight - height);
+                <div className="overflow-x-auto">
+                    <svg
+                        width={totalWidth}
+                        height={totalHeight}
+                        viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+                        role="img"
+                        aria-label={`Bar chart showing ${spec.y_axis?.label || "values"}`}
+                    >
+                        <title>{spec.title || `Bar chart of ${spec.y_axis?.label}`}</title>
 
-                        // Determine color
-                        let fillColor = pointColors[idx] || "#3b82f6"; // Default blue
-                        const emphasis = pointEmphasis[idx];
+                        {/* Y-axis ticks and labels */}
+                        {tickValues.map((tickValue, idx) => {
+                            const y = topPadding + chartHeight - ((tickValue as number) / maxTickValue) * chartHeight;
+                            return (
+                                <g key={`y-tick-${idx}`}>
+                                    {/* Grid line */}
+                                    <line
+                                        x1={leftPadding}
+                                        y1={y}
+                                        x2={leftPadding + chartWidth}
+                                        y2={y}
+                                        stroke="#e5e7eb"
+                                        strokeWidth={1}
+                                        aria-hidden="true"
+                                    />
+                                    {/* Tick mark */}
+                                    <line
+                                        x1={leftPadding - 5}
+                                        y1={y}
+                                        x2={leftPadding}
+                                        y2={y}
+                                        stroke="#9ca3af"
+                                        strokeWidth={1}
+                                        aria-hidden="true"
+                                    />
+                                    {/* Y-axis label */}
+                                    <text
+                                        x={leftPadding - 10}
+                                        y={y}
+                                        textAnchor="end"
+                                        dominantBaseline="middle"
+                                        className="text-xs fill-gray-600"
+                                    >
+                                        {formatNumber(tickValue as number)}
+                                    </text>
+                                </g>
+                            );
+                        })}
 
-                        // Adjust opacity based on emphasis
-                        const opacity = emphasis === "strong" || emphasis === "critical" ? 1 :
-                            emphasis === "subtle" ? 0.8 : 0.7;
+                        {/* Y-axis line */}
+                        <line
+                            x1={leftPadding}
+                            y1={topPadding}
+                            x2={leftPadding}
+                            y2={topPadding + chartHeight}
+                            stroke="#9ca3af"
+                            strokeWidth={2}
+                            aria-hidden="true"
+                        />
 
-                        return (
-                            <g key={idx}>
-                                <rect
-                                    x={x}
-                                    y={y}
-                                    width={barWidth}
-                                    height={height}
-                                    fill={fillColor}
-                                    opacity={opacity}
-                                    rx={4}
-                                    className="transition-all hover:opacity-100"
-                                />
-                                <text
-                                    x={x + barWidth / 2}
-                                    y={y - 5}
-                                    textAnchor="middle"
-                                    className="text-xs fill-gray-600"
-                                >
-                                    {value.toLocaleString()}
-                                </text>
-                                <text
-                                    x={x + barWidth / 2}
-                                    y={topPadding + chartHeight + 20}
-                                    textAnchor="middle"
-                                    className="text-xs fill-gray-500"
-                                >
-                                    {String(xValues[idx] || idx).substring(0, 10)}
-                                </text>
-                            </g>
-                        );
-                    })}
+                        {/* X-axis line */}
+                        <line
+                            x1={leftPadding}
+                            y1={topPadding + chartHeight}
+                            x2={leftPadding + chartWidth}
+                            y2={topPadding + chartHeight}
+                            stroke="#9ca3af"
+                            strokeWidth={2}
+                            aria-hidden="true"
+                        />
 
-                    {/* Threshold markers */}
-                    {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx) => {
-                        const y = topPadding + (chartHeight - ((marker.value || 0) / maxValue) * chartHeight);
-                        return (
-                            <g key={`threshold-${idx}`}>
-                                <line
-                                    x1={0}
-                                    y1={y}
-                                    x2={xValues.length * (barWidth + 10)}
-                                    y2={y}
-                                    stroke="#94a3b8"
-                                    strokeWidth={2}
-                                    strokeDasharray="4 4"
-                                />
-                                <text
-                                    x={5}
-                                    y={y - 5}
-                                    className="text-xs fill-gray-500"
-                                >
-                                    {marker.label}
-                                </text>
-                            </g>
-                        );
-                    })}
-                </svg>
+                        {/* Bars */}
+                        {yValues.map((value, idx) => {
+                            const height = maxTickValue > 0 ? (value / maxTickValue) * chartHeight : 0;
+                            const x = leftPadding + idx * (chartWidth / yValues.length) + (chartWidth / yValues.length - barWidth) / 2;
+                            const y = topPadding + (chartHeight - height);
+
+                            // Determine color
+                            let fillColor = pointColors[idx] || "#3b82f6"; // Default blue
+                            const emphasis = pointEmphasis[idx];
+
+                            // Adjust opacity based on emphasis
+                            const opacity = emphasis === "strong" || emphasis === "critical" ? 1 :
+                                emphasis === "subtle" ? 0.8 : 0.7;
+
+                            return (
+                                <g key={idx}>
+                                    <rect
+                                        x={x}
+                                        y={y}
+                                        width={barWidth}
+                                        height={height}
+                                        fill={fillColor}
+                                        opacity={opacity}
+                                        rx={4}
+                                        className="transition-all hover:opacity-100"
+                                        aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
+                                    >
+                                        <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
+                                    </rect>
+                                    {/* Value label on top of bar */}
+                                    <text
+                                        x={x + barWidth / 2}
+                                        y={y - 5}
+                                        textAnchor="middle"
+                                        className="text-xs fill-gray-700 font-medium"
+                                    >
+                                        {formatNumber(value)}
+                                    </text>
+                                    {/* X-axis label */}
+                                    <text
+                                        x={x + barWidth / 2}
+                                        y={topPadding + chartHeight + 20}
+                                        textAnchor="middle"
+                                        className="text-xs fill-gray-600"
+                                    >
+                                        {String(xLabels[idx] || idx).substring(0, 12)}
+                                    </text>
+                                </g>
+                            );
+                        })}
+
+                        {/* Threshold markers */}
+                        {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx) => {
+                            const markerValue = marker.value || 0;
+                            const y = topPadding + (chartHeight - (markerValue / maxTickValue) * chartHeight);
+                            return (
+                                <g key={`threshold-${idx}`}>
+                                    <line
+                                        x1={leftPadding}
+                                        y1={y}
+                                        x2={leftPadding + chartWidth}
+                                        y2={y}
+                                        stroke="#ef4444"
+                                        strokeWidth={2}
+                                        strokeDasharray="4 4"
+                                        aria-hidden="true"
+                                    />
+                                    <text
+                                        x={leftPadding + 5}
+                                        y={y - 5}
+                                        className="text-xs fill-red-600 font-medium"
+                                    >
+                                        {marker.label}
+                                    </text>
+                                </g>
+                            );
+                        })}
+                    </svg>
+                </div>
             </div>
         </div>
     );
 }
 
-// Line Chart Renderer (Simple SVG implementation)
+// Line Chart Renderer (SVG implementation)
 function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     const series = spec.series?.[0];
-    const xValues = spec.x_axis?.values || [];
-    const yValues = series?.values || [];
+    const xLabels = spec.x_axis?.values || [];  // Time/category labels
+    const yValues = series?.values || [];       // Actual data values
+    const yAxisTicks = spec.y_axis?.values || [];  // Y-axis tick positions
 
     if (yValues.length === 0) return null;
 
@@ -384,16 +627,29 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     const minValue = Math.min(...yValues.map(v => typeof v === 'number' ? v : 0));
     const chartHeight = 300;
     const topPadding = 40;
-    const bottomPadding = 40;
+    const bottomPadding = 60;
+    const leftPadding = 60;
+    const rightPadding = 20;
     const totalHeight = chartHeight + topPadding + bottomPadding;
     const chartWidth = 600;
+    const totalWidth = chartWidth + leftPadding + rightPadding;
     const pointSpacing = chartWidth / (yValues.length - 1 || 1);
+
+    // Use backend tick values if available, otherwise compute
+    const tickValues = yAxisTicks.length > 0
+        ? yAxisTicks
+        : [minValue, minValue + (maxValue - minValue) * 0.25, minValue + (maxValue - minValue) * 0.5,
+            minValue + (maxValue - minValue) * 0.75, maxValue];
+
+    const minTickValue = Math.min(...tickValues.map(v => typeof v === 'number' ? v : 0));
+    const maxTickValue = Math.max(...tickValues.map(v => typeof v === 'number' ? v : 0));
+    const range = maxTickValue - minTickValue || 1;
 
     // Generate path
     const pathData = yValues
         .map((value, idx) => {
-            const x = idx * pointSpacing;
-            const y = topPadding + (chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight);
+            const x = leftPadding + idx * pointSpacing;
+            const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
             return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
         })
         .join(' ');
@@ -414,9 +670,9 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                             spec.trend_slope < 0 ? "bg-red-100 text-red-700" :
                                 "bg-gray-100 text-gray-700"
                             }`}>
-                            {spec.trend_slope > 0 && <TrendingUp className="h-4 w-4" />}
-                            {spec.trend_slope < 0 && <TrendingDown className="h-4 w-4" />}
-                            {spec.trend_slope === 0 && <Minus className="h-4 w-4" />}
+                            {spec.trend_slope > 0 && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
+                            {spec.trend_slope < 0 && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
+                            {spec.trend_slope === 0 && <Minus className="h-4 w-4" aria-hidden="true" />}
                             <span>{Math.abs(spec.trend_slope).toFixed(1)}%</span>
                         </div>
                     )}
@@ -426,7 +682,76 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                 <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
                 </div>
-                <svg width="100%" height={totalHeight} viewBox={`0 0 ${chartWidth} ${totalHeight}`}>
+                <svg
+                    width={totalWidth}
+                    height={totalHeight}
+                    viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+                    role="img"
+                    aria-label={`Line chart showing ${spec.y_axis?.label || "trend"}`}
+                >
+                    <title>{spec.title || `Line chart of ${spec.y_axis?.label}`}</title>
+
+                    {/* Y-axis ticks and labels */}
+                    {tickValues.map((tickValue, idx) => {
+                        const y = topPadding + chartHeight - ((tickValue as number - minTickValue) / range) * chartHeight;
+                        return (
+                            <g key={`y-tick-${idx}`}>
+                                {/* Grid line */}
+                                <line
+                                    x1={leftPadding}
+                                    y1={y}
+                                    x2={leftPadding + chartWidth}
+                                    y2={y}
+                                    stroke="#e5e7eb"
+                                    strokeWidth={1}
+                                    aria-hidden="true"
+                                />
+                                {/* Tick mark */}
+                                <line
+                                    x1={leftPadding - 5}
+                                    y1={y}
+                                    x2={leftPadding}
+                                    y2={y}
+                                    stroke="#9ca3af"
+                                    strokeWidth={1}
+                                    aria-hidden="true"
+                                />
+                                {/* Y-axis label */}
+                                <text
+                                    x={leftPadding - 10}
+                                    y={y}
+                                    textAnchor="end"
+                                    dominantBaseline="middle"
+                                    className="text-xs fill-gray-600"
+                                >
+                                    {formatNumber(tickValue as number)}
+                                </text>
+                            </g>
+                        );
+                    })}
+
+                    {/* Y-axis line */}
+                    <line
+                        x1={leftPadding}
+                        y1={topPadding}
+                        x2={leftPadding}
+                        y2={topPadding + chartHeight}
+                        stroke="#9ca3af"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                    />
+
+                    {/* X-axis line */}
+                    <line
+                        x1={leftPadding}
+                        y1={topPadding + chartHeight}
+                        x2={leftPadding + chartWidth}
+                        y2={topPadding + chartHeight}
+                        stroke="#9ca3af"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                    />
+
                     {/* Line path */}
                     <path
                         d={pathData}
@@ -439,8 +764,8 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
 
                     {/* Points */}
                     {yValues.map((value, idx) => {
-                        const x = idx * pointSpacing;
-                        const y = topPadding + (chartHeight - ((value - minValue) / (maxValue - minValue)) * chartHeight);
+                        const x = leftPadding + idx * pointSpacing;
+                        const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
 
                         return (
                             <circle
@@ -450,20 +775,23 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                                 r={4}
                                 fill={lineColor}
                                 className="hover:r-6 transition-all"
-                            />
+                                aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
+                            >
+                                <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
+                            </circle>
                         );
                     })}
 
                     {/* X-axis labels */}
-                    {xValues.map((label, idx) => {
-                        const x = idx * pointSpacing;
+                    {xLabels.map((label, idx) => {
+                        const x = leftPadding + idx * pointSpacing;
                         return (
                             <text
                                 key={idx}
                                 x={x}
                                 y={topPadding + chartHeight + 20}
                                 textAnchor="middle"
-                                className="text-xs fill-gray-500"
+                                className="text-xs fill-gray-600"
                             >
                                 {String(label).substring(0, 10)}
                             </text>
@@ -475,7 +803,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     );
 }
 
-// Pie Chart Renderer (Simple SVG implementation)
+// Pie Chart Renderer (SVG implementation)
 function PieChartRenderer({ spec }: { spec: VisualSpec }) {
     const series = spec.series?.[0];
     const labels = spec.x_axis?.values || [];
@@ -508,7 +836,14 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
         <div className="bg-white p-8 rounded-lg border border-gray-200">
             <div className="flex flex-col md:flex-row gap-6">
                 <div className="flex-1">
-                    <svg width="300" height="300" viewBox="-150 -150 300 300">
+                    <svg
+                        width="300"
+                        height="300"
+                        viewBox="-150 -150 300 300"
+                        role="img"
+                        aria-label={`Pie chart showing distribution of ${spec.y_axis?.label || "values"}`}
+                    >
+                        <title>{spec.title || `Pie chart of ${spec.y_axis?.label}`}</title>
                         {slices.map((slice, idx) => {
                             const radius = 120;
                             const startRad = (slice.startAngle * Math.PI) / 180;
@@ -526,7 +861,10 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
                                     fill={slice.color}
                                     opacity={0.9}
                                     className="hover:opacity-100 transition-opacity"
-                                />
+                                    aria-label={`${slice.label}: ${slice.percentage.toFixed(1)}%`}
+                                >
+                                    <title>{`${slice.label}: ${slice.value.toLocaleString()} (${slice.percentage.toFixed(1)}%)`}</title>
+                                </path>
                             );
                         })}
                     </svg>
@@ -537,6 +875,7 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
                             <div
                                 className="w-4 h-4 rounded"
                                 style={{ backgroundColor: slice.color }}
+                                aria-hidden="true"
                             />
                             <div className="flex-1">
                                 <p className="text-sm font-medium text-gray-900">{slice.label}</p>

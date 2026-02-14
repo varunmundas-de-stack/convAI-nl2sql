@@ -72,17 +72,19 @@ def merge_intent(
         logger.debug(f"Inherited time_range: {previous_qco.time_range.start_date} to {previous_qco.time_range.end_date}")
 
     # -------------------------------------------------------------------------
-    # RULE 4: time_dimension — inherit granularity if missing but time_range exists
+    # RULE 4: time_dimension — inherit dimension and granularity if missing
     # -------------------------------------------------------------------------
-    if not merged.get("time_dimension") and previous_qco.time_granularity:
+    if not merged.get("time_dimension") and (previous_qco.time_dimension or previous_qco.time_granularity):
         # Only inherit if the intent type benefits from it (trend, comparison)
         intent_type = merged.get("intent_type", "")
         if intent_type in ("trend", "comparison"):
+            # Use stored time dimension, fallback to invoice_date if not available
+            dimension = previous_qco.time_dimension or "invoice_date"
             merged["time_dimension"] = {
-                "dimension": "invoice_date",
-                "granularity": previous_qco.time_granularity,
+                "dimension": dimension,
+                "granularity": previous_qco.time_granularity or "day",
             }
-            logger.debug(f"Inherited time_dimension granularity: {previous_qco.time_granularity}")
+            logger.debug(f"Inherited time_dimension: {dimension} @ {previous_qco.time_granularity}")
 
     # -------------------------------------------------------------------------
     # RULE 5: filters — additive merge

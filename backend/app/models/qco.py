@@ -7,8 +7,23 @@ query, enabling follow-up queries like "now show by brand" or "drill into Mumbai
 It carries NO query results — only the resolved intent parameters.
 """
 
+from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field
+
+
+class FilterOperator(str, Enum):
+    """Valid filter operators for QCO filters."""
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+    IN = "in"
+    NOT_IN = "not_in"
+    CONTAINS = "contains"
+    NOT_CONTAINS = "not_contains"
+    GREATER_THAN = "gt"
+    LESS_THAN = "lt"
+    GREATER_THAN_OR_EQUAL = "gte"
+    LESS_THAN_OR_EQUAL = "lte"
 
 
 class QCOTimeRange(BaseModel):
@@ -20,7 +35,7 @@ class QCOTimeRange(BaseModel):
 class QCOFilter(BaseModel):
     """A resolved filter from the previous query."""
     dimension: str
-    operator: str
+    operator: str  # Keep as str for backward compatibility, but validate in resolver
     value: str | List[str]
 
 
@@ -32,6 +47,9 @@ class QueryContextObject(BaseModel):
     This is injected into the LLM prompt for follow-up queries and used
     by the intent merger to fill in missing fields.
     """
+    # Schema version for migration support
+    schema_version: int = Field(default=2, description="QCO schema version for backward compatibility")
+    
     # The original natural language query
     original_query: str = Field(..., description="The original NL query that produced this context")
 
@@ -44,6 +62,7 @@ class QueryContextObject(BaseModel):
     group_by: Optional[List[str]] = Field(default=None, description="Semantic dimension names")
 
     # Time
+    time_dimension: Optional[str] = Field(default=None, description="Semantic time dimension name, e.g. 'invoice_date'")
     time_granularity: Optional[str] = Field(default=None, description="day, week, month, quarter, year")
     time_range: Optional[QCOTimeRange] = Field(default=None, description="Concrete resolved date range")
 
@@ -73,6 +92,9 @@ class QueryContextObject(BaseModel):
         if self.group_by:
             lines.append(f"Previous Group By: {', '.join(self.group_by)}")
 
+        if self.time_dimension:
+            lines.append(f"Previous Time Dimension: {self.time_dimension}")
+        
         if self.time_granularity:
             lines.append(f"Previous Granularity: {self.time_granularity}")
 

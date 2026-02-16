@@ -132,17 +132,18 @@ class Filter(BaseModel):
 
 class TimeDimension(BaseModel):
     """
-    Represents a time dimension configuration for trend analysis.
+    Represents a time dimension configuration for trend analysis or filtering.
     
-    Specifies which time field to use and at what granularity.
+    Specifies which time field to use. Granularity is required for grouping (trends),
+    but optional for pure filtering.
     """
     dimension: str = Field(
         ...,
         description="The time dimension field (e.g., 'invoice_date')"
     )
-    granularity: Literal["day", "week", "month", "quarter", "year"] = Field(
-        ...,
-        description="Time granularity for grouping"
+    granularity: Optional[Literal["day", "week", "month", "quarter", "year"]] = Field(
+        default=None,
+        description="Time granularity for grouping. Optional if only filtering."
     )
 
     model_config = ConfigDict(extra="forbid")

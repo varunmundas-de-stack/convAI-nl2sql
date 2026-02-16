@@ -294,13 +294,13 @@ def normalize_intent(raw_intent: dict) -> dict:
                     dim, intent["sales_scope"]
                 )
 
-    # Case 2: time_range exists but time_dimension missing → inject default
-    elif time_range and time_range.get("window") == "all_time":
+    # Case 2: time_range exists but time_dimension missing → inject default (filter only)
+    elif time_range and not time_dimension:
+        # Default to invoice_date for filtering, but NO granularity (so no grouping)
+        default_dim = resolve_time_dimension("invoice_date", intent["sales_scope"])
         intent["time_dimension"] = {
-            "dimension": resolve_time_dimension(
-                "invoice_date",
-                intent["sales_scope"]
-            )
+            "dimension": default_dim,
+            "granularity": None  # Explicitly None to prevent grouping
         }
 
     return intent

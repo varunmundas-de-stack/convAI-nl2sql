@@ -114,7 +114,9 @@ def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
 
     if intent.time_dimension is not None:
         td["dimension"] = intent.time_dimension.dimension
-        td["granularity"] = intent.time_dimension.granularity
+        # Only add granularity if present (grouping)
+        if intent.time_dimension.granularity:
+            td["granularity"] = intent.time_dimension.granularity
         
     if intent.time_range is not None:
         if intent.time_range.window:
@@ -124,6 +126,12 @@ def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
                 str(intent.time_range.start_date),
                 str(intent.time_range.end_date),
             ]
+
+    # Ensure we have a dimension field if we have a dateRange
+    if "dateRange" in td and "dimension" not in td:
+        # This shouldn't happen if IntentNormalizer injects the default
+        # But as a failsafe, we could raise or infer
+        raise ValueError("CubeQueryBuilder: Time range specified but no time dimension provided for filtering.")
 
     return [td]
 

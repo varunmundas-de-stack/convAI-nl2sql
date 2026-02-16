@@ -66,7 +66,7 @@ interface ChartRendererProps {
 }
 
 export default function ChartRenderer({ visual_spec, refined_insights }: ChartRendererProps) {
-    const [showInsights, setShowInsights] = useState(true);
+    const [showContextNotes, setShowContextNotes] = useState(false);
     const [isClient, setIsClient] = useState(false);
 
     useEffect(() => {
@@ -109,27 +109,56 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                 </div>
             )}
 
-            {/* Executive Summary (collapsible) */}
+            {/* Executive Summary (Always Visible) */}
             {refined_insights?.executive_summary && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="text-xs font-bold text-blue-900 mb-2 uppercase tracking-wide">Executive Summary</h4>
+                    <p className="text-sm text-blue-800 leading-relaxed font-medium">{refined_insights.executive_summary}</p>
+                </div>
+            )}
+
+            {/* Context Notes (Collapsible via Dropdown) */}
+            {refined_insights?.insights && refined_insights.insights.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
                     <button
-                        onClick={() => setShowInsights(!showInsights)}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-blue-100 transition-colors"
-                        aria-expanded={showInsights}
-                        aria-controls="executive-summary"
+                        onClick={() => setShowContextNotes(!showContextNotes)}
+                        className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                        aria-expanded={showContextNotes}
                     >
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-blue-900">Executive Summary</span>
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm font-semibold text-gray-700">Detailed Insights</span>
+                            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                                {refined_insights.insights.length}
+                            </span>
                         </div>
-                        {showInsights ? (
-                            <ChevronUp className="h-4 w-4 text-blue-700" aria-hidden="true" />
+                        {showContextNotes ? (
+                            <ChevronUp className="h-4 w-4 text-gray-500" aria-hidden="true" />
                         ) : (
-                            <ChevronDown className="h-4 w-4 text-blue-700" aria-hidden="true" />
+                            <ChevronDown className="h-4 w-4 text-gray-500" aria-hidden="true" />
                         )}
                     </button>
-                    {showInsights && (
-                        <div id="executive-summary" className="px-4 py-3 border-t border-blue-200">
-                            <p className="text-sm text-blue-900">{refined_insights.executive_summary}</p>
+                    {showContextNotes && (
+                        <div className="divide-y divide-gray-100">
+                            {refined_insights.insights.map((insight: any, idx: number) => (
+                                <div key={idx} className="p-4 hover:bg-gray-50 transition-colors">
+                                    <div className="flex items-start gap-3">
+                                        <div className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${insight.severity === 'critical' ? 'bg-red-500 shadow-sm ring-1 ring-red-200' :
+                                            insight.severity === 'high' ? 'bg-orange-500 shadow-sm ring-1 ring-orange-200' :
+                                                insight.severity === 'medium' ? 'bg-yellow-500 shadow-sm ring-1 ring-yellow-200' :
+                                                    'bg-blue-400 shadow-sm ring-1 ring-blue-200'
+                                            }`} />
+                                        <div className="space-y-1">
+                                            <p className="text-sm text-gray-700 font-medium leading-normal">{insight.headline}</p>
+                                            {insight.context_note && (
+                                                <p className="text-sm text-gray-600 mt-1">{insight.context_note}</p>
+                                            )}
+                                            {insight.label && (
+                                                <p className="text-xs text-gray-400 uppercase tracking-tighter">{insight.label.replace(/_/g, " ")}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
@@ -181,31 +210,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                 </div>
             ) : null}
 
-            {/* Annotations */}
-            {visual_spec.annotations && visual_spec.annotations.length > 0 && (
-                <div className="space-y-2">
-                    {visual_spec.annotations
-                        .filter(a => a.position === "header" || a.position === "footer")
-                        .map((annotation, idx) => (
-                            <div
-                                key={idx}
-                                className={`px-4 py-3 rounded-lg border ${getSeverityStyles(annotation.severity)}`}
-                                role="alert"
-                            >
-                                <div className="flex items-start gap-2">
-                                    {annotation.direction && annotation.direction !== "unknown" && (
-                                        <div className="mt-0.5" aria-hidden="true">
-                                            {annotation.direction === "up" && <TrendingUp className="h-4 w-4" />}
-                                            {annotation.direction === "down" && <TrendingDown className="h-4 w-4" />}
-                                            {annotation.direction === "flat" && <Minus className="h-4 w-4" />}
-                                        </div>
-                                    )}
-                                    <p className="text-sm flex-1">{annotation.text}</p>
-                                </div>
-                            </div>
-                        ))}
-                </div>
-            )}
+
         </div>
     );
 }
@@ -243,10 +248,10 @@ function formatNumber(value: number): string {
 // Clean column name for display (remove table prefixes, format nicely)
 function cleanColumnName(col: string): string {
     if (!col) return "Value";
-    
+
     // Remove table prefixes like "fact_secondary_sales.", "dim_product.", etc.
     let cleaned = col;
-    
+
     // Strip common table prefixes
     const prefixes = [
         "fact_secondary_sales.",
@@ -259,20 +264,20 @@ function cleanColumnName(col: string): string {
         "fact_",
         "dim_",
     ];
-    
+
     for (const prefix of prefixes) {
         if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
             cleaned = cleaned.substring(prefix.length);
             break;
         }
     }
-    
+
     // Remove any remaining dots by taking the last segment
     if (cleaned.includes(".")) {
         const parts = cleaned.split(".");
         cleaned = parts[parts.length - 1];
     }
-    
+
     // Replace underscores with spaces and title case
     return cleaned.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -282,22 +287,22 @@ function formatCellValue(value: any): string {
     if (value === null || value === undefined || value === "") {
         return "-";
     }
-    
+
     // Handle date strings (ISO 8601 format)
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
         try {
             const date = new Date(value);
             // Format as: DD MMM YYYY (e.g., "01 Oct 2025")
-            return date.toLocaleDateString('en-GB', { 
-                day: '2-digit', 
-                month: 'short', 
-                year: 'numeric' 
+            return date.toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric'
             });
         } catch {
             return String(value);
         }
     }
-    
+
     // Handle numbers - add comma separators for large numbers
     if (typeof value === "number") {
         // For integers or numbers with less than 2 decimal places, show as integer
@@ -307,22 +312,22 @@ function formatCellValue(value: any): string {
         // For small decimal numbers, show 2 decimal places
         return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
-    
+
     return String(value);
 }
 
 // Detect if a column contains numeric data (for right alignment)
 function isNumericColumn(rows: any[], columnName: string): boolean {
     if (rows.length === 0) return false;
-    
+
     // Check first 5 non-null values
     const samples = rows
         .slice(0, 5)
         .map(row => row[columnName])
         .filter(val => val !== null && val !== undefined);
-    
+
     if (samples.length === 0) return false;
-    
+
     // If any sample is a number, consider it numeric
     return samples.some(val => typeof val === "number");
 }
@@ -333,7 +338,7 @@ function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
     const numericColumns = new Set(
         columns.filter(col => isNumericColumn(rows, col))
     );
-    
+
     return (
         <div className="space-y-3">
             {/* Row count indicator */}
@@ -345,7 +350,7 @@ function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
                     </span>
                 )}
             </div>
-            
+
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                     <div className="max-h-[600px] overflow-y-auto">
@@ -356,9 +361,8 @@ function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
                                         <th
                                             key={idx}
                                             scope="col"
-                                            className={`px-6 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200 ${
-                                                numericColumns.has(col) ? 'text-right' : 'text-left'
-                                            }`}
+                                            className={`px-6 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200 ${numericColumns.has(col) ? 'text-right' : 'text-left'
+                                                }`}
                                         >
                                             {cleanColumnName(col)}
                                         </th>
@@ -368,8 +372,8 @@ function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {rows.length === 0 ? (
                                     <tr>
-                                        <td 
-                                            colSpan={columns.length} 
+                                        <td
+                                            colSpan={columns.length}
                                             className="px-6 py-8 text-center text-sm text-gray-500"
                                         >
                                             No data available
@@ -377,22 +381,21 @@ function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
                                     </tr>
                                 ) : (
                                     rows.map((row, rowIdx) => (
-                                        <tr 
-                                            key={rowIdx} 
+                                        <tr
+                                            key={rowIdx}
                                             className="hover:bg-gray-50 transition-colors duration-150"
                                         >
                                             {columns.map((col, colIdx) => {
                                                 const value = row[col];
                                                 const isNumeric = numericColumns.has(col);
-                                                
+
                                                 return (
                                                     <td
                                                         key={colIdx}
-                                                        className={`px-6 py-4 text-sm text-gray-900 ${
-                                                            isNumeric 
-                                                                ? 'text-right font-mono' 
-                                                                : 'text-left'
-                                                        }`}
+                                                        className={`px-6 py-4 text-sm text-gray-900 ${isNumeric
+                                                            ? 'text-right font-mono'
+                                                            : 'text-left'
+                                                            }`}
                                                     >
                                                         {formatCellValue(value)}
                                                     </td>

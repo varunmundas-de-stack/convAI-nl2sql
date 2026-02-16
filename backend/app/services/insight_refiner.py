@@ -22,7 +22,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.services.insight_engine import InsightResult, Insight, Severity, Direction
-from app.services.llm_service import call_claude
+from app.services.llm_service import call_claude, count_tokens
 from app.models.qco import QueryContextObject
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,8 @@ def refine_insights(
         # Call LLM
         logger.debug(f"Calling LLM for insight refinement (prompt length: {len(prompt)} chars)")
         response = call_claude(prompt)
-        
+        token_count = count_tokens(prompt)
+        logger.debug(f"Token count for insight engine: {token_count}")
         # Parse response
         raw_text = response.content[0].text
         refinements = _parse_refinements(raw_text)

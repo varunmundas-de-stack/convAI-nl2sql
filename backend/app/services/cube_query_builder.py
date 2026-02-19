@@ -35,23 +35,6 @@ def _years_ago_str(years: int) -> str:
 
 
 
-
-# TIME_WINDOW_TO_CUBE_RANGE: dict[str, str] = {
-#     "today": "today",
-#     "yesterday": "yesterday",
-#     "last_7_days": "last 7 days",
-#     "last_30_days": "last 30 days",
-#     "last_90_days": "last 90 days",
-#     "month_to_date": "this month",
-#     "quarter_to_date": "this quarter",
-#     "year_to_date": "this year",
-#     "last_month": "last month",
-#     "last_quarter": "last quarter",
-#     "last_year": "last year",
-#     "all_time": "all time",
-# }
-
-
 class CubeQueryBuildError(Exception):
     """Exception raised when a Cube Query cannot be built."""
     pass

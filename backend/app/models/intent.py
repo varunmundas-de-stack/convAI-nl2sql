@@ -182,7 +182,7 @@ class Intent(BaseModel):
     )
     
     sales_scope: Literal["PRIMARY", "SECONDARY"] = Field(
-        default="PRIMARY",
+        default="SECONDARY",
         description="The sales scope (PRIMARY or SECONDARY)"
     )
     

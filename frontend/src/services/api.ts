@@ -1,6 +1,6 @@
 import { ChatResponse } from "@/types/chat";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 
 // Store session ID in memory for the current conversation
 let currentSessionId: string | null = null;

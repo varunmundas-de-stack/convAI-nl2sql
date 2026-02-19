@@ -1,263 +1,143 @@
-# NL2SQL: Natural Language to SQL Analytics for FMCG
+# NL2SQL System Documentation
 
-![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
-![Cube.js](https://img.shields.io/badge/Cube.js-Latest-purple.svg)
+## 1. System Overview
 
+The NL2SQL (Natural Language to SQL) system is a specialized analytics interface designed for the Fast-Moving Consumer Goods (FMCG) sector. It enables non-technical business users to query complex sales data using natural language, abstracting the underlying SQL complexity.
 
----
-## 🎯 Summary & Problem Statement
+The system operates on a "Guardrails First" philosophy, prioritizing accuracy and safety over generative freedom. It utilizes a deterministic pipeline architecture that combines Large Language Models (LLMs) for intent extraction with a strict semantic layer (Cube.js) for data retrieval. This approach mitigates hallucination risks common in generative AI database interfaces by enforcing a validated business catalog.
 
-In the FMCG sector, business users (sales managers, marketing analysts) need quick access to sales data to make informed decisions. However, they often lack the technical skills to write complex SQL queries, creating a bottleneck where they must rely on data analysts for simple requests.
+## 2. Architecture Overview
 
-**NL2SQL bridges this gap** by providing a simple, safe, and powerful conversational interface. It leverages a "Guardrails First" philosophy:
-*   **Accuracy**: Ensures queries map correctly to business metrics via a strict Catalog.
-*   **Safety**: Prevents invalid or malicious queries from reaching the database.
-*   **Explainability**: Provides clear feedback on how a query was interpreted.
+The system employs a microservices-based architecture orchestrated via Docker.
 
----
+### Core Components
 
-## 🚀 Key Features
+*   **Orchestrator Service (Backend)**: A Python FastAPI application serving as the central nervous system. It manages the query lifecycle, state, and integration with external services.
+*   **Semantic Layer (Cube.js)**: Acts as the interface between the application and the raw database. It manages data modeling, caching, access control, and SQL generation.
+*   **Data Store (PostgreSQL)**: The relational database hosting the raw FMCG sales data (facts and dimensions).
+*   **State Store (Redis)**: High-performance key-value store used for managing conversational context (sessions) and temporary pipeline state during clarification loops.
+*   **Inference Engine (Anthropic Claude)**: External LLM service utilized strictly for natural language understanding and intent extraction, not for SQL generation.
 
-- **Natural Language Understanding**: Ask questions in plain English (e.g., "Show me sales by region").
-- **Intent Extraction**: LLM-powered query parsing with state-of-the-art models (Claude).
-- **Semantic Validation**: A rigorous catalog-based validation system ensures every query is strictly mapped to defined business metrics.
-- **Clarification Flow**: Automatically detects ambiguity and asks follow-up questions (e.g., "Did you mean Primary or Secondary sales?").
-- **Cube.js Integration**: Seamless connection to your data warehouse via the Cube.js semantic layer, handling complex joins and aggregations.
-- **Data Visualization**: Automatic generation of appropriate charts (Table, Bar, Line, Pie).
-- **Transparency**: Full visibility into the pipeline steps, from raw intent to final SQL.
-- **Resiliency**: Tests designed to survive LLM drift and schema changes.
-
----
-
-## 🏗️ Architecture
-
-The system follows a pipeline architecture where data flows through distinct stages of processing, validation, and execution.
-
-### 1. High-Level Pipeline
+### Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           NL2SQL Pipeline                                │
-│                                                                          │
-│   "Show me sales by region"                                              │
-│            │                                                             │
-│            ▼                                                             │
-│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐   │
-│   │ Intent Extractor│ ──► │ Intent Validator│ ──► │Cube Query Builder│  │
-│   │     (LLM)       │     │   (Catalog)     │     │   (Mapping)     │   │
-│   └─────────────────┘     └─────────────────┘     └─────────────────┘   │
-│                                                            │             │
-│                                                            ▼             │
-│   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐   │
-│   │ Visualization   │ ◄── │   Cube Client   │ ◄── │   Cube Server   │   │
-│   │   Generator     │     │    (HTTP)       │     │    (API)        │   │
-│   └─────────────────┘     └─────────────────┘     └─────────────────┘   │
-│            │                                               │             │
-│            ▼                                               ▼             │
-│        Response                                   ┌─────────────────┐   │
-│                                                   │   PostgreSQL    │   │
-│                                                   │   (Data Store)  │   │
-│                                                   └─────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+[Client] <-> [FastAPI Backend] <-> [Redis]
+                    |
+                    v
+             [Anthropic API]
+                    |
+                    v
+               [Cube.js API]
+                    |
+                    v
+               [PostgreSQL]
 ```
 
-### 2. Data Flow Steps
+## 3. Pipeline Flow
 
-1.  **Intent Extraction (LLM)**: The user's query is sent to the LLM (Claude) with a prompt containing the business catalog. The LLM returns a structured JSON "Intent".
-2.  **Normalization & Validation**:
-    *   *Normalization*: Semantic terms are mapped to physical Cube IDs (e.g., "sales" -> `fact_secondary_sales.net_value`).
-    *   *Validation*: The Intent is checked against the `catalog.yaml` and strict Pydantic models.
-3.  **Query Generation**: The validated Intent is **deterministically** translated into a Cube Query JSON.
-4.  **Execution (Cube)**: Cube.js generates the SQL, executes it against PostgreSQL, and handles caching.
-5.  **Visualization**: The result set is analyzed to select the best chart type (e.g., Time Series -> Line Chart).
+The query processing pipeline is linear but interruptible, managed by the `QueryOrchestrator`. It proceeds through the following distinct stages:
 
-### 3. Core Design Decisions
+1.  **Context Retrieval**: The system accepts a query and a session ID. It attempts to load the previous Query Context Object (QCO) from Redis to support follow-up questions (e.g., "how about in the South region?").
+2.  **Intent Extraction**: The raw query and optional previous context are submitted to the LLM. The model returns a structured JSON representation of the user's intent, adhering to a defined schema.
+3.  **Intent Merging**: If previous context exists, the new intent is merged with the old QCO. Specific override rules determine how new filters replace or augment existing ones.
+4.  **Normalization**: Semantic terms (e.g., "sales", "last month") are mapped to physical identifiers defined in the Cube.js schema (e.g., `fact_secondary_sales.net_value`, `time_range: last_30_days`).
+5.  **Validation**: The normalized intent is validated against the `catalog.yaml`. The system checks for:
+    *   Metric existence and accessibility.
+    *   Dimension compatibility (group-by validity).
+    *   Filter validity.
+    *   **Ambiguity Detection**: If the intent is incomplete or ambiguous, the pipeline suspends and returns a `ClarificationRequest` to the client.
+6.  **Query Compilation**: A validated intent is deterministically compiled into a Cube.js JSON query object. This step involves no AI; it is a mechanical translation ensuring syntactical correctness.
+7.  **Execution**: The compiled query is transmitted to the Cube.js API. Cube.js generates the dialect-specific SQL, executes it against PostgreSQL, and returns the result set.
+8.  **Insight Generation**: The raw result set is analyzed to generate statistical insights (e.g., trend detection, outlier identification) and a declarative visualization specification (e.g., bar chart configuration).
+9.  **Context Resolution**: A new QCO is derived from the successful query and saved to Redis, updating the session state for future interactions.
+10. **Response Construction**: A comprehensive JSON response containing the data, visualization config, natural language summary, and debug metadata is returned to the client.
 
-*   **Decoupled Catalog**: The LLM sees a simplified "Business Catalog" (`catalog.yaml`), not the raw DB schema. This reduces hallucinations.
-*   **Cube as Semantic Layer**: We do not generate SQL directly. We generate strict Cube queries. Cube handles the complex SQL generation, joins, and time zones.
-*   **Stateful Interaction (Redis)**: The system uses Redis to store conversation state, allowing for clarification loops and follow-up questions.
+## 4. Module Responsibilities
 
----
+The backend codebase (`backend/app/`) is organized by functional responsibility:
 
-## 📁 Project Structure
+*   **`services/query_orchestrator.py`**: The primary controller. It executes the pipeline steps sequentially, handles state transitions, and manages error propagation.
+*   **`services/intent_extractor.py`**: Manages interactions with the LLM provider. It constructs prompts, handles retries, and parses the LLM's string output into JSON.
+*   **`services/intent_validator.py`**: Enforces business logic. It ensures that the requested metrics and dimensions exist in the catalog and are compatible. It is responsible for triggering clarification flows.
+*   **`services/cube_query_builder.py`**: A translation engine that converts the internal `Intent` model into the external Cube.js query format.
+*   **`services/catalog_manager.py`**: Loads and serves the `catalog.yaml` definition file, providing a singleton interface for looking up metrics and dimensions.
+*   **`pipeline/state_store.py`**: Wraps Redis operations for saving and retrieving pipeline state, particularly for interrupted queries requiring user clarification.
 
-The codebase is organized to enforce separation of concerns:
+## 5. API Interfaces
 
-```
-nl2sql/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                 # FastAPI Application entry point
-│   │   ├── models/
-│   │   │   └── intent.py           # Pydantic contract enforcing structural validity
-│   │   ├── services/
-│   │   │   ├── query_orchestrator.py # Core "Brain": Coordinates pipeline steps
-│   │   │   ├── intent_extractor.py   # LLM Interface (Claude) -> Raw JSON
-│   │   │   ├── intent_normalizer.py  # Maps semantic terms to Cube fields
-│   │   │   ├── intent_validator.py   # Enforces strict Catalog rules
-│   │   │   ├── cube_query_builder.py # Deterministic compiler (Intent -> Cube Query)
-│   │   │   ├── cube_client.py        # HTTP Client for Cube API
-│   │   │   ├── catalog_manager.py    # Loads/Serves catalog.yaml
-│   │   │   └── data_visualizer.py    # Generates Plotly/JSON visualization configs
-│   │   ├── pipeline/
-│   │   │   └── state_store.py        # Redis state management for multi-turn chat
-│   │   ├── prompts/
-│   │   │   └── intent_extraction.txt # Few-shot prompt for LLM
-│   │   └── utils/
-│   │       └── generate_catalog.py   # Script to sync Catalog with Cube schema
-│   ├── catalog/
-│   │   └── catalog.yaml            # Single Source of Truth for Business Logic
-│   └── tests/                      # Comprehensive Unit and E2E tests
-├── cube/
-│   ├── model/
-│   │   └── cubes/                  # Cube.js Datamodeling (YAML)
-│   └── data/                       # Seed data scripts
-├── docker-compose.yml              # Infrastructure orchestration
-└── requirements.txt
-```
+The system exposes a RESTful API via FastAPI.
 
----
+### Primary Endpoints
 
-## 🏁 Getting Started
+#### `POST /query`
+Executes a natural language query.
+*   **Input**: `{"query": "string", "session_id": "string (optional)"}`
+*   **Output**: JSON object containing execution results, visualization data, or an error payload.
 
-### Prerequisites
+#### `POST /clarify`
+Resumes a suspended pipeline with user-provided disambiguation.
+*   **Input**: `{"request_id": "string", "answers": { ... }}`
+*   **Output**: Same structure as `/query`.
 
-- **Python 3.12+**
-- **Docker & Docker Compose**
-- **Redis** (Required for state management; docker-compose handles this).
-- **Anthropic API Key** (for Claude LLM).
+### Metadata Endpoints
 
-### 1. Installation
+*   **`GET /catalog/metrics`**: Lists available business metrics.
+*   **`GET /catalog/dimensions`**: Lists available analysis dimensions.
+*   **`GET /catalog/time-windows`**: Lists supported time ranges.
+
+## 6. Error Handling Strategy
+
+The system implements a centralized error handling strategy utilizing the `OrchestratorResponse` object. Exceptions are caught at the pipeline level and converted into structured error data rather than causing HTTP 500 crashes.
+
+### Error Classification
+
+*   **Client Errors (400)**:
+    *   `IntentValidationError`: The query requested metrics not in the catalog.
+    *   `IntentIncompleteError`: The query was too vague (triggers clarification).
+*   **Upstream Errors (502/504)**:
+    *   `CubeHTTPError`: Connection failure to the Cube.js service.
+    *   `CubeQueryExecutionError`: SQL execution failure within the data warehouse.
+*   **System Errors (500)**:
+    *   `LLMCallError`: Failure to communicate with the inference provider.
+    *   `PipelineCompletionError`: Internal logic failure.
+
+Errors include a machine-readable `error_type` and a human-readable `message` to facilitate frontend error display.
+
+## 7. Deployment Flow
+
+Deployment is containerized using Docker Compose, ensuring environment consistency.
+
+### Requirements
+*   Docker Engine & Docker Compose
+*   Python 3.12+ (for local development)
+*   Anthropic API Credentials
+
+### Configuration
+Environment variables function as the primary configuration mechanism, defined in `.env`:
+*   `ANTHROPIC_API_KEY`: Authentication for the LLM.
+*   `CUBE_API_URL`: Endpoint for the Cube.js service.
+*   `REDIS_URL`: Connection string for the state store.
+
+### Infrastructure Setup
+The `docker-compose.yml` defines the service mesh:
+1.  **PostgreSQL**: Initializes with seed data from `cube/data/`.
+2.  **Redis**: Starts with default persistence settings.
+3.  **Cube.js**: Connects to PostgreSQL and exposes the semantic API (port 4000).
+4.  **Backend**: Builds from `backend/Dockerfile` and exposes port 8000.
+
+### Installation
 
 ```bash
-git clone https://github.com/yourusername/nl2sql.git
-cd nl2sql
+# Clone the repository
+git clone <repository_url>
 
-# Backend Setup
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+# Configure environment
+cp .env.example .env
+# Edit .env with appropriate credentials
 
-### 2. Configuration
-
-Create a `.env` file in the project root:
-
-```env
-# LLM Provider
-ANTHROPIC_API_KEY=your_api_key_here
-ANTHROPIC_MODEL_ID=claude-3-sonnet-20240229
-
-# Cube.js
-CUBE_API_URL=http://localhost:4000/cubejs-api/v1
-CUBE_API_SECRET=mysecretkey123
-
-# State Store (Redis)
-REDIS_URL=redis://localhost:6379/0
-
-# App Settings
-LOG_LEVEL=INFO
-```
-
-### 3. Start Infrastructure
-
-Use Docker Compose to spin up PostgreSQL, Cube.js, and Redis.
-
-```bash
+# Start services
 docker-compose up -d
 
-# Wait ~30s for services to initialize...
-
-# Populate Database (One-time setup)
-# Windows PowerShell:
-Get-Content .\cube\data\02_populate_data.sql | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
+# Initialize Database (if not using automatic seeding)
+cat cube/data/02_populate_data.sql | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
 ```
-
-### 4. Run the API
-
-```bash
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
----
-
-## 📖 API Usage
-
-### Execute Query
-
-**POST** `/query`
-
-```json
-{
-  "query": "Show me total secondary sales by zone for the last 30 days"
-}
-```
-
-**Response**:
-```json
-{
-  "query": "Show me total secondary sales by zone for last 30 days",
-  "success": true,
-  "stage": "completed",
-  "validated_intent": {
-    "intent_type": "distribution",
-    "metric": "fact_secondary_sales.net_value",
-    "group_by": ["fact_secondary_sales.zone"],
-    "time_range": {"window": "last_30_days"}
-  },
-  "data": [
-    {"fact_secondary_sales.zone": "North", "fact_secondary_sales.net_value": 150000},
-    {"fact_secondary_sales.zone": "South", "fact_secondary_sales.net_value": 230000}
-  ],
-  "visualization": {
-    "type": "bar",
-    "chart_data": { ... }
-  }
-}
-```
-
----
-
-## 🔧 Supported Metrics & Dimensions
-
-The system comes pre-configured with a standard FMCG data model (`catalog.yaml`).
-
-| Category | Item | Description |
-|----------|------|-------------|
-| **Metrics** | `Primary Sales` | Sales from Company to Distributor |
-| | `Secondary Sales` | Sales from Distributor to Retailer (Offtake) |
-| | `Transaction Count` | Volume of individual invoices |
-| **Dimensions** | `Geography` | Zone, State |
-| | `Product` | Brand, Category |
-| | `Partner` | Distributor Name, Warehouse Name |
-| **Time** | `Windows` | Last 7/30/90 Days, MTD, QTD, YTD, All Time |
-
----
-
-## 🧪 Testing Strategy
-
-The project employs a robust testing strategy to ensure reliability against AI unpredictability.
-
-### 1. Deterministic Tests
-Unit tests validate that the core logic (Validator, Builder) behaves exactly as expected.
-```bash
-pytest app/tests/test_catalog_contract.py
-pytest app/tests/test_intent_validator.py
-```
-
-### 2. End-to-End Pipeline Tests
-Simulates real user queries to ensure the entire flow (LLM -> Cube -> Response) works.
-```bash
-pytest app/tests/test_query_orchestrator_e2e.py
-```
-
----
-
-## 🛣️ Future Work
-
-*   **Automated Catalog Sync**: Build a watcher to automatically trigger catalog generation when Cube files change.
-*   **Natural Language Answers**: Add a final LLM step to summarize the JSON data into a text paragraph.
-*   **Multi-Tenant Support**: Enable context-aware catalog filtering based on the logged-in user.
-*   **CI/CD Pipeline**: GitHub Actions for automated Docker builds and testing.

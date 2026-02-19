@@ -35,23 +35,6 @@ def _years_ago_str(years: int) -> str:
 
 
 
-
-# TIME_WINDOW_TO_CUBE_RANGE: dict[str, str] = {
-#     "today": "today",
-#     "yesterday": "yesterday",
-#     "last_7_days": "last 7 days",
-#     "last_30_days": "last 30 days",
-#     "last_90_days": "last 90 days",
-#     "month_to_date": "this month",
-#     "quarter_to_date": "this quarter",
-#     "year_to_date": "this year",
-#     "last_month": "last month",
-#     "last_quarter": "last quarter",
-#     "last_year": "last year",
-#     "all_time": "all time",
-# }
-
-
 class CubeQueryBuildError(Exception):
     """Exception raised when a Cube Query cannot be built."""
     pass
@@ -114,7 +97,9 @@ def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
 
     if intent.time_dimension is not None:
         td["dimension"] = intent.time_dimension.dimension
-        td["granularity"] = intent.time_dimension.granularity
+        # Only add granularity if present (grouping)
+        if intent.time_dimension.granularity:
+            td["granularity"] = intent.time_dimension.granularity
         
     if intent.time_range is not None:
         if intent.time_range.window:
@@ -124,6 +109,12 @@ def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
                 str(intent.time_range.start_date),
                 str(intent.time_range.end_date),
             ]
+
+    # Ensure we have a dimension field if we have a dateRange
+    if "dateRange" in td and "dimension" not in td:
+        # This shouldn't happen if IntentNormalizer injects the default
+        # But as a failsafe, we could raise or infer
+        raise ValueError("CubeQueryBuilder: Time range specified but no time dimension provided for filtering.")
 
     return [td]
 

@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -7,3 +8,4 @@ class PipelineState:
     original_query: str
     intent: dict
     missing_fields: list[str]
+    session_id: Optional[str] = None

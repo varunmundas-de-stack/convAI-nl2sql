@@ -13,6 +13,7 @@ DESIGN PRINCIPLE:
 import logging
 import colorlog
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -132,10 +133,16 @@ class QueryRequest(BaseModel):
         description="Natural language query",
         json_schema_extra={"example": "Show me total sales by region for last 30 days"}
     )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session ID for conversational context. Enables follow-up queries.",
+        json_schema_extra={"example": "sess_abc123"}
+    )
 
 class ClarificationRequest(BaseModel):
     request_id: str
     answers: dict[str, Any]
+    session_id: str | None = None
 
 # =============================================================================
 # HELPER: MAP PIPELINE STAGE TO HTTP STATUS
@@ -186,10 +193,12 @@ async def execute_query(request: QueryRequest):
     Returns the complete pipeline response (success or failure).
     """
     query = request.query.strip()
-    logger.info(f"Received query: {query}")
+    # Auto-generate session_id if not provided (enables context for follow-ups)
+    session_id = request.session_id or f"sess_{uuid.uuid4().hex[:12]}"
+    logger.info(f"Received query: {query} (session={session_id}, new={request.session_id is None})")
     
     # Delegate to orchestrator (does ALL the work)
-    response = run_pipeline(query)
+    response = run_pipeline(query, session_id=session_id)
     
     # Convert to dict for JSON response
     response_dict = response.to_dict()
@@ -270,7 +279,7 @@ async def list_time_windows():
 
 @app.post("/clarify")
 def clarify_endpoint(req: ClarificationRequest):
-    return resume_query(req.request_id, req.answers)
+    return resume_query(req.request_id, req.answers, session_id=req.session_id)
 
 
 # =============================================================================

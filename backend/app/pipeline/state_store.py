@@ -63,6 +63,7 @@ class RedisStateStore:
             "original_query": state.original_query,
             "intent": state.intent,
             "missing_fields": state.missing_fields,
+            "session_id": state.session_id,
         }
     
     def _dict_to_state(self, data: dict) -> PipelineState:
@@ -72,6 +73,7 @@ class RedisStateStore:
             original_query=data["original_query"],
             intent=data["intent"],
             missing_fields=data["missing_fields"],
+            session_id=data.get("session_id"),
         )
     
     def _key(self, request_id: str) -> str:

@@ -68,9 +68,8 @@ class IntentValidator:
         1. Structural validation (Pydantic parsing)
         2. Metric validation (exists in catalog)
         3. Dimension validation (group_by fields exist)
-        4. Time dimension validation (exists, valid granularity)
-        5. Time range validation (valid window if specified)
-        6. Filter validation (dimensions exist, values valid)
+        4. Intent-specific validation (time dimension, time range, etc.)
+        5. Filter validation (dimensions exist, values valid)
         
         Args:
             raw_intent: Dictionary from LLM or API
@@ -103,19 +102,44 @@ class IntentValidator:
         if intent.group_by:
             self._validate_dimensions(intent.group_by, context="group_by")
         
-        # Step 4: Validate time dimension
-        if not intent.time_dimension:
-            missing_fields.append("time_dimension")
-            clarification_questions.append("What time dimension would you like to use? eg. day, week, month, quarter, year")
+        # Step 4: Intent-specific validation
+        if intent.intent_type == IntentType.TREND:
+            # TREND requires time_dimension and time_range
+            if not intent.time_dimension:
+                missing_fields.append("time_dimension")
+                clarification_questions.append("What time dimension would you like to use? eg. day, week, month, quarter, year")
+            else:
+                self._validate_time_dimension(intent.time_dimension)
+                # For TREND, granularity is MANDATORY
+                if not intent.time_dimension.granularity:
+                    missing_fields.append("time_dimension.granularity")
+                    clarification_questions.append("What time granularity would you like? eg. day, week, month")
+                
+            if not intent.time_range:
+                missing_fields.append("time_range")
+                clarification_questions.append("What time range would you like to use? eg. last 7 days, last 30 days, last 90 days, last 1 year")
+            else:
+                self._validate_time_range(intent.time_range)
+                
+        elif intent.intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION):
+            # RANKING and DISTRIBUTION require group_by
+            if not intent.group_by:
+                missing_fields.append("group_by")
+                clarification_questions.append("What would you like to group or rank by?")
+            
+            # Optional time fields - validate if present
+            if intent.time_dimension:
+                self._validate_time_dimension(intent.time_dimension)
+            if intent.time_range:
+                self._validate_time_range(intent.time_range)
+
         else:
-            self._validate_time_dimension(intent.time_dimension)
-        
-        # Step 5: Validate time range
-        if not intent.time_range:
-            missing_fields.append("time_range")
-            clarification_questions.append("What time range would you like to use? eg. last 7 days, last 30 days, last 90 days, last 1 year")
-        else:
-            self._validate_time_range(intent.time_range)
+            # SNAPSHOT, COMPARISON, DRILL_DOWN - simpler validation
+            # Optional time fields - validate if present
+            if intent.time_dimension:
+                self._validate_time_dimension(intent.time_dimension)
+            if intent.time_range:
+                self._validate_time_range(intent.time_range)
         
         # Step 6: Validate filters
         if intent.filters:
@@ -124,7 +148,7 @@ class IntentValidator:
         if missing_fields:
             raise IntentIncompleteError(
                 missing_fields=missing_fields,
-                clarification_message=clarification_questions,
+                clarification_message=" ".join(clarification_questions),
             )
         return intent
     
@@ -188,9 +212,10 @@ class IntentValidator:
         if not self.catalog.is_valid_time_dimension(time_dim.dimension):
             raise UnknownTimeDimensionError(time_dim.dimension)
 
-        allowed = self.catalog.get_time_granularities(time_dim.dimension)
-        if time_dim.granularity not in allowed:
-            raise InvalidGranularityError(time_dim.granularity)
+        if time_dim.granularity:
+            allowed = self.catalog.get_time_granularities(time_dim.dimension)
+            if time_dim.granularity not in allowed:
+                raise InvalidGranularityError(time_dim.granularity)
 
     
     def _validate_time_range(self, time_range: TimeRange) -> None:

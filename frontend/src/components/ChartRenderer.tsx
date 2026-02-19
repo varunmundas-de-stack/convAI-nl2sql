@@ -1,0 +1,895 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus } from "lucide-react";
+
+// Types matching backend VisualSpec
+interface VisualSpec {
+    chart_type: string;
+    title?: string;
+    subtitle?: string;
+    x_axis?: Axis;
+    y_axis?: Axis;
+    series?: DataSeries[];
+    annotations?: InsightAnnotation[];
+    markers?: Marker[];
+    primary_value?: string;
+    primary_label?: string;
+    secondary_value?: string;
+    secondary_label?: string;
+    direction?: "up" | "down" | "flat" | "unknown";
+    trend_slope?: number;
+    columns?: string[];
+    rows?: any[];
+    empty?: boolean;
+}
+
+interface Axis {
+    label: string;
+    values?: any[];  // For categorical/time: labels; For linear: tick positions
+    format?: string;
+    axis_type?: "time" | "categorical" | "linear";
+}
+
+interface DataSeries {
+    label: string;
+    values: any[];  // Actual data values
+    emphasis?: string;
+    color_hint?: string;
+    point_emphasis?: string[];
+    point_colors?: (string | null)[];
+}
+
+interface InsightAnnotation {
+    text: string;
+    severity: "low" | "medium" | "high" | "critical";
+    direction?: "up" | "down" | "flat" | "unknown";
+    position?: string;
+}
+
+interface Marker {
+    marker_type: "outlier" | "trend_line" | "threshold" | "annotation" | "peak" | "trough";
+    label: string;
+    position?: any;
+    value?: number;
+    emphasis?: string;
+}
+
+interface RefinedInsights {
+    insights?: any[];
+    executive_summary?: string;
+}
+
+interface ChartRendererProps {
+    visual_spec?: VisualSpec;
+    refined_insights?: RefinedInsights;
+}
+
+export default function ChartRenderer({ visual_spec, refined_insights }: ChartRendererProps) {
+    const [showContextNotes, setShowContextNotes] = useState(false);
+    const [isClient, setIsClient] = useState(false);
+
+    useEffect(() => {
+        setIsClient(true);
+    }, []);
+
+    if (!isClient) {
+        return (
+            <div className="bg-white p-6 rounded-lg border border-gray-200 h-[400px] flex items-center justify-center">
+                <p className="text-gray-500">Loading chart...</p>
+            </div>
+        );
+    }
+
+    if (!visual_spec) {
+        return (
+            <div className="bg-white p-6 rounded-lg border border-gray-200">
+                <p className="text-gray-500">No visualization data available</p>
+            </div>
+        );
+    }
+
+    if (visual_spec.empty) {
+        return (
+            <div className="bg-white p-6 rounded-lg border border-gray-200">
+                <p className="text-gray-500">No data returned for this query</p>
+            </div>
+        );
+    }
+
+    const { chart_type, title, subtitle, primary_value, primary_label, secondary_value, secondary_label, direction, trend_slope } = visual_spec;
+
+    return (
+        <div className="space-y-4">
+            {/* Title Section */}
+            {title && (
+                <div className="space-y-1">
+                    <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+                    {subtitle && <p className="text-sm text-gray-600">{subtitle}</p>}
+                </div>
+            )}
+
+            {/* Executive Summary (Always Visible) */}
+            {refined_insights?.executive_summary && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="text-xs font-bold text-blue-900 mb-2 uppercase tracking-wide">Executive Summary</h4>
+                    <p className="text-sm text-blue-800 leading-relaxed font-medium">{refined_insights.executive_summary}</p>
+                </div>
+            )}
+
+            {/* Context Notes (Collapsible via Dropdown) */}
+            {refined_insights?.insights && refined_insights.insights.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+                    <button
+                        onClick={() => setShowContextNotes(!showContextNotes)}
+                        className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                        aria-expanded={showContextNotes}
+                    >
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm font-semibold text-gray-700">Detailed Insights</span>
+                            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                                {refined_insights.insights.length}
+                            </span>
+                        </div>
+                        {showContextNotes ? (
+                            <ChevronUp className="h-4 w-4 text-gray-500" aria-hidden="true" />
+                        ) : (
+                            <ChevronDown className="h-4 w-4 text-gray-500" aria-hidden="true" />
+                        )}
+                    </button>
+                    {showContextNotes && (
+                        <div className="divide-y divide-gray-100">
+                            {refined_insights.insights.map((insight: any, idx: number) => (
+                                <div key={idx} className="p-4 hover:bg-gray-50 transition-colors">
+                                    <div className="flex items-start gap-3">
+                                        <div className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${insight.severity === 'critical' ? 'bg-red-500 shadow-sm ring-1 ring-red-200' :
+                                            insight.severity === 'high' ? 'bg-orange-500 shadow-sm ring-1 ring-orange-200' :
+                                                insight.severity === 'medium' ? 'bg-yellow-500 shadow-sm ring-1 ring-yellow-200' :
+                                                    'bg-blue-400 shadow-sm ring-1 ring-blue-200'
+                                            }`} />
+                                        <div className="space-y-1">
+                                            <p className="text-sm text-gray-700 font-medium leading-normal">{insight.headline}</p>
+                                            {insight.context_note && (
+                                                <p className="text-sm text-gray-600 mt-1">{insight.context_note}</p>
+                                            )}
+                                            {insight.label && (
+                                                <p className="text-xs text-gray-400 uppercase tracking-tighter">{insight.label.replace(/_/g, " ")}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Primary/Secondary Values for Number Cards and Snapshots */}
+            {chart_type === "number_card" && primary_value && (
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                    <div className="space-y-4">
+                        <div>
+                            <p className="text-sm text-gray-600 mb-1">{primary_label || "Value"}</p>
+                            <div className="flex items-baseline gap-3">
+                                <p className="text-4xl font-bold text-gray-900">{primary_value}</p>
+                                {direction && direction !== "unknown" && trend_slope !== undefined && (
+                                    <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${direction === "up" ? "bg-green-100 text-green-700" :
+                                        direction === "down" ? "bg-red-100 text-red-700" :
+                                            "bg-gray-100 text-gray-700"
+                                        }`}>
+                                        {direction === "up" && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
+                                        {direction === "down" && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
+                                        {direction === "flat" && <Minus className="h-4 w-4" aria-hidden="true" />}
+                                        <span>{Math.abs(trend_slope).toFixed(1)}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        {secondary_value && (
+                            <div className="pt-4 border-t border-blue-200">
+                                <p className="text-xs text-gray-500">{secondary_label || "Secondary"}</p>
+                                <p className="text-lg font-semibold text-gray-700">{secondary_value}</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Chart Rendering */}
+            {chart_type === "table" && visual_spec.columns && visual_spec.rows ? (
+                <TableRenderer columns={visual_spec.columns} rows={visual_spec.rows} />
+            ) : chart_type === "bar" || chart_type === "horizontal_bar" || chart_type === "stacked_bar" ? (
+                <BarChartRenderer spec={visual_spec} />
+            ) : chart_type === "line" ? (
+                <LineChartRenderer spec={visual_spec} />
+            ) : chart_type === "pie" ? (
+                <PieChartRenderer spec={visual_spec} />
+            ) : chart_type !== "number_card" ? (
+                <div className="bg-white p-2 rounded-lg border border-gray-200">
+                    <p className="text-gray-500">Unsupported chart type: {chart_type}</p>
+                </div>
+            ) : null}
+
+
+        </div>
+    );
+}
+
+// Helper function for severity styles
+function getSeverityStyles(severity: string): string {
+    switch (severity) {
+        case "critical":
+            return "bg-red-50 border-red-300 text-red-900";
+        case "high":
+            return "bg-orange-50 border-orange-300 text-orange-900";
+        case "medium":
+            return "bg-yellow-50 border-yellow-300 text-yellow-900";
+        case "low":
+        default:
+            return "bg-gray-50 border-gray-300 text-gray-700";
+    }
+}
+
+// Helper to format numbers consistently
+function formatNumber(value: number): string {
+    if (value >= 1_000_000_000) {
+        return `${(value / 1_000_000_000).toFixed(1)}B`;
+    } else if (value >= 1_000_000) {
+        return `${(value / 1_000_000).toFixed(1)}M`;
+    } else if (value >= 1_000) {
+        return `${(value / 1_000).toFixed(1)}K`;
+    } else if (value % 1 !== 0) {
+        return value.toFixed(2);
+    } else {
+        return value.toString();
+    }
+}
+
+// Clean column name for display (remove table prefixes, format nicely)
+function cleanColumnName(col: string): string {
+    if (!col) return "Value";
+
+    // Remove table prefixes like "fact_secondary_sales.", "dim_product.", etc.
+    let cleaned = col;
+
+    // Strip common table prefixes
+    const prefixes = [
+        "fact_secondary_sales.",
+        "fact_primary_sales.",
+        "fact secondary sales.",
+        "fact primary sales.",
+        "dim_product.",
+        "dim_region.",
+        "dim_time.",
+        "fact_",
+        "dim_",
+    ];
+
+    for (const prefix of prefixes) {
+        if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
+            cleaned = cleaned.substring(prefix.length);
+            break;
+        }
+    }
+
+    // Remove any remaining dots by taking the last segment
+    if (cleaned.includes(".")) {
+        const parts = cleaned.split(".");
+        cleaned = parts[parts.length - 1];
+    }
+
+    // Replace underscores with spaces and title case
+    return cleaned.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Format cell values with proper number and date formatting
+function formatCellValue(value: any): string {
+    if (value === null || value === undefined || value === "") {
+        return "-";
+    }
+
+    // Handle date strings (ISO 8601 format)
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+        try {
+            const date = new Date(value);
+            // Format as: DD MMM YYYY (e.g., "01 Oct 2025")
+            return date.toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric'
+            });
+        } catch {
+            return String(value);
+        }
+    }
+
+    // Handle numbers - add comma separators for large numbers
+    if (typeof value === "number") {
+        // For integers or numbers with less than 2 decimal places, show as integer
+        if (Number.isInteger(value) || Math.abs(value) > 100) {
+            return value.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+        }
+        // For small decimal numbers, show 2 decimal places
+        return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    return String(value);
+}
+
+// Detect if a column contains numeric data (for right alignment)
+function isNumericColumn(rows: any[], columnName: string): boolean {
+    if (rows.length === 0) return false;
+
+    // Check first 5 non-null values
+    const samples = rows
+        .slice(0, 5)
+        .map(row => row[columnName])
+        .filter(val => val !== null && val !== undefined);
+
+    if (samples.length === 0) return false;
+
+    // If any sample is a number, consider it numeric
+    return samples.some(val => typeof val === "number");
+}
+
+// Table Renderer
+function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
+    // Determine which columns are numeric for alignment
+    const numericColumns = new Set(
+        columns.filter(col => isNumericColumn(rows, col))
+    );
+
+    return (
+        <div className="space-y-3">
+            {/* Row count indicator */}
+            <div className="flex items-center justify-between text-xs text-gray-500">
+                <span>{rows.length} {rows.length === 1 ? 'row' : 'rows'}</span>
+                {rows.length > 100 && (
+                    <span className="text-amber-600 font-medium">
+                        Large dataset - scroll to view all
+                    </span>
+                )}
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <div className="max-h-[600px] overflow-y-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                <tr>
+                                    {columns.map((col, idx) => (
+                                        <th
+                                            key={idx}
+                                            scope="col"
+                                            className={`px-6 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200 ${numericColumns.has(col) ? 'text-right' : 'text-left'
+                                                }`}
+                                        >
+                                            {cleanColumnName(col)}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {rows.length === 0 ? (
+                                    <tr>
+                                        <td
+                                            colSpan={columns.length}
+                                            className="px-6 py-8 text-center text-sm text-gray-500"
+                                        >
+                                            No data available
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    rows.map((row, rowIdx) => (
+                                        <tr
+                                            key={rowIdx}
+                                            className="hover:bg-gray-50 transition-colors duration-150"
+                                        >
+                                            {columns.map((col, colIdx) => {
+                                                const value = row[col];
+                                                const isNumeric = numericColumns.has(col);
+
+                                                return (
+                                                    <td
+                                                        key={colIdx}
+                                                        className={`px-6 py-4 text-sm text-gray-900 ${isNumeric
+                                                            ? 'text-right font-mono'
+                                                            : 'text-left'
+                                                            }`}
+                                                    >
+                                                        {formatCellValue(value)}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Bar Chart Renderer (SVG implementation)
+function BarChartRenderer({ spec }: { spec: VisualSpec }) {
+    const series = spec.series?.[0];
+    const xLabels = spec.x_axis?.values || [];  // Category labels
+    const yValues = series?.values || [];       // Actual data values
+    const yAxisTicks = spec.y_axis?.values || [];  // Y-axis tick positions
+    const pointColors = series?.point_colors || [];
+    const pointEmphasis = series?.point_emphasis || [];
+
+    if (yValues.length === 0) return null;
+
+    const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
+    const chartHeight = 300;
+    const topPadding = 40;
+    const bottomPadding = 60;
+    const leftPadding = 60;  // Space for Y-axis labels
+    const rightPadding = 20;
+    const totalHeight = chartHeight + topPadding + bottomPadding;
+    const chartWidth = Math.max(600, xLabels.length * 70);
+    const totalWidth = chartWidth + leftPadding + rightPadding;
+    const barWidth = Math.min(60, (chartWidth / yValues.length) * 0.8);
+
+    // Use backend tick values if available, otherwise compute
+    const tickValues = yAxisTicks.length > 0
+        ? yAxisTicks
+        : [0, maxValue * 0.25, maxValue * 0.5, maxValue * 0.75, maxValue];
+
+    const maxTickValue = Math.max(...tickValues.map(v => typeof v === 'number' ? v : 0));
+
+    return (
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+            {spec.primary_value && (
+                <div className="mb-4 flex items-baseline gap-4">
+                    <div>
+                        <p className="text-xs text-gray-500">{spec.primary_label}</p>
+                        <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
+                    </div>
+                    {spec.secondary_value && (
+                        <div>
+                            <p className="text-xs text-gray-500">{spec.secondary_label}</p>
+                            <p className="text-lg font-semibold text-gray-700">{spec.secondary_value}</p>
+                        </div>
+                    )}
+                </div>
+            )}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
+                </div>
+                <div className="overflow-x-auto">
+                    <svg
+                        width={totalWidth}
+                        height={totalHeight}
+                        viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+                        role="img"
+                        aria-label={`Bar chart showing ${spec.y_axis?.label || "values"}`}
+                    >
+                        <title>{spec.title || `Bar chart of ${spec.y_axis?.label}`}</title>
+
+                        {/* Y-axis ticks and labels */}
+                        {tickValues.map((tickValue, idx) => {
+                            const y = topPadding + chartHeight - ((tickValue as number) / maxTickValue) * chartHeight;
+                            return (
+                                <g key={`y-tick-${idx}`}>
+                                    {/* Grid line */}
+                                    <line
+                                        x1={leftPadding}
+                                        y1={y}
+                                        x2={leftPadding + chartWidth}
+                                        y2={y}
+                                        stroke="#e5e7eb"
+                                        strokeWidth={1}
+                                        aria-hidden="true"
+                                    />
+                                    {/* Tick mark */}
+                                    <line
+                                        x1={leftPadding - 5}
+                                        y1={y}
+                                        x2={leftPadding}
+                                        y2={y}
+                                        stroke="#9ca3af"
+                                        strokeWidth={1}
+                                        aria-hidden="true"
+                                    />
+                                    {/* Y-axis label */}
+                                    <text
+                                        x={leftPadding - 10}
+                                        y={y}
+                                        textAnchor="end"
+                                        dominantBaseline="middle"
+                                        className="text-xs fill-gray-600"
+                                    >
+                                        {formatNumber(tickValue as number)}
+                                    </text>
+                                </g>
+                            );
+                        })}
+
+                        {/* Y-axis line */}
+                        <line
+                            x1={leftPadding}
+                            y1={topPadding}
+                            x2={leftPadding}
+                            y2={topPadding + chartHeight}
+                            stroke="#9ca3af"
+                            strokeWidth={2}
+                            aria-hidden="true"
+                        />
+
+                        {/* X-axis line */}
+                        <line
+                            x1={leftPadding}
+                            y1={topPadding + chartHeight}
+                            x2={leftPadding + chartWidth}
+                            y2={topPadding + chartHeight}
+                            stroke="#9ca3af"
+                            strokeWidth={2}
+                            aria-hidden="true"
+                        />
+
+                        {/* Bars */}
+                        {yValues.map((value, idx) => {
+                            const height = maxTickValue > 0 ? (value / maxTickValue) * chartHeight : 0;
+                            const x = leftPadding + idx * (chartWidth / yValues.length) + (chartWidth / yValues.length - barWidth) / 2;
+                            const y = topPadding + (chartHeight - height);
+
+                            // Determine color
+                            let fillColor = pointColors[idx] || "#3b82f6"; // Default blue
+                            const emphasis = pointEmphasis[idx];
+
+                            // Adjust opacity based on emphasis
+                            const opacity = emphasis === "strong" || emphasis === "critical" ? 1 :
+                                emphasis === "subtle" ? 0.8 : 0.7;
+
+                            return (
+                                <g key={idx}>
+                                    <rect
+                                        x={x}
+                                        y={y}
+                                        width={barWidth}
+                                        height={height}
+                                        fill={fillColor}
+                                        opacity={opacity}
+                                        rx={4}
+                                        className="transition-all hover:opacity-100"
+                                        aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
+                                    >
+                                        <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
+                                    </rect>
+                                    {/* Value label on top of bar */}
+                                    <text
+                                        x={x + barWidth / 2}
+                                        y={y - 5}
+                                        textAnchor="middle"
+                                        className="text-xs fill-gray-700 font-medium"
+                                    >
+                                        {formatNumber(value)}
+                                    </text>
+                                    {/* X-axis label */}
+                                    <text
+                                        x={x + barWidth / 2}
+                                        y={topPadding + chartHeight + 20}
+                                        textAnchor="middle"
+                                        className="text-xs fill-gray-600"
+                                    >
+                                        {String(xLabels[idx] || idx).substring(0, 12)}
+                                    </text>
+                                </g>
+                            );
+                        })}
+
+                        {/* Threshold markers */}
+                        {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx) => {
+                            const markerValue = marker.value || 0;
+                            const y = topPadding + (chartHeight - (markerValue / maxTickValue) * chartHeight);
+                            return (
+                                <g key={`threshold-${idx}`}>
+                                    <line
+                                        x1={leftPadding}
+                                        y1={y}
+                                        x2={leftPadding + chartWidth}
+                                        y2={y}
+                                        stroke="#ef4444"
+                                        strokeWidth={2}
+                                        strokeDasharray="4 4"
+                                        aria-hidden="true"
+                                    />
+                                    <text
+                                        x={leftPadding + 5}
+                                        y={y - 5}
+                                        className="text-xs fill-red-600 font-medium"
+                                    >
+                                        {marker.label}
+                                    </text>
+                                </g>
+                            );
+                        })}
+                    </svg>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Line Chart Renderer (SVG implementation)
+function LineChartRenderer({ spec }: { spec: VisualSpec }) {
+    const series = spec.series?.[0];
+    const xLabels = spec.x_axis?.values || [];  // Time/category labels
+    const yValues = series?.values || [];       // Actual data values
+    const yAxisTicks = spec.y_axis?.values || [];  // Y-axis tick positions
+
+    if (yValues.length === 0) return null;
+
+    const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
+    const minValue = Math.min(...yValues.map(v => typeof v === 'number' ? v : 0));
+    const chartHeight = 300;
+    const topPadding = 40;
+    const bottomPadding = 60;
+    const leftPadding = 60;
+    const rightPadding = 20;
+    const totalHeight = chartHeight + topPadding + bottomPadding;
+    const chartWidth = 600;
+    const totalWidth = chartWidth + leftPadding + rightPadding;
+    const pointSpacing = chartWidth / (yValues.length - 1 || 1);
+
+    // Use backend tick values if available, otherwise compute
+    const tickValues = yAxisTicks.length > 0
+        ? yAxisTicks
+        : [minValue, minValue + (maxValue - minValue) * 0.25, minValue + (maxValue - minValue) * 0.5,
+            minValue + (maxValue - minValue) * 0.75, maxValue];
+
+    const minTickValue = Math.min(...tickValues.map(v => typeof v === 'number' ? v : 0));
+    const maxTickValue = Math.max(...tickValues.map(v => typeof v === 'number' ? v : 0));
+    const range = maxTickValue - minTickValue || 1;
+
+    // Generate path
+    const pathData = yValues
+        .map((value, idx) => {
+            const x = leftPadding + idx * pointSpacing;
+            const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
+            return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
+        })
+        .join(' ');
+
+    const lineColor = series?.color_hint === "positive" ? "#10b981" :
+        series?.color_hint === "negative" ? "#ef4444" : "#3b82f6";
+
+    return (
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+            {spec.primary_value && (
+                <div className="mb-4 flex items-baseline gap-4">
+                    <div>
+                        <p className="text-xs text-gray-500">{spec.primary_label}</p>
+                        <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
+                    </div>
+                    {spec.trend_slope !== undefined && (
+                        <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${spec.trend_slope > 0 ? "bg-green-100 text-green-700" :
+                            spec.trend_slope < 0 ? "bg-red-100 text-red-700" :
+                                "bg-gray-100 text-gray-700"
+                            }`}>
+                            {spec.trend_slope > 0 && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
+                            {spec.trend_slope < 0 && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
+                            {spec.trend_slope === 0 && <Minus className="h-4 w-4" aria-hidden="true" />}
+                            <span>{Math.abs(spec.trend_slope).toFixed(1)}%</span>
+                        </div>
+                    )}
+                </div>
+            )}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
+                </div>
+                <svg
+                    width={totalWidth}
+                    height={totalHeight}
+                    viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+                    role="img"
+                    aria-label={`Line chart showing ${spec.y_axis?.label || "trend"}`}
+                >
+                    <title>{spec.title || `Line chart of ${spec.y_axis?.label}`}</title>
+
+                    {/* Y-axis ticks and labels */}
+                    {tickValues.map((tickValue, idx) => {
+                        const y = topPadding + chartHeight - ((tickValue as number - minTickValue) / range) * chartHeight;
+                        return (
+                            <g key={`y-tick-${idx}`}>
+                                {/* Grid line */}
+                                <line
+                                    x1={leftPadding}
+                                    y1={y}
+                                    x2={leftPadding + chartWidth}
+                                    y2={y}
+                                    stroke="#e5e7eb"
+                                    strokeWidth={1}
+                                    aria-hidden="true"
+                                />
+                                {/* Tick mark */}
+                                <line
+                                    x1={leftPadding - 5}
+                                    y1={y}
+                                    x2={leftPadding}
+                                    y2={y}
+                                    stroke="#9ca3af"
+                                    strokeWidth={1}
+                                    aria-hidden="true"
+                                />
+                                {/* Y-axis label */}
+                                <text
+                                    x={leftPadding - 10}
+                                    y={y}
+                                    textAnchor="end"
+                                    dominantBaseline="middle"
+                                    className="text-xs fill-gray-600"
+                                >
+                                    {formatNumber(tickValue as number)}
+                                </text>
+                            </g>
+                        );
+                    })}
+
+                    {/* Y-axis line */}
+                    <line
+                        x1={leftPadding}
+                        y1={topPadding}
+                        x2={leftPadding}
+                        y2={topPadding + chartHeight}
+                        stroke="#9ca3af"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                    />
+
+                    {/* X-axis line */}
+                    <line
+                        x1={leftPadding}
+                        y1={topPadding + chartHeight}
+                        x2={leftPadding + chartWidth}
+                        y2={topPadding + chartHeight}
+                        stroke="#9ca3af"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                    />
+
+                    {/* Line path */}
+                    <path
+                        d={pathData}
+                        fill="none"
+                        stroke={lineColor}
+                        strokeWidth={3}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    />
+
+                    {/* Points */}
+                    {yValues.map((value, idx) => {
+                        const x = leftPadding + idx * pointSpacing;
+                        const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
+
+                        return (
+                            <circle
+                                key={idx}
+                                cx={x}
+                                cy={y}
+                                r={4}
+                                fill={lineColor}
+                                className="hover:r-6 transition-all"
+                                aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
+                            >
+                                <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
+                            </circle>
+                        );
+                    })}
+
+                    {/* X-axis labels */}
+                    {xLabels.map((label, idx) => {
+                        const x = leftPadding + idx * pointSpacing;
+                        return (
+                            <text
+                                key={idx}
+                                x={x}
+                                y={topPadding + chartHeight + 20}
+                                textAnchor="middle"
+                                className="text-xs fill-gray-600"
+                            >
+                                {String(label).substring(0, 10)}
+                            </text>
+                        );
+                    })}
+                </svg>
+            </div>
+        </div>
+    );
+}
+
+// Pie Chart Renderer (SVG implementation)
+function PieChartRenderer({ spec }: { spec: VisualSpec }) {
+    const series = spec.series?.[0];
+    const labels = spec.x_axis?.values || [];
+    const values = series?.values || [];
+
+    if (values.length === 0) return null;
+
+    const total = values.reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+    const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+
+    let currentAngle = -90; // Start from top
+    const slices = values.map((value, idx) => {
+        const percentage = (value / total) * 100;
+        const angle = (value / total) * 360;
+        const startAngle = currentAngle;
+        const endAngle = currentAngle + angle;
+        currentAngle = endAngle;
+
+        return {
+            value,
+            percentage,
+            startAngle,
+            endAngle,
+            color: colors[idx % colors.length],
+            label: labels[idx],
+        };
+    });
+
+    return (
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+            <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-1">
+                    <svg
+                        width="300"
+                        height="300"
+                        viewBox="-150 -150 300 300"
+                        role="img"
+                        aria-label={`Pie chart showing distribution of ${spec.y_axis?.label || "values"}`}
+                    >
+                        <title>{spec.title || `Pie chart of ${spec.y_axis?.label}`}</title>
+                        {slices.map((slice, idx) => {
+                            const radius = 120;
+                            const startRad = (slice.startAngle * Math.PI) / 180;
+                            const endRad = (slice.endAngle * Math.PI) / 180;
+                            const x1 = radius * Math.cos(startRad);
+                            const y1 = radius * Math.sin(startRad);
+                            const x2 = radius * Math.cos(endRad);
+                            const y2 = radius * Math.sin(endRad);
+                            const largeArc = slice.percentage > 50 ? 1 : 0;
+
+                            return (
+                                <path
+                                    key={idx}
+                                    d={`M 0 0 L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`}
+                                    fill={slice.color}
+                                    opacity={0.9}
+                                    className="hover:opacity-100 transition-opacity"
+                                    aria-label={`${slice.label}: ${slice.percentage.toFixed(1)}%`}
+                                >
+                                    <title>{`${slice.label}: ${slice.value.toLocaleString()} (${slice.percentage.toFixed(1)}%)`}</title>
+                                </path>
+                            );
+                        })}
+                    </svg>
+                </div>
+                <div className="flex-1 space-y-2">
+                    {slices.map((slice, idx) => (
+                        <div key={idx} className="flex items-center gap-3">
+                            <div
+                                className="w-4 h-4 rounded"
+                                style={{ backgroundColor: slice.color }}
+                                aria-hidden="true"
+                            />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium text-gray-900">{slice.label}</p>
+                                <p className="text-xs text-gray-500">
+                                    {slice.value.toLocaleString()} ({slice.percentage.toFixed(1)}%)
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}

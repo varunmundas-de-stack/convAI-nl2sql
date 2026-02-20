@@ -2,6 +2,8 @@ import anthropic
 from dotenv import load_dotenv
 import os
 import logging
+from arize.otel import register
+from openinference.instrumentation.anthropic import AnthropicInstrumentor
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,7 +21,13 @@ try:
 except Exception as e:
     logger.error(f"Error loading configuration: {e}")
 
+tracer_provider = register(
+    space_id = "U3BhY2U6Mzg1MDE6dVlmZg==",
+    api_key = os.getenv("ARIZE_API_KEY"),
+    project_name = "nl2sql",
+)
 
+AnthropicInstrumentor().instrument(tracer_provider=tracer_provider)
 
 def call_claude(prompt: str) -> anthropic.types.Message:
     """

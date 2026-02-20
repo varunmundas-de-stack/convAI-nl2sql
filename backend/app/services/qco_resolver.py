@@ -18,6 +18,7 @@ from typing import Optional
 
 from app.models.intent import Intent
 from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter
+from app.models.hierarchy import get_axis
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,13 @@ def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
     if hasattr(intent_type, "value"):
         intent_type = intent_type.value
 
+    # Compute active hierarchy state from group_by
+    active_hierarchies = {}
+    for dim in (group_by or []):
+        axis = get_axis(dim)
+        if axis:
+            active_hierarchies[axis] = dim
+
     qco = QueryContextObject(
         original_query=query,
         intent_type=intent_type,
@@ -88,10 +96,12 @@ def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
         filters=filters,
         visualization_type=intent.visualization_type,
         limit=intent.limit,
+        active_hierarchies=active_hierarchies or None,
     )
 
     logger.info(f"QCO resolved: metric={metric}, scope={intent.sales_scope}, "
-                f"time_range={time_range}, group_by={group_by}")
+                f"time_range={time_range}, group_by={group_by}, "
+                f"active_hierarchies={active_hierarchies or 'none'}")
 
     return qco
 

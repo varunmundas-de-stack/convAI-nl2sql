@@ -8,7 +8,7 @@ It carries NO query results — only the resolved intent parameters.
 """
 
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -75,6 +75,12 @@ class QueryContextObject(BaseModel):
     # Limit
     limit: Optional[int] = Field(default=None)
 
+    # Hierarchy state
+    active_hierarchies: Optional[Dict[str, str]] = Field(
+        default=None,
+        description='Axis → current active dimension, e.g. {"geography": "zone", "product": "brand"}'
+    )
+
     def to_prompt_context(self) -> str:
         """
         Format QCO as a human-readable context block for LLM prompt injection.
@@ -113,5 +119,9 @@ class QueryContextObject(BaseModel):
 
         if self.limit:
             lines.append(f"Previous Limit: {self.limit}")
+
+        if self.active_hierarchies:
+            hier_strs = [f"{axis}={dim}" for axis, dim in self.active_hierarchies.items()]
+            lines.append(f"Previous Hierarchies: {', '.join(hier_strs)}")
 
         return "\n".join(lines)

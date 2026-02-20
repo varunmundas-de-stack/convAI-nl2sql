@@ -6,200 +6,321 @@ Output ONLY valid JSON. No explanation. No markdown.
 
 ## OUTPUT SCHEMA
 {
-  "intent_type": "<string>",
-  "sales_scope": "<PRIMARY | SECONDARY>",
-  "metric": "<string | null>",
-  "group_by": "<array | null>",
-  "time_dimension": {"dimension": "<string | null>", "granularity": "<string | null>"} | null,
-  "time_range": {"window": "<string | null>", "start_date": "<string | null>", "end_date": "<string | null>"} | null,
-  "filters": [{"dimension": "<string>", "operator": "<string>", "value": "<string | array>"}] | null,
-  "visualization_type": "<string>",
-  "limit": "<integer | null>"
+  "sales_scope": "PRIMARY | SECONDARY",
+  "metrics": [
+    {
+      "name": "<metric_name>"
+    }
+  ],
+  "group_by": ["<dimension_name>"] | null,
+  "filters": [
+    {
+      "dimension": "<dimension_name>",
+      "operator": "equals | not_equals | in | not_in | contains",
+      "value": "<string | array>"
+    }
+  ] | null,
+  "time": {
+    "dimension": "invoice_date",
+    "window": "<time_window | null>",
+    "start_date": "<YYYY-MM-DD | null>",
+    "end_date": "<YYYY-MM-DD | null>",
+    "granularity": "day | week | month | quarter | year | null"
+  } | null,
+
+  "post_processing": {
+    "ranking": {
+      "enabled": true | false,
+      "order": "asc | desc",
+      "limit": <integer | null>
+    } | null,
+
+    "comparison": {
+      "type": "none | dimension | period",
+      "comparison_window": "<time_window | null>"
+    } | null,
+
+    "derived_metric": "none | mom_growth | yoy_growth | contribution_percent | avg_price"
+  } | null
 }
+
 
 ## HARD RULES (DO NOT VIOLATE)
 1. Use ONLY semantic catalog values listed below. Never invent.
-2. `metric` MUST be a metric, never a dimension.
+2. `metrics[].name` MUST be a metric from the catalog, never a dimension.
 3. `group_by` MUST contain ONLY dimensions, never metrics.
 4. Metrics can NEVER appear in `group_by`.
 5. If the question mentions "Primary" or "Secondary", set `sales_scope` explicitly. Default to "SECONDARY".
-6. If metric implies aggregation ("total", "sum", "value", "amount"), choose a VALUE metric.
-7. If metric implies counting ("how many", "count", "number of"), choose a COUNT metric.
-8. If the query mentions "top N" or "bottom N", set `limit` to N (e.g., "top 5" -> limit=5).
-9. For ranking intents without explicit limit, use limit=10 as default.
+6. If metric implies aggregation ("total", "sum", "value", "amount"), aggregation = "sum".
+7. If metric implies counting ("how many", "count", "number of"), use metric name "count" with aggregation = "count".
+8. If metric implies averaging ("average", "mean", "per"), aggregation = "avg".
+9. If the query mentions "top N", set ranking.enabled = true, order = "desc", limit = N.
+10. If the query mentions "bottom N", set ranking.enabled = true, order = "asc", limit = N.
+11. Do NOT output "intent_type" or "visualization_type" — these are not part of the schema.
+12. If "post_processing" has no relevant fields, set it to null.
+13. "time" must always use "window" OR "start_date"/"end_date" — never both.
 
 
+## TIME RULES
+1. Use "time.window" ONLY if it matches one of the TIME_WINDOWS exactly.
+2. If the duration is not listed (e.g. "last 6 months"), DO NOT invent a window.
+3. Instead, compute explicit "start_date" and "end_date" in YYYY-MM-DD format.
+4. Use TODAY = {current_date} to calculate dates when no window matches.
+5. start_date is inclusive. end_date is inclusive.
+6. If no time is mentioned at all, set "time" to null.
+7. For trend queries (metric over time with grouping by period), always set "time.granularity".
+8. For snapshot/filter-only queries, "time.granularity" must be null.
 
-## TIME RANGE RULES:
-1. Use "time_range.window" ONLY if it matches one of the TIME_WINDOWS exactly.
-2. If the duration is not listed (example: "last 6 months"), DO NOT invent a window.
-3. In that case, compute and output explicit "start_date" and "end_date" in ISO format (YYYY-MM-DD).
-4. Never output window values other than the ones listed.
-5. Use TODAY = {current_date} for only calculating the start and end dates when the time window is not listed.
-6. start_date should be inclusive if end_date is today.
-
-
-## INTENT_TYPE (priority order)
-ranking > comparison > trend > distribution > drill_down > snapshot
-
-## VISUALIZATION RULES
-snapshot: number_card if no group_by else table
-trend: line_chart (bar if mentioned)
-ranking: bar_chart (table if mentioned)
-distribution: bar_chart (pie if mentioned)
 
 ## CATALOG
 
 ### METRICS
-
-count                      → count of transactions  
-net_value                  → total net sales value  
-gross_value                → total gross sales value  
-tax_value                  → total tax amount  
-billed_qty                 → total sales quantity
-volume_qty                 → alias for billed_qty (total quantity)
-quantity                   → alias for billed_qty
+count         → count of transactions       (aggregation: count)
+net_value     → total net sales value       (aggregation: sum)
+gross_value   → total gross sales value     (aggregation: sum)
+tax_value     → total tax amount            (aggregation: sum)
+billed_qty    → total sales quantity        (aggregation: sum)
+volume_qty    → alias for billed_qty
+quantity      → alias for billed_qty
 
 ### DIMENSIONS (for group_by and filters)
 
 # Geography
 city
 state
-zone                       (South-1, South-2, Central, North-1, North-2, East, West)
-territory                  → alias for zone
-region                     → alias for zone
+zone           (South-1, South-2, Central, North-1, North-2, East, West)
+territory      → alias for zone
+region         → alias for zone
 
 # Partners
 distributor_code
 distributor_name
-distributor                → alias for distributor_name
-retailer_code              (SECONDARY only)
-retailer_name              (SECONDARY only)
-retailer                   → alias for retailer_name
-retailer_type              (ModernTrade, GeneralTrade, Kirana, Wholesaler)
+distributor    → alias for distributor_name
+retailer_code  (SECONDARY only)
+retailer_name  (SECONDARY only)
+retailer       → alias for retailer_name
+retailer_type  (ModernTrade, GeneralTrade, Kirana, Wholesaler)
 
 # Products
 sku_code
 product_desc
-product                    → alias for product_desc
-brand                      (Gold Flake, Aashirvaad, Fortune, Navy Cut)
-category                   (Cigarettes, Aata, Oil)
+product        → alias for product_desc
+brand          (Gold Flake, Aashirvaad, Fortune, Navy Cut)
+category       (Cigarettes, Aata, Oil)
 sub_category
 pack_size
 
 # Routes
-route_code                 (SECONDARY only)
-route_name                 (SECONDARY only)
-
+route_code     (SECONDARY only)
+route_name     (SECONDARY only)
 
 ### TIME_DIMENSIONS
-- invoice_date
-
-If user does not specify, ALWAYS use invoice_date.
-
+invoice_date   (always use this unless specified otherwise)
 
 ### TIME_WINDOWS
-today
-yesterday
-last_7_days
-last_30_days
-last_90_days
-month_to_date
-quarter_to_date
-year_to_date
-last_month
-last_quarter
-last_year
-all_time
+today | yesterday | last_7_days | last_30_days | last_90_days
+month_to_date | quarter_to_date | year_to_date
+last_month | last_quarter | last_year | all_time
 
-### FILTER OPERATORS
-equals, not_equals, in, not_in, contains
 
 ## EXAMPLES
 
-Query: Top 5 zones by total quantity. 
-Output JSON: 
+Query: Top 5 zones by total quantity.
+Output JSON:
 {
-  "intent_type": "ranking",
   "sales_scope": "SECONDARY",
-  "metric": "billed_qty",
+  "metrics": [{ "name": "billed_qty", "aggregation": "sum" }],
   "group_by": ["zone"],
-  "time_dimension": null,
-  "time_range": null,
   "filters": null,
-  "visualization_type": "bar_chart",
-  "limit": 5
+  "time": null,
+  "post_processing": {
+    "ranking": { "enabled": true, "order": "desc", "limit": 5 },
+    "comparison": null,
+    "derived_metric": "none"
+  }
 }
 
 
-Query: Show the daily trend of Secondary Sales net value for the 'Oil' category over the last 30 days. 
-Output JSON: 
+Query: Show the daily trend of Secondary Sales net value for the Oil category over the last 30 days.
+Output JSON:
 {
-  "intent_type": "trend",
   "sales_scope": "SECONDARY",
-  "metric": "net_value",
+  "metrics": [{ "name": "net_value", "aggregation": "sum" }],
   "group_by": null,
-  "time_dimension": {
+  "filters": [{ "dimension": "category", "operator": "equals", "value": "Oil" }],
+  "time": {
     "dimension": "invoice_date",
-    "granularity": "day"
-  },
-  "time_range": {
     "window": "last_30_days",
     "start_date": null,
-    "end_date": null
+    "end_date": null,
+    "granularity": "day"
   },
-  "filters": [
-    {
-      "dimension": "category",
-      "operator": "equals",
-      "value": "Oil"
-    }
-  ],
-  "visualization_type": "line_chart",
-  "limit": null
+  "post_processing": null
 }
 
 
-Query: Which distributors have the highest gross value? 
-Output JSON: 
+Query: Which distributors have the highest gross value?
+Output JSON:
 {
-  "intent_type": "ranking",
   "sales_scope": "SECONDARY",
-  "metric": "gross_value",
+  "metrics": [{ "name": "gross_value", "aggregation": "sum" }],
   "group_by": ["distributor_name"],
-  "time_dimension": null,
-  "time_range": null,
   "filters": null,
-  "visualization_type": "bar_chart",
-  "limit": 10
+  "time": null,
+  "post_processing": {
+    "ranking": { "enabled": true, "order": "desc", "limit": 10 },
+    "comparison": null,
+    "derived_metric": "none"
+  }
 }
 
 
 Query: What is the breakdown of sales by brand?
-Output JSON: 
+Output JSON:
 {
-  "intent_type": "distribution",
   "sales_scope": "SECONDARY",
-  "metric": "net_value",
+  "metrics": [{ "name": "net_value", "aggregation": "sum" }],
   "group_by": ["brand"],
-  "time_dimension": null,
-  "time_range": null,
   "filters": null,
-  "visualization_type": "bar_chart",
-  "limit": null
+  "time": null,
+  "post_processing": null
+}
+
+
+Query: Total net sales value this month.
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": [{ "name": "net_value", "aggregation": "sum" }],
+  "group_by": null,
+  "filters": null,
+  "time": {
+    "dimension": "invoice_date",
+    "window": "month_to_date",
+    "start_date": null,
+    "end_date": null,
+    "granularity": null
+  },
+  "post_processing": null
+}
+
+
+Query: Show monthly trend of Primary Sales gross value for the Aata category from January to March 2024.
+Output JSON:
+{
+  "sales_scope": "PRIMARY",
+  "metrics": [{ "name": "gross_value", "aggregation": "sum" }],
+  "group_by": null,
+  "filters": [{ "dimension": "category", "operator": "equals", "value": "Aata" }],
+  "time": {
+    "dimension": "invoice_date",
+    "window": null,
+    "start_date": "2024-01-01",
+    "end_date": "2024-03-31",
+    "granularity": "month"
+  },
+  "post_processing": null
+}
+
+
+Query: How many transactions happened in the North-1 zone last week?
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": [{ "name": "count", "aggregation": "count" }],
+  "group_by": null,
+  "filters": [{ "dimension": "zone", "operator": "equals", "value": "North-1" }],
+  "time": {
+    "dimension": "invoice_date",
+    "window": "last_7_days",
+    "start_date": null,
+    "end_date": null,
+    "granularity": null
+  },
+  "post_processing": null
+}
+
+
+Query: Compare net value this month vs last month by zone.
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": [{ "name": "net_value", "aggregation": "sum" }],
+  "group_by": ["zone"],
+  "filters": null,
+  "time": {
+    "dimension": "invoice_date",
+    "window": "month_to_date",
+    "start_date": null,
+    "end_date": null,
+    "granularity": null
+  },
+  "post_processing": {
+    "ranking": null,
+    "comparison": { "type": "period", "comparison_window": "last_month" },
+    "derived_metric": "none"
+  }
+}
+
+
+Query: What is the month-over-month growth in billed quantity by brand?
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": [{ "name": "billed_qty", "aggregation": "sum" }],
+  "group_by": ["brand"],
+  "filters": null,
+  "time": {
+    "dimension": "invoice_date",
+    "window": "last_month",
+    "start_date": null,
+    "end_date": null,
+    "granularity": "month"
+  },
+  "post_processing": {
+    "ranking": null,
+    "comparison": null,
+    "derived_metric": "mom_growth"
+  }
 }
 
 
 {previous_context}
 
+
+## HIERARCHY RULES
+1. Geography hierarchy: zone → state → city (shallow → deep)
+2. Product hierarchy: category → sub_category → brand → sku_code (shallow → deep)
+3. Time granularity order: year → quarter → month → week → day (coarse → fine)
+4. When user says "drill into X" where X is a value of a previous group_by dimension:
+   - Set a filter: previous_dimension = X
+   - Set group_by to the NEXT level in that hierarchy
+   - Example: prev group_by=zone, "drill into South" → filter zone=South, group_by=state
+5. When user says "show by X" where X is deeper in the same hierarchy:
+   - Replace the previous group_by level with X
+   - Example: prev group_by=category, "show by brand" → group_by=brand
+6. Only 1 active level per hierarchy axis (never zone + state together).
+7. Max 2 non-time axes in group_by at once.
+
+
+## MINIMAL MESSAGE RULE
+If the user message contains ONLY a dimension name (e.g. "brand", "state", "category")
+AND previous context exists:
+→ Treat as a group_by change, NOT a fresh query.
+→ Set group_by = [that dimension], inherit everything else from context.
+→ Do NOT treat a bare dimension name as a filter or a new metric.
+
+
 ## CONTEXT-AWARE RULES (when previous context is provided)
 1. If the user explicitly mentions a metric, scope, time range, or dimension → USE THEIR VALUE.
-2. If the user's query is vague on a field (e.g. no metric mentioned) and previous context exists → you MAY infer from context.
-3. If the user says "now show by X" or "break down by X" → override group_by with X, keep other fields from context.
-4. If the user says "drill into X" → add X as a filter, keep other fields from context.
-5. If the user provides a new time range → override the previous one completely.
-6. The new query ALWAYS takes priority over previous context.
-7. If there is no previous context, treat the query as a standalone question.
+2. If the user's query is vague on a field and previous context exists → you MAY infer from context.
+3. If the user says "now show by X" or "break down by X" → set group_by = [X], keep other fields from context.
+4. If the user says "drill into X" → add filter for previous group_by dimension = X, set group_by to next hierarchy level.
+5. If the user says "also by X" or "break that by X" (adding a second axis) → set group_by = [previous_dim, X].
+6. If the user provides a new time range → override the previous one completely.
+7. If the user changes granularity (e.g. "show weekly") → update time.granularity, keep everything else.
+8. The new query ALWAYS takes priority over previous context.
+9. If there is no previous context, treat the query as a standalone question.
 
 Now extract from this query:
 {query}

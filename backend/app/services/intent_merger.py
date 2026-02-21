@@ -112,10 +112,15 @@ def merge_intent(
             merged["filters"] = new_filters
 
     # -------------------------------------------------------------------------
-    # RULE 6: group_by — DO NOT inherit (explicit change is the whole point)
-    # If user says "show by brand" we want ONLY brand, not brand + previous dims
+    # RULE 6: group_by — hierarchy-aware
+    # Drill mutation is applied BEFORE this merger (Step 2.5 in orchestrator).
+    # If drill already set group_by → use it as-is.
+    # If no group_by and previous QCO has one → inherit for continuation queries.
     # -------------------------------------------------------------------------
-    # group_by is NOT inherited — this is intentional.
+    if not merged.get("group_by") and previous_qco.group_by:
+        # Inherit previous group_by for continuation (e.g. "show me last month" keeps group_by)
+        merged["group_by"] = list(previous_qco.group_by)
+        logger.debug(f"Inherited group_by: {previous_qco.group_by}")
 
     # -------------------------------------------------------------------------
     # RULE 7: visualization_type — inherit if missing

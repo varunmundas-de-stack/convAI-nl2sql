@@ -18,8 +18,8 @@ from app.models.intent import (
     Intent,
     IntentType,
     Filter,
-    TimeDimension,
-    TimeRange,
+    TimeSpec,
+    Metric,
 )
 from app.services.catalog_manager import CatalogManager
 from app.services.intent_errors import (
@@ -52,96 +52,60 @@ class IntentValidator:
     VALID_GRANULARITIES = {"day", "week", "month", "quarter", "year"}
     
     def __init__(self, catalog: CatalogManager):
-        """
-        Initialize validator with a catalog manager.
-        
-        Args:
-            catalog: CatalogManager instance for validating metrics/dimensions
-        """
         self.catalog = catalog
     
     def validate(self, raw_intent: Dict[str, Any]) -> Intent:
         """
         Validate a raw intent dictionary and return a validated Intent object.
-        
-        This is the main entry point. It performs:
+
+        Performs:
         1. Structural validation (Pydantic parsing)
         2. Metric validation (exists in catalog)
         3. Dimension validation (group_by fields exist)
-        4. Intent-specific validation (time dimension, time range, etc.)
-        5. Filter validation (dimensions exist, values valid)
-        
-        Args:
-            raw_intent: Dictionary from LLM or API
-            
-        Returns:
-            Validated Intent object
-            
-        Raises:
-            MalformedIntentError: If dict cannot be parsed to Intent
-            UnknownMetricError: If metric not in catalog
-            UnknownDimensionError: If dimension not in catalog
-            UnknownTimeDimensionError: If time dimension not in catalog
-            InvalidTimeWindowError: If time window not recognized
-            InvalidGranularityError: If granularity invalid
-            InvalidFilterError: If filter dimension unknown
+        4. Intent-specific validation (time spec, granularity)
+        5. Filter validation
         """
-        # Step 1: Parse raw dict into Intent model
         intent = self._parse_intent(raw_intent)
         missing_fields: list[str] = []
         clarification_questions: list[str] = []
         
-        # Step 2: Validate metric exists
-        if not intent.metric:
-            missing_fields.append("metric")
+        # Validate metrics
+        if not intent.metrics:
+            missing_fields.append("metrics")
             clarification_questions.append("What would you like to measure?")
         else:
-            self._validate_metric(intent.metric)
+            for m in intent.metrics:
+                self._validate_metric(m.name)
         
-        # Step 3: Validate group_by dimensions
+        # Validate group_by dimensions
         if intent.group_by:
             self._validate_dimensions(intent.group_by, context="group_by")
         
-        # Step 4: Intent-specific validation
-        if intent.intent_type == IntentType.TREND:
-            # TREND requires time_dimension and time_range
-            if not intent.time_dimension:
-                missing_fields.append("time_dimension")
-                clarification_questions.append("What time dimension would you like to use? eg. day, week, month, quarter, year")
-            else:
-                self._validate_time_dimension(intent.time_dimension)
-                # For TREND, granularity is MANDATORY
-                if not intent.time_dimension.granularity:
-                    missing_fields.append("time_dimension.granularity")
-                    clarification_questions.append("What time granularity would you like? eg. day, week, month")
-                
-            if not intent.time_range:
-                missing_fields.append("time_range")
-                clarification_questions.append("What time range would you like to use? eg. last 7 days, last 30 days, last 90 days, last 1 year")
-            else:
-                self._validate_time_range(intent.time_range)
-                
-        elif intent.intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION):
-            # RANKING and DISTRIBUTION require group_by
+        # Validate time spec if present
+        if intent.time is not None:
+            self._validate_time_spec(intent.time)
+
+        # Intent-specific validation
+        intent_type = derive_intent_type_safe(intent)
+
+        if intent_type == IntentType.TREND:
+            if intent.time is None:
+                missing_fields.append("time")
+                clarification_questions.append(
+                    "What time range and granularity would you like to use?"
+                )
+            elif intent.time.granularity is None:
+                missing_fields.append("time.granularity")
+                clarification_questions.append(
+                    "What time granularity would you like? e.g. day, week, month"
+                )
+
+        elif intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION):
             if not intent.group_by:
                 missing_fields.append("group_by")
                 clarification_questions.append("What would you like to group or rank by?")
-            
-            # Optional time fields - validate if present
-            if intent.time_dimension:
-                self._validate_time_dimension(intent.time_dimension)
-            if intent.time_range:
-                self._validate_time_range(intent.time_range)
-
-        else:
-            # SNAPSHOT, COMPARISON, DRILL_DOWN - simpler validation
-            # Optional time fields - validate if present
-            if intent.time_dimension:
-                self._validate_time_dimension(intent.time_dimension)
-            if intent.time_range:
-                self._validate_time_range(intent.time_range)
         
-        # Step 6: Validate filters
+        # Validate filters
         if intent.filters:
             self._validate_filters(intent.filters)
         
@@ -151,6 +115,7 @@ class IntentValidator:
                 clarification_message=" ".join(clarification_questions),
             )
         return intent
+
     
     def _preprocess_intent(self, raw_intent: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -168,11 +133,9 @@ class IntentValidator:
             MalformedIntentError: If parsing fails
         """
         try:
-            # Pre-process to fix common LLM issues
             processed_intent = self._preprocess_intent(raw_intent)
             return Intent(**processed_intent)
-        except IntentValidationError as e:
-            # Extract meaningful error message from Pydantic
+        except ValidationError as e:
             errors = e.errors()
             if errors:
                 first_error = errors[0]
@@ -182,10 +145,7 @@ class IntentValidator:
                     f"{field}: {msg}",
                     raw_intent=raw_intent
                 )
-            raise MalformedIntentError(
-                str(e),
-                raw_intent=raw_intent
-            )
+            raise MalformedIntentError(str(e), raw_intent=raw_intent)
         except Exception as e:
             raise MalformedIntentError(
                 f"Unexpected error: {str(e)}",
@@ -193,12 +153,6 @@ class IntentValidator:
             )
     
     def _validate_metric(self, metric: str) -> None:
-        """
-        Validate that metric exists in catalog.
-        
-        Raises:
-            UnknownMetricError: If metric not found
-        """
         if not self.catalog.is_valid_metric(metric):
             raise UnknownMetricError(metric)
     
@@ -207,38 +161,34 @@ class IntentValidator:
             if not self.catalog.is_valid_dimension(dim):
                 raise UnknownDimensionError(dim, context)
 
-    
-    def _validate_time_dimension(self, time_dim: TimeDimension) -> None:
-        if not self.catalog.is_valid_time_dimension(time_dim.dimension):
-            raise UnknownTimeDimensionError(time_dim.dimension)
-
-        if time_dim.granularity:
-            allowed = self.catalog.get_time_granularities(time_dim.dimension)
-            if time_dim.granularity not in allowed:
-                raise InvalidGranularityError(time_dim.granularity)
-
-    
-    def _validate_time_range(self, time_range: TimeRange) -> None:
+    def _validate_time_spec(self, time_spec: TimeSpec) -> None:
         """
-        Validate time range window if specified.
+        Validate a unified TimeSpec (dimension, window/dates, granularity).
         
         Raises:
+            UnknownTimeDimensionError: If time dimension not in catalog
             InvalidTimeWindowError: If window not recognized
-            InvalidTimeRangeError: If time range structure is invalid
+            InvalidGranularityError: If granularity invalid
         """
-        # The TimeRange model already validates that we don't have both window and dates
-        # But we need to validate the window value if present
-        if time_range.window:
-            if not self.catalog.is_valid_time_window(time_range.window):
-                raise InvalidTimeWindowError(time_range.window)
-        
-        # If using explicit dates, basic validation (format is handled by Pydantic)
-        # Additional date validation could be added here if needed
+        # Validate the time dimension field
+        if not self.catalog.is_valid_time_dimension(time_spec.dimension):
+            raise UnknownTimeDimensionError(time_spec.dimension)
+
+        # Validate window if specified
+        if time_spec.window:
+            if not self.catalog.is_valid_time_window(time_spec.window):
+                raise InvalidTimeWindowError(time_spec.window)
+
+        # Validate granularity if specified
+        if time_spec.granularity:
+            allowed = self.catalog.get_time_granularities(time_spec.dimension)
+            if time_spec.granularity not in allowed:
+                raise InvalidGranularityError(time_spec.granularity)
     
     def _validate_filters(self, filters: List[Filter]) -> None:
         """
         Validate all filter dimensions exist in catalog.
-        
+
         Raises:
             InvalidFilterError: If filter dimension not in catalog
         """
@@ -262,31 +212,33 @@ class IntentValidator:
         all_dimensions = self.catalog.list_dimension_names()
         return self._find_similar(dimension, all_dimensions, max_results=3)
     
-    def _get_time_dimension_suggestions(self, time_dim: str) -> List[str]:
-        """Get similar time dimension names for suggestions."""
-        all_time_dims = [td.get('name', '') for td in self.catalog.list_time_dimensions()]
-        return self._find_similar(time_dim, all_time_dims, max_results=3)
-    
     def _find_similar(self, query: str, candidates: List[str], max_results: int = 3) -> List[str]:
-        """
-        Find similar strings using simple substring matching.
-        
-        For production, consider using fuzzy matching (e.g., rapidfuzz).
-        """
+        """Find similar strings using simple substring matching."""
         query_lower = query.lower()
-        
-        # Exact prefix matches first
         prefix_matches = [c for c in candidates if c.lower().startswith(query_lower)]
-        
-        # Then substring matches
         substring_matches = [
             c for c in candidates 
             if query_lower in c.lower() and c not in prefix_matches
         ]
-        
-        # Combine and limit
         suggestions = prefix_matches + substring_matches
         return suggestions[:max_results]
+
+
+# =============================================================================
+# MODULE-LEVEL HELPERS
+# =============================================================================
+
+def derive_intent_type_safe(intent: Intent) -> IntentType:
+    """
+    Safely derive intent type from a validated Intent.
+
+    Wraps derive_intent_type() and falls back to SNAPSHOT on any error.
+    """
+    from app.models.intent import derive_intent_type
+    try:
+        return derive_intent_type(intent)
+    except Exception:
+        return IntentType.SNAPSHOT
 
 
 def validate_intent(raw_intent: Dict[str, Any], catalog: CatalogManager) -> Intent:

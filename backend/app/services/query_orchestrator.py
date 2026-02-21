@@ -42,6 +42,7 @@ from app.services.cube_client import (
 from app.services.intent_normalizer import normalize_intent
 from app.services.intent_merger import merge_intent
 from app.services.qco_resolver import resolve_qco
+from app.services.drill_detector import detect_drill, apply_drill_mutation
 from app.services.catalog_manager import CatalogManager
 from app.services.insight_engine import generate_insights, InsightResult, InsightEngineError
 from app.services.insight_refiner import refine_insights, RefinedInsightResult, InsightRefinerError
@@ -272,6 +273,19 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
     response = _extract_intent(response, start_time, previous_qco=previous_qco)
     if response.error:
         return response
+    
+    # -------------------------------------------------------------------------
+    # STEP 2.5: Detect and apply drill-down mutation (before generic merge)
+    # -------------------------------------------------------------------------
+    drill_result = None
+    if previous_qco and response.raw_intent:
+        drill_result = detect_drill(response.raw_intent, previous_qco)
+        if drill_result.case != "none":
+            response.raw_intent = apply_drill_mutation(
+                response.raw_intent, previous_qco, drill_result
+            )
+            logger.info(f"Drill [{drill_result.case}]: "
+                        f"{drill_result.prev_dimension} → {drill_result.next_dimension}")
     
     # -------------------------------------------------------------------------
     # STEP 3: Merge intent with previous QCO

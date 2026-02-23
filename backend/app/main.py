@@ -221,6 +221,12 @@ async def execute_query(request: QueryRequest):
             response_dict["error"] = str(response_dict["error"]) 
 
         raise HTTPException(status_code=http_status, detail=response_dict)
+
+    if response.error:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM temporarily unavailable"
+        )
     
     logger.info(f"Query executed successfully in {response.duration_ms}ms, {len(response.data or [])} rows")
      
@@ -277,9 +283,37 @@ async def list_time_windows():
         ]
     }
 
-@app.post("/clarify")
-def clarify_endpoint(req: ClarificationRequest):
-    return resume_query(req.request_id, req.answers, session_id=req.session_id)
+@app.post("/clarify", tags=["Query"], summary="Submit clarification answers")
+async def clarify_endpoint(req: ClarificationRequest):
+    """
+    Resume a paused pipeline by supplying answers to a clarification request.
+
+    Returns the same response shape as /query.
+    """
+    response_dict = resume_query(req.request_id, req.answers, session_id=req.session_id)
+
+    # Clarification requested again — not an error, return 200
+    if response_dict.get("stage") == PipelineStage.CLARIFICATION_REQUESTED:
+        return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
+
+    # State not found — treat as a client error (bad/expired request_id)
+    if (
+        not response_dict.get("success")
+        and response_dict.get("error", {}).get("error_type") == "PipelineStateNotFound"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=response_dict,
+        )
+
+    if not response_dict.get("success"):
+        error_type = response_dict.get("error", {}).get("error_type", "UnknownError")
+        stage = response_dict.get("stage", "")
+        http_status = _get_http_status_for_stage(stage, error_type)
+        logger.warning(f"Clarify pipeline failed at stage '{stage}': {error_type}")
+        raise HTTPException(status_code=http_status, detail=response_dict)
+
+    return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
 
 
 # =============================================================================

@@ -182,15 +182,22 @@ def normalize_intent(raw_intent: dict) -> dict:
         intent["metric"] = resolve_metric(metric, scope)
 
     # -------------------------------------------------------------------------
-    # Metrics — new list field (each item: {name, aggregation})
+    # Metrics — supports both string array ["net_value"] and object array [{"name": "net_value"}]
     # -------------------------------------------------------------------------
     metrics = intent.get("metrics")
     if metrics and isinstance(metrics, list):
+        normalised = []
         for m in metrics:
-            if isinstance(m, dict):
+            if isinstance(m, str):
+                # Plain string form: resolve directly, wrap in dict
+                resolved = resolve_metric(m, scope) if m in METRIC_MAP else m
+                normalised.append({"name": resolved})
+            elif isinstance(m, dict):
                 name = m.get("name")
                 if name in METRIC_MAP:
                     m["name"] = resolve_metric(name, scope)
+                normalised.append(m)
+        intent["metrics"] = normalised
 
     # -------------------------------------------------------------------------
     # Group by

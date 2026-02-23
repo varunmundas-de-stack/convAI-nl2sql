@@ -50,7 +50,7 @@ class Metric(BaseModel):
         description="Catalog metric name (e.g. 'net_value', 'billed_qty', 'count')"
     )
     aggregation: Literal["sum", "count", "avg"] = Field(
-        ...,
+        default="sum",
         description="Aggregation function to apply"
     )
 

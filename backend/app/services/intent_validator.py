@@ -13,6 +13,7 @@ NO business logic. NO LLM logic. Only validation.
 """
 
 from typing import Any, Dict, List, Optional
+import logging
 
 from app.models.intent import (
     Intent,
@@ -35,6 +36,8 @@ from app.services.intent_errors import (
     IntentIncompleteError,
 )
 from pydantic import ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class IntentValidator:
@@ -62,14 +65,22 @@ class IntentValidator:
         1. Structural validation (Pydantic parsing)
         2. Metric validation (exists in catalog)
         3. Dimension validation (group_by fields exist)
-        4. Intent-specific validation (time spec, granularity)
+        4. Time & clarification rule enforcement (8 rules)
         5. Filter validation
         """
         intent = self._parse_intent(raw_intent)
         missing_fields: list[str] = []
         clarification_questions: list[str] = []
         
-        # Validate metrics
+        # --- Rule 8: Time must NEVER be in dimensions ---
+        # Silently remove invoice_date from group_by if present
+        if intent.group_by:
+            cleaned = [d for d in intent.group_by if "invoice_date" not in d]
+            if len(cleaned) != len(intent.group_by):
+                logger.warning("Removed invoice_date from group_by (Rule 8: time must only use timeDimensions)")
+                object.__setattr__(intent, 'group_by', cleaned if cleaned else None)
+        
+        # --- Validate metrics ---
         if not intent.metrics:
             missing_fields.append("metrics")
             clarification_questions.append("What would you like to measure?")
@@ -77,35 +88,89 @@ class IntentValidator:
             for m in intent.metrics:
                 self._validate_metric(m.name)
         
-        # Validate group_by dimensions
+        # --- Validate group_by dimensions ---
         if intent.group_by:
             self._validate_dimensions(intent.group_by, context="group_by")
         
-        # Validate time spec if present
+        # --- Validate time spec if present ---
         if intent.time is not None:
             self._validate_time_spec(intent.time)
 
-        # Intent-specific validation
+        # --- Derive intent type for rule checks ---
         intent_type = derive_intent_type_safe(intent)
 
+        # --- Rule 1: Time is mandatory ---
+        if intent.time is None:
+            missing_fields.append("time")
+            clarification_questions.append(
+                "What time range should this query cover? "
+                "(e.g., last 30 days, this month, year to date)"
+            )
+
+        # --- Rule 4: Trend without granularity → clarify ---
         if intent_type == IntentType.TREND:
             if intent.time is None:
-                missing_fields.append("time")
-                clarification_questions.append(
-                    "What time range and granularity would you like to use?"
-                )
+                # Already caught by Rule 1
+                pass
             elif intent.time.granularity is None:
                 missing_fields.append("time.granularity")
                 clarification_questions.append(
-                    "What time granularity would you like? e.g. day, week, month"
+                    "What time granularity would you like? "
+                    "(e.g., day, week, month, quarter, year)"
                 )
 
-        elif intent_type in (IntentType.RANKING, IntentType.DISTRIBUTION):
-            if not intent.group_by:
+        # --- Rule 5: Ranking without group_by → clarify ---
+        has_ranking = bool(
+            intent.post_processing and
+            intent.post_processing.ranking and
+            intent.post_processing.ranking.enabled
+        )
+        if has_ranking and not intent.group_by:
+            missing_fields.append("group_by")
+            clarification_questions.append(
+                "Ranking requires a breakdown dimension. "
+                "What would you like to rank by? (e.g., zone, brand, distributor)"
+            )
+
+        # --- Rule for distribution without group_by ---
+        if intent_type == IntentType.DISTRIBUTION and not intent.group_by:
+            if "group_by" not in missing_fields:
                 missing_fields.append("group_by")
-                clarification_questions.append("What would you like to group or rank by?")
+                clarification_questions.append("What would you like to group by?")
+
+        # --- Rule 6: Growth without comparison window → clarify ---
+        has_growth = bool(
+            intent.post_processing and
+            intent.post_processing.derived_metric in ("mom_growth", "yoy_growth")
+        )
+        if has_growth:
+            has_comparison_window = bool(
+                intent.post_processing and
+                intent.post_processing.comparison and
+                intent.post_processing.comparison.comparison_window
+            )
+            if not has_comparison_window:
+                missing_fields.append("post_processing.comparison.comparison_window")
+                clarification_questions.append(
+                    "Growth requires a comparison period. "
+                    "What period should we compare against? (e.g., last_month, last_quarter)"
+                )
+
+        # --- Rule 7: Period comparison without window → clarify ---
+        has_period_comparison = bool(
+            intent.post_processing and
+            intent.post_processing.comparison and
+            intent.post_processing.comparison.type == "period"
+        )
+        if has_period_comparison:
+            if not intent.post_processing.comparison.comparison_window:
+                if "post_processing.comparison.comparison_window" not in missing_fields:
+                    missing_fields.append("post_processing.comparison.comparison_window")
+                    clarification_questions.append(
+                        "Compared to which period? (e.g., last_month, last_quarter, last_year)"
+                    )
         
-        # Validate filters
+        # --- Validate filters ---
         if intent.filters:
             self._validate_filters(intent.filters)
         
@@ -117,13 +182,78 @@ class IntentValidator:
         return intent
 
     
+    # Common user phrases → canonical TIME_WINDOW slug
+    _TIME_WINDOW_ALIASES: Dict[str, str] = {
+        "last 7 days":      "last_7_days",
+        "last 30 days":     "last_30_days",
+        "last 90 days":     "last_90_days",
+        "this month":       "month_to_date",
+        "month to date":    "month_to_date",
+        "this quarter":     "quarter_to_date",
+        "quarter to date":  "quarter_to_date",
+        "this year":        "year_to_date",
+        "year to date":     "year_to_date",
+        "last month":       "last_month",
+        "last quarter":     "last_quarter",
+        "last year":        "last_year",
+        "today":            "today",
+        "yesterday":        "yesterday",
+        "all time":         "all_time",
+    }
+
     def _preprocess_intent(self, raw_intent: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Pre-process raw intent to fix common LLM output issues.
-        
-        Currently a passthrough - can be extended for future fixes.
+        Pre-process raw intent to normalise common LLM output variations and
+        coerce clarification answers into the correct structure.
+
+        Handles:
+        - metrics as a plain string array ["net_value"] → [{"name": "net_value"}]
+        - time as a plain string "last 30 days" → proper TimeSpec dict
+        - string "null" → None for comparison.type and derived_metric
         """
-        return raw_intent.copy()
+        intent = raw_intent.copy()
+
+        # --- Metrics: plain strings → {"name": str} dicts ---
+        metrics = intent.get("metrics")
+        if isinstance(metrics, list):
+            normalised = []
+            for m in metrics:
+                if isinstance(m, str):
+                    normalised.append({"name": m})
+                else:
+                    normalised.append(m)
+            intent["metrics"] = normalised
+
+        # --- Time: plain string answer → TimeSpec dict ---
+        time_val = intent.get("time")
+        if isinstance(time_val, str):
+            # Normalise: lowercase + strip, try alias map, else use as-is slug
+            key = time_val.strip().lower()
+            window = self._TIME_WINDOW_ALIASES.get(key, key.replace(" ", "_"))
+            # Use the cube-prefixed dimension (normalizer has already run at this point)
+            scope = intent.get("sales_scope", "SECONDARY")
+            cube = "fact_secondary_sales" if scope == "SECONDARY" else "fact_primary_sales"
+            intent["time"] = {
+                "dimension": f"{cube}.invoice_date",
+                "window": window,
+                "start_date": None,
+                "end_date": None,
+                "granularity": None,
+            }
+            logger.info(f"Coerced string time '{time_val}' → window='{window}' ({cube}.invoice_date)")
+
+        # --- "null" strings → None (prompt uses "null" as placeholder) ---
+        pp = intent.get("post_processing")
+        if isinstance(pp, dict):
+            # derived_metric
+            if pp.get("derived_metric") == "null":
+                pp["derived_metric"] = None
+            # comparison.type
+            comp = pp.get("comparison")
+            if isinstance(comp, dict) and comp.get("type") == "null":
+                comp["type"] = "none"
+
+        return intent
     
     def _parse_intent(self, raw_intent: Dict[str, Any]) -> Intent:
         """

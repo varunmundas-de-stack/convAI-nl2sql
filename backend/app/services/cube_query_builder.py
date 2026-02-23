@@ -44,10 +44,12 @@ class CubeQueryBuildError(Exception):
 # =============================================================================
 
 def _build_measures(intent: Intent) -> list[str]:
-    metric = intent.metric
-    if "." not in metric:
-        raise ValueError(f"CubeQueryBuilder received non-normalized metric: {metric}")
-    return [metric]
+    measures: list[str] = []
+    for m in intent.metrics:
+        if "." not in m.name:
+            raise ValueError(f"CubeQueryBuilder received non-normalized metric: {m.name}")
+        measures.append(m.name)
+    return measures
 
 
 def _build_dimensions(intent: Intent) -> list[str] | None:
@@ -90,45 +92,39 @@ def _build_filters(intent: Intent) -> list[dict[str, Any]] | None:
     return filters
 
 def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
-    if intent.time_dimension is None and intent.time_range is None:
+    if intent.time is None:
         return None
 
-    td: dict[str, Any] = {}
+    t = intent.time
+    td: dict[str, Any] = {"dimension": t.dimension}
 
-    if intent.time_dimension is not None:
-        td["dimension"] = intent.time_dimension.dimension
-        # Only add granularity if present (grouping)
-        if intent.time_dimension.granularity:
-            td["granularity"] = intent.time_dimension.granularity
-        
-    if intent.time_range is not None:
-        if intent.time_range.window:
-            td["dateRange"] = resolve_time_window(intent.time_range.window)
-        else:
-            td["dateRange"] = [
-                str(intent.time_range.start_date),
-                str(intent.time_range.end_date),
-            ]
+    # Granularity — only set for trend queries
+    if t.granularity:
+        td["granularity"] = t.granularity
 
-    # Ensure we have a dimension field if we have a dateRange
-    if "dateRange" in td and "dimension" not in td:
-        # This shouldn't happen if IntentNormalizer injects the default
-        # But as a failsafe, we could raise or infer
-        raise ValueError("CubeQueryBuilder: Time range specified but no time dimension provided for filtering.")
+    # Date range — named window takes priority over explicit dates
+    if t.window:
+        td["dateRange"] = resolve_time_window(t.window)
+    elif t.start_date and t.end_date:
+        td["dateRange"] = [str(t.start_date), str(t.end_date)]
 
     return [td]
 
 def _build_order(intent: Intent) -> dict[str, str]:
-    metric = intent.metric
-    if "." not in metric:
-        raise ValueError(f"CubeQueryBuilder received non-normalized order metric: {metric}")
-    return {metric: "desc"}
+    # Order by the first (primary) metric; direction comes from ranking spec if present
+    primary = intent.metrics[0].name
+    if "." not in primary:
+        raise ValueError(f"CubeQueryBuilder received non-normalized order metric: {primary}")
+    ranking = intent.post_processing.ranking if intent.post_processing else None
+    direction = (ranking.order or "desc") if (ranking and ranking.enabled) else "desc"
+    return {primary: direction}
 
 
 def _build_limit(intent: Intent) -> int:
-    """Return the limit from intent, or default if not specified."""
-    if intent.limit is not None:
-        return intent.limit
+    """Return the limit from ranking spec, or default if not specified."""
+    ranking = intent.post_processing.ranking if intent.post_processing else None
+    if ranking and ranking.enabled and ranking.limit is not None:
+        return ranking.limit
     return DEFAULT_LIMIT
 
 

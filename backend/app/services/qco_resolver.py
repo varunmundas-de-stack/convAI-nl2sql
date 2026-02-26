@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from app.models.intent import Intent
-from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter
+from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter, QCOMetric
 from app.models.hierarchy import get_axis
 
 logger = logging.getLogger(__name__)
@@ -40,27 +40,33 @@ def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
     Returns:
         QueryContextObject with all resolved parameters
     """
-    # Resolve time range to concrete dates
+    from app.models.intent import derive_intent_type
+
+    # Resolve time to concrete dates
     time_range = _resolve_time_range(intent)
 
-    # Resolve time dimension and granularity
+    # Time dimension and granularity from unified intent.time (TimeSpec)
     time_dimension = None
     time_granularity = None
-    if intent.time_dimension:
-        if hasattr(intent.time_dimension, "dimension"):
-            time_dimension = _to_semantic_name(intent.time_dimension.dimension)
-        if hasattr(intent.time_dimension, "granularity"):
-            time_granularity = intent.time_dimension.granularity
+    if intent.time is not None:
+        time_dimension = _to_semantic_name(intent.time.dimension)
+        time_granularity = intent.time.granularity
 
-    # Extract semantic metric name (strip cube prefix if present)
-    metric = _to_semantic_name(intent.metric)
+    # Full metrics list — strip Cube prefixes, preserve aggregation
+    qco_metrics = [
+        QCOMetric(
+            name=_to_semantic_name(m.name),
+            aggregation=m.aggregation,
+        )
+        for m in intent.metrics
+    ]
 
-    # Extract semantic dimension names
+    # Group-by — strip cube prefixes
     group_by = None
     if intent.group_by:
         group_by = [_to_semantic_name(d) for d in intent.group_by]
 
-    # Resolve filters to semantic names
+    # Filters — strip cube prefixes
     filters = None
     if intent.filters:
         filters = [
@@ -72,10 +78,11 @@ def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
             for f in intent.filters
         ]
 
-    # Get intent_type as string
-    intent_type = intent.intent_type
-    if hasattr(intent_type, "value"):
-        intent_type = intent_type.value
+    # Derive intent type deterministically from structure
+    try:
+        intent_type = derive_intent_type(intent).value
+    except Exception:
+        intent_type = "snapshot"
 
     # Compute active hierarchy state from group_by
     active_hierarchies = {}
@@ -84,23 +91,34 @@ def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
         if axis:
             active_hierarchies[axis] = dim
 
+    # Extract ranking limit from post_processing (for follow-up inheritance)
+    limit = None
+    if (
+        intent.post_processing
+        and intent.post_processing.ranking
+        and intent.post_processing.ranking.enabled
+        and intent.post_processing.ranking.limit is not None
+    ):
+        limit = intent.post_processing.ranking.limit
+
     qco = QueryContextObject(
         original_query=query,
         intent_type=intent_type,
         sales_scope=intent.sales_scope,
-        metric=metric,
+        metrics=qco_metrics,
         group_by=group_by,
         time_dimension=time_dimension,
         time_granularity=time_granularity,
         time_range=time_range,
         filters=filters,
-        visualization_type=intent.visualization_type,
-        limit=intent.limit,
+        limit=limit,
         active_hierarchies=active_hierarchies or None,
     )
 
-    logger.info(f"QCO resolved: metric={metric}, scope={intent.sales_scope}, "
+    primary_metric = qco_metrics[0].name if qco_metrics else ""
+    logger.info(f"QCO resolved: metrics={[m.name for m in qco_metrics]}, scope={intent.sales_scope}, "
                 f"time_range={time_range}, group_by={group_by}, "
+                f"intent_type={intent_type}, limit={limit}, "
                 f"active_hierarchies={active_hierarchies or 'none'}")
 
     return qco
@@ -108,30 +126,26 @@ def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
 
 def _resolve_time_range(intent: Intent) -> Optional[QCOTimeRange]:
     """
-    Resolve the intent's time range to concrete start/end dates.
+    Resolve the intent's time to concrete start/end dates.
 
-    If the intent uses a named window (e.g. 'last_30_days'), we resolve
-    it to explicit dates so the QCO always has concrete dates.
+    Reads from intent.time (unified TimeSpec). Named windows are resolved
+    to explicit ISO dates so the QCO always stores concrete dates.
     """
-    if intent.time_range is None:
+    t = intent.time
+    if t is None:
         return None
 
-    # If explicit dates already provided, use them directly
-    if intent.time_range.start_date and intent.time_range.end_date:
-        return QCOTimeRange(
-            start_date=intent.time_range.start_date,
-            end_date=intent.time_range.end_date,
-        )
+    # Explicit dates provided — use them directly
+    if t.start_date and t.end_date:
+        return QCOTimeRange(start_date=t.start_date, end_date=t.end_date)
 
     # Resolve named window to concrete dates
-    if intent.time_range.window:
-        start, end = _resolve_window_to_dates(intent.time_range.window)
-        return QCOTimeRange(
-            start_date=start.isoformat(),
-            end_date=end.isoformat(),
-        )
+    if t.window:
+        start, end = _resolve_window_to_dates(t.window)
+        return QCOTimeRange(start_date=start.isoformat(), end_date=end.isoformat())
 
     return None
+
 
 
 def _resolve_window_to_dates(window: str) -> tuple[date, date]:

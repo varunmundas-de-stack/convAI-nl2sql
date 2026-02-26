@@ -9,3 +9,5 @@ data.json
 logs/*
 .planning/*
 .opencode/*
+.claude/*
+.github/*

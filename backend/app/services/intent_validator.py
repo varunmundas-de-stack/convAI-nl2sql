@@ -99,13 +99,26 @@ class IntentValidator:
         # --- Derive intent type for rule checks ---
         intent_type = derive_intent_type_safe(intent)
 
-        # --- Rule 1: Time is mandatory ---
+        # --- Rule 1: Time is mandatory AND must have a date range ---
+        # Both conditions must be true:
+        #   (a) a time block must exist (window or start_date/end_date)
+        #   (b) granularity alone is NOT enough — a range is always required
         if intent.time is None:
             missing_fields.append("time")
             clarification_questions.append(
                 "What time range should this query cover? "
                 "(e.g., last 30 days, this month, year to date)"
             )
+        else:
+            has_range = bool(intent.time.window) or bool(
+                intent.time.start_date and intent.time.end_date
+            )
+            if not has_range:
+                missing_fields.append("time.window")
+                clarification_questions.append(
+                    "What time range should this query cover? "
+                    "(e.g., last 30 days, this month, year to date)"
+                )
 
         # --- Rule 4: Trend without granularity → clarify ---
         if intent_type == IntentType.TREND:
@@ -212,6 +225,21 @@ class IntentValidator:
         - string "null" → None for comparison.type and derived_metric
         """
         intent = raw_intent.copy()
+        # --- Unflatten dot-notation keys from clarification answers ---
+        # e.g., "time.window": "last_30_days" -> {"time": {"window": "last_30_days"}}
+        keys_to_unflatten = [k for k in intent.keys() if "." in k]
+        for k in keys_to_unflatten:
+            val = intent.pop(k)
+            parts = k.split(".")
+            current = intent
+            for part in parts[:-1]:
+                if current.get(part) is None:
+                    current[part] = {}
+                elif not isinstance(current[part], dict):
+                    current[part] = {}
+                current = current[part]
+            current[parts[-1]] = val
+
 
         # --- Metrics: plain strings → {"name": str} dicts ---
         metrics = intent.get("metrics")
@@ -224,15 +252,15 @@ class IntentValidator:
                     normalised.append(m)
             intent["metrics"] = normalised
 
-        # --- Time: plain string answer → TimeSpec dict ---
+        # --- Time: plain string OR dict → normalised TimeSpec dict ---
+        scope = intent.get("sales_scope", "SECONDARY")
+        cube = "fact_secondary_sales" if scope == "SECONDARY" else "fact_primary_sales"
+
         time_val = intent.get("time")
         if isinstance(time_val, str):
-            # Normalise: lowercase + strip, try alias map, else use as-is slug
+            # User answered the time clarification with a plain string like "last 30 days"
             key = time_val.strip().lower()
             window = self._TIME_WINDOW_ALIASES.get(key, key.replace(" ", "_"))
-            # Use the cube-prefixed dimension (normalizer has already run at this point)
-            scope = intent.get("sales_scope", "SECONDARY")
-            cube = "fact_secondary_sales" if scope == "SECONDARY" else "fact_primary_sales"
             intent["time"] = {
                 "dimension": f"{cube}.invoice_date",
                 "window": window,
@@ -241,6 +269,18 @@ class IntentValidator:
                 "granularity": None,
             }
             logger.info(f"Coerced string time '{time_val}' → window='{window}' ({cube}.invoice_date)")
+        elif isinstance(time_val, dict):
+            # time arrived as a dict (e.g., unflattened from 'time.window': 'last 30 days')
+            # Normalise window alias if present
+            raw_window = time_val.get("window")
+            if isinstance(raw_window, str):
+                key = raw_window.strip().lower()
+                time_val["window"] = self._TIME_WINDOW_ALIASES.get(key, key.replace(" ", "_"))
+            # Ensure dimension is fully qualified
+            dim = time_val.get("dimension")
+            if not dim or dim == "invoice_date":
+                time_val["dimension"] = f"{cube}.invoice_date"
+            logger.info(f"Normalised time dict: window='{time_val.get('window')}', dim='{time_val.get('dimension')}'")
 
         # --- "null" strings → None (prompt uses "null" as placeholder) ---
         pp = intent.get("post_processing")
@@ -248,10 +288,13 @@ class IntentValidator:
             # derived_metric
             if pp.get("derived_metric") == "null":
                 pp["derived_metric"] = None
-            # comparison.type
+            # comparison.type / comparison_window
             comp = pp.get("comparison")
-            if isinstance(comp, dict) and comp.get("type") == "null":
-                comp["type"] = "none"
+            if isinstance(comp, dict):
+                if comp.get("type") == "null":
+                    comp["type"] = "none"
+                if comp.get("comparison_window") == "null":
+                    comp["comparison_window"] = None
 
         return intent
     

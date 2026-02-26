@@ -72,7 +72,6 @@ def detect_drill(
         return DrillResult(case="none")
 
     prev_group_by = previous_qco.group_by or []
-    prev_metric = previous_qco.metric or ""
 
     new_group_by = new_intent.get("group_by") or []
     new_filters = new_intent.get("filters") or []
@@ -80,18 +79,23 @@ def detect_drill(
     # --- Check for new metric (different metric = fresh query) ---
     new_metrics = new_intent.get("metrics") or []
     if new_metrics:
-        new_metric_names = {m.get("name", "") if isinstance(m, dict) else "" for m in new_metrics}
+        # Metrics can be dicts {"name": ..., "aggregation": ...} or plain strings
+        new_metric_names = {
+            (m.get("name", "") if isinstance(m, dict) else str(m))
+            for m in new_metrics
+        }
         # If there's a genuinely new metric, it's a fresh query
+        # Compare against the primary metric from the previous QCO
         if new_metric_names and not any(
-            _semantic_match(nm, prev_metric) for nm in new_metric_names
+            _semantic_match(nm, previous_qco.metric) for nm in new_metric_names
         ):
-            logger.debug(f"New metric detected ({new_metric_names} vs {prev_metric}) — fresh query")
+            logger.debug(f"New metric detected ({new_metric_names} vs {previous_qco.metric}) — fresh query")
             return DrillResult(case="none")
 
     # Also check legacy single-metric field
     new_metric = new_intent.get("metric")
-    if new_metric and not _semantic_match(new_metric, prev_metric):
-        logger.debug(f"New metric detected ({new_metric} vs {prev_metric}) — fresh query")
+    if new_metric and not _semantic_match(new_metric, previous_qco.metric):
+        logger.debug(f"New metric detected ({new_metric} vs {previous_qco.metric}) — fresh query")
         return DrillResult(case="none")
 
     # --- Build previous hierarchy state ---

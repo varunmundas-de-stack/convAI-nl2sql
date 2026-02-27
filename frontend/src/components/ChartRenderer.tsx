@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import TableRenderer from "./TableRenderer";
 
 // Types matching backend VisualSpec
 interface VisualSpec {
@@ -197,7 +198,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
 
             {/* Chart Rendering */}
             {chart_type === "table" && visual_spec.columns && visual_spec.rows ? (
-                <TableRenderer columns={visual_spec.columns} rows={visual_spec.rows} />
+                <TableRenderer data={{ type: "table", columns: visual_spec.columns, rows: visual_spec.rows }} />
             ) : chart_type === "bar" || chart_type === "horizontal_bar" || chart_type === "stacked_bar" ? (
                 <BarChartRenderer spec={visual_spec} />
             ) : chart_type === "line" ? (
@@ -330,87 +331,6 @@ function isNumericColumn(rows: any[], columnName: string): boolean {
 
     // If any sample is a number, consider it numeric
     return samples.some(val => typeof val === "number");
-}
-
-// Table Renderer
-function TableRenderer({ columns, rows }: { columns: string[]; rows: any[] }) {
-    // Determine which columns are numeric for alignment
-    const numericColumns = new Set(
-        columns.filter(col => isNumericColumn(rows, col))
-    );
-
-    return (
-        <div className="space-y-3">
-            {/* Row count indicator */}
-            <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>{rows.length} {rows.length === 1 ? 'row' : 'rows'}</span>
-                {rows.length > 100 && (
-                    <span className="text-amber-600 font-medium">
-                        Large dataset - scroll to view all
-                    </span>
-                )}
-            </div>
-
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                    <div className="max-h-[600px] overflow-y-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50 sticky top-0 z-10">
-                                <tr>
-                                    {columns.map((col, idx) => (
-                                        <th
-                                            key={idx}
-                                            scope="col"
-                                            className={`px-6 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200 ${numericColumns.has(col) ? 'text-right' : 'text-left'
-                                                }`}
-                                        >
-                                            {cleanColumnName(col)}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {rows.length === 0 ? (
-                                    <tr>
-                                        <td
-                                            colSpan={columns.length}
-                                            className="px-6 py-8 text-center text-sm text-gray-500"
-                                        >
-                                            No data available
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    rows.map((row, rowIdx) => (
-                                        <tr
-                                            key={rowIdx}
-                                            className="hover:bg-gray-50 transition-colors duration-150"
-                                        >
-                                            {columns.map((col, colIdx) => {
-                                                const value = row[col];
-                                                const isNumeric = numericColumns.has(col);
-
-                                                return (
-                                                    <td
-                                                        key={colIdx}
-                                                        className={`px-6 py-4 text-sm text-gray-900 ${isNumeric
-                                                            ? 'text-right font-mono'
-                                                            : 'text-left'
-                                                            }`}
-                                                    >
-                                                        {formatCellValue(value)}
-                                                    </td>
-                                                );
-                                            })}
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
 }
 
 // Bar Chart Renderer (SVG implementation)

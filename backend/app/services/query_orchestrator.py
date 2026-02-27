@@ -31,7 +31,7 @@ from app.services.intent_extractor import (
 )
 from app.services.intent_validator import validate_intent
 from app.services.intent_errors import IntentValidationError, IntentIncompleteError
-from app.services.cube_query_builder import build_cube_query, CubeQueryBuildError
+from app.services.cube_query_builder import build_cube_query, build_comparison_query, build_total_query, CubeQueryBuildError
 from app.services.cube_client import (
     CubeClient,
     CubeClientError,
@@ -43,6 +43,8 @@ from app.services.intent_normalizer import normalize_intent
 from app.services.intent_merger import merge_intent
 from app.services.qco_resolver import resolve_qco
 from app.services.drill_detector import detect_drill, apply_drill_mutation
+from app.services.period_planner import determine_strategy, QueryStrategy, transform_intent_for_strategy
+
 from app.services.catalog_manager import CatalogManager
 from app.services.insight_engine import generate_insights, InsightResult, InsightEngineError
 from app.services.insight_refiner import refine_insights, RefinedInsightResult, InsightRefinerError
@@ -137,7 +139,9 @@ class OrchestratorResponse:
     clarification: Optional[Dict[str, Any]] = None
     validated_intent: Optional[Dict[str, Any]] = None
     cube_query: Optional[Dict[str, Any]] = None
+    period_strategy: Optional[str] = None   # QueryStrategy value for period/growth queries
     data: Optional[List[Dict[str, Any]]] = None
+    comparison_data: Optional[List[Dict[str, Any]]] = None  # Secondary Cube rows (data_b)
     insights: Optional[Any] = None        # InsightResult from insight engine
     refined_insights: Optional[Any] = None  # RefinedInsightResult from insight refiner
     visual_spec: Optional[Any] = None     # VisualSpec from visual spec generator
@@ -171,6 +175,7 @@ class OrchestratorResponse:
                 else None
             ),
             "cube_query": self.cube_query,
+            "period_strategy": self.period_strategy,
             "data": self.data,
             "insights": (
                 self.insights.model_dump()
@@ -591,13 +596,29 @@ def _validate_intent(response: OrchestratorResponse, start_time: float) -> Orche
 def _build_cube_query(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
     try:
         logger.info("Step 3: Building Cube query...")
-        cube_query = build_cube_query(response.validated_intent)
+
+        # --- Stage 1: determine_strategy ---
+        try:
+            strategy = determine_strategy(response.validated_intent)
+            response.period_strategy = strategy.value
+            logger.info(f"Strategy determined: {strategy.value}")
+        except Exception as e:
+            logger.warning(f"Period strategy determination failed (non-fatal): {e}")
+            strategy = QueryStrategy.SINGLE_QUERY
+            response.period_strategy = strategy.value
+
+        # --- Stage 2: transform_intent_for_strategy ---
+        transformed_intent = transform_intent_for_strategy(response.validated_intent, strategy)
+        # Store back so _execute_cube_query uses the transformed version
+        response.validated_intent = transformed_intent
+
+        # --- Stage 3: build_cube_query ---
+        cube_query = build_cube_query(transformed_intent)
         response.cube_query = cube_query
         response.stage = PipelineStage.CUBE_QUERY_BUILT
         logger.info(f"Cube query built: {cube_query}")
-        
+
     except CubeQueryBuildError as e:
-        # Cube query build error - STOP
         logger.error(f"Cube query build error: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.INTENT_VALIDATED,
@@ -606,32 +627,60 @@ def _build_cube_query(response: OrchestratorResponse, start_time: float) -> Orch
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
-    
+
     return response
 
 
 def _execute_cube_query(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
+    """
+    Execute Cube HTTP call(s) and store raw results.
+    Post-processing math is deferred to generate_insights() in the insight engine.
+
+    Pipeline stages covered here:
+        → build_cube_query()  (done in _build_cube_query)
+        → execute             (fire 1 or 2 Cube HTTP calls based on strategy)
+        → generate_insights() handles post_process_by_strategy internally
+    """
+    strategy = response.period_strategy or QueryStrategy.SINGLE_QUERY.value
+    intent   = response.validated_intent
+
     try:
-        logger.info("Step 4: Executing Cube query...")
         cube_client = CubeClient()
-        try:
-            cube_response = cube_client.load(response.cube_query)
-            response.data = cube_response.data
-        except CubeHTTPError as e:
-            response.error = OrchestratorError(
-                stage=PipelineStage.CUBE_QUERY_BUILT,
-                error_type="CubeHTTPError",
-                message="Cube query failed",
-                details=e.to_dict() if hasattr(e, "to_dict") else None
-            )
-            response.success = False
+
+        # Primary query — always
+        logger.info(f"Step 4: Executing Cube query (strategy={strategy})...")
+        cube_response_a = _cube_load(cube_client, response.cube_query, response, start_time)
+        if cube_response_a is None:
             return response
+        response.data = cube_response_a.data
+        logger.info(f"Primary query executed: {len(response.data)} rows")
+
+        # Secondary query — DUAL_QUERY and CONTRIBUTION strategies
+        if strategy == QueryStrategy.DUAL_QUERY.value:
+            try:
+                comparison_query = build_comparison_query(intent)
+                cube_response_b = _cube_load(cube_client, comparison_query, response, start_time)
+                if cube_response_b is None:
+                    return response
+                response.comparison_data = cube_response_b.data
+                logger.info(f"Comparison query executed: {len(response.comparison_data)} rows")
+            except Exception as e:
+                logger.warning(f"Comparison query failed, proceeding without it: {e}")
+
+        elif strategy == QueryStrategy.CONTRIBUTION.value:
+            try:
+                total_query = build_total_query(intent)
+                cube_response_total = _cube_load(cube_client, total_query, response, start_time)
+                if cube_response_total is None:
+                    return response
+                response.comparison_data = cube_response_total.data
+                logger.info(f"Total query executed: {len(response.comparison_data)} rows")
+            except Exception as e:
+                logger.warning(f"Total query failed, proceeding without it: {e}")
 
         response.stage = PipelineStage.CUBE_EXECUTED
-        logger.info(f"Cube query executed, rows: {len(cube_response.data)}")
-        
+
     except CubeQueryExecutionError as e:
-        # Cube query execution error - STOP
         logger.error(f"Cube query execution error: {e}")
         response.error = OrchestratorError(
             stage=PipelineStage.CUBE_QUERY_BUILT,
@@ -640,8 +689,32 @@ def _execute_cube_query(response: OrchestratorResponse, start_time: float) -> Or
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
-    
+
     return response
+
+
+def _cube_load(
+    client: CubeClient,
+    query: Dict[str, Any],
+    response: OrchestratorResponse,
+    start_time: float,
+) -> Optional["CubeResponse"]:
+    """
+    Execute a single Cube load call. On HTTP error, sets response.error and returns None.
+    """
+    try:
+        result = client.load(query)
+        return result
+    except CubeHTTPError as e:
+        response.error = OrchestratorError(
+            stage=PipelineStage.CUBE_QUERY_BUILT,
+            error_type="CubeHTTPError",
+            message="Cube query failed",
+            details=e.to_dict() if hasattr(e, "to_dict") else None,
+        )
+        response.success = False
+        response.duration_ms = int((time.monotonic() - start_time) * 1000)
+        return None
 
 
 def _generate_insights_and_spec(
@@ -670,11 +743,13 @@ def _generate_insights_and_spec(
         else:
             chart_type_hint = "table"
         
-        # Step 7a: Insight Engine (pure math, no LLM)
+        # Step 7a: Insight Engine (post-processing + pure math analysis, no LLM)
         insight_result = generate_insights(
             data=response.data or [],
             intent=intent,
             previous_qco=previous_qco,
+            strategy=response.period_strategy,
+            comparison_data=response.comparison_data,
         )
         response.insights = insight_result
         response.stage = PipelineStage.INSIGHTS_GENERATED

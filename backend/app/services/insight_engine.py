@@ -30,6 +30,13 @@ from app.models.qco import QueryContextObject
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Post-processing keys (formerly in growth_computer)
+# ---------------------------------------------------------------------------
+_GROWTH_KEY       = "growth_rate"
+_PREVIOUS_KEY     = "previous_value"
+_CONTRIBUTION_KEY = "contribution_pct"
+
 
 # =============================================================================
 # INSIGHT TYPES
@@ -121,23 +128,43 @@ def generate_insights(
     intent: Intent,
     previous_qco: Optional[QueryContextObject] = None,
     baseline_data: Optional[list[dict[str, Any]]] = None,
-) -> InsightResult:
+    strategy: Optional[str] = None,
+    comparison_data: Optional[list[dict[str, Any]]] = None,
+) -> "InsightResult":
     """
     Analyze query results and produce machine-readable insights.
-    
-    This is the ONLY public function.
-    
+
+    This is the single entry point for all data transformation + analysis.
+
+    Pipeline position:
+        execute → generate_insights()  ← HERE (post-process then analyze)
+        → refine_insights() → visual_spec_generator()
+
+    Step 0 (internal): post-process raw Cube data by strategy
+        SINGLE_TIME_SERIES  → inject growth_rate per row
+        DUAL_QUERY          → merge comparison rows, inject previous_value + growth_rate
+        CONTRIBUTION        → inject contribution_pct per row
+        SINGLE_QUERY        → pass-through
+
     Args:
-        data: Raw query result rows
-        intent: Validated intent (current query)
-        previous_qco: Previous QCO (for context-aware insights)
-        baseline_data: Optional previous-period data for comparison
-        
+        data:            Primary Cube result rows
+        intent:          Validated intent (current query)
+        previous_qco:    Previous QCO (for context-aware insights)
+        baseline_data:   Optional previous-period data (legacy param, same as comparison_data)
+        strategy:        QueryStrategy value string — drives post-processing
+        comparison_data: Secondary Cube rows (comparison period or total query)
+
     Returns:
-        InsightResult with computed insights
+        InsightResult with post-processed data and computed insights
     """
-    logger.info(f"Generating insights: {len(data)} rows, metric={intent.metric}")
-    
+    logger.info(f"Generating insights: {len(data)} rows, metric={intent.metric if hasattr(intent, 'metric') else '?'}")
+
+    # ------------------------------------------------------------------
+    # Step 0: Post-process raw Cube data by strategy
+    # ------------------------------------------------------------------
+    secondary = comparison_data or baseline_data  # support both param names
+    data = _post_process_by_strategy(data, secondary, strategy, intent)
+
     # Handle both Pydantic models and dicts for intent
     if hasattr(intent, 'model_dump'):
         intent_dict = intent.model_dump()
@@ -254,6 +281,149 @@ def generate_insights(
     
     logger.info(f"Generated {len(result.insights)} insights, primary: {result.primary_insight.label if result.primary_insight else 'none'}")
     return result
+
+
+# =============================================================================
+# POST-PROCESSING (formerly growth_computer.py)
+# =============================================================================
+
+def _post_process_by_strategy(
+    data_a: list[dict[str, Any]],
+    data_b: list[dict[str, Any]] | None,
+    strategy: str | None,
+    intent: Any,
+) -> list[dict[str, Any]]:
+    """
+    Dispatch to the correct math function based on QueryStrategy.
+    Called as Step 0 inside generate_insights() before any statistical analysis.
+    """
+    from app.services.period_planner import QueryStrategy  # local import avoids circular
+
+    if strategy == QueryStrategy.SINGLE_TIME_SERIES.value:
+        return _compute_row_wise_growth(data_a, _metric_key(intent), _time_col_key(intent))
+
+    if strategy == QueryStrategy.DUAL_QUERY.value:
+        return _merge_and_compute_growth(data_a, data_b or [], _metric_key(intent), _group_keys(intent))
+
+    if strategy == QueryStrategy.CONTRIBUTION.value:
+        return _compute_contribution(data_a, data_b or [], _metric_key(intent))
+
+    return data_a  # SINGLE_QUERY — pass-through
+
+
+def _compute_row_wise_growth(
+    data: list[dict[str, Any]],
+    metric_key: str,
+    time_col: str,
+) -> list[dict[str, Any]]:
+    """Row-wise growth between consecutive time buckets (SINGLE_TIME_SERIES)."""
+    if not data:
+        return []
+    sorted_data = sorted(data, key=lambda r: r.get(time_col, "") or "")
+    result: list[dict[str, Any]] = []
+    for i, row in enumerate(sorted_data):
+        new_row = dict(row)
+        if i == 0:
+            new_row[_GROWTH_KEY] = None
+        else:
+            curr = _pp_to_float(row.get(metric_key))
+            prev = _pp_to_float(sorted_data[i - 1].get(metric_key))
+            new_row[_GROWTH_KEY] = _pp_safe_growth(curr, prev)
+        result.append(new_row)
+    return result
+
+
+def _merge_and_compute_growth(
+    data_a: list[dict[str, Any]],
+    data_b: list[dict[str, Any]],
+    metric_key: str,
+    group_keys: list[str],
+) -> list[dict[str, Any]]:
+    """Merge two period datasets and compute period-over-period growth (DUAL_QUERY)."""
+    if not data_a:
+        return []
+    lookup_b: dict[tuple, float] = {}
+    for row in data_b:
+        key = _pp_group_key(row, group_keys)
+        lookup_b[key] = _pp_to_float(row.get(metric_key)) or 0.0
+    result: list[dict[str, Any]] = []
+    for row in data_a:
+        new_row = dict(row)
+        key = _pp_group_key(row, group_keys)
+        curr = _pp_to_float(row.get(metric_key))
+        prev = lookup_b.get(key, 0.0)
+        new_row[_PREVIOUS_KEY] = prev
+        new_row[_GROWTH_KEY] = _pp_safe_growth(curr, prev)
+        result.append(new_row)
+    return result
+
+
+def _compute_contribution(
+    data: list[dict[str, Any]],
+    total_data: list[dict[str, Any]],
+    metric_key: str,
+) -> list[dict[str, Any]]:
+    """Compute each row's % share of the grand total (CONTRIBUTION)."""
+    if not data:
+        return []
+    total = sum(_pp_to_float(r.get(metric_key)) or 0.0 for r in total_data)
+    result: list[dict[str, Any]] = []
+    for row in data:
+        new_row = dict(row)
+        value = _pp_to_float(row.get(metric_key))
+        new_row[_CONTRIBUTION_KEY] = (value / total * 100.0) if total and value is not None else None
+        result.append(new_row)
+    return result
+
+
+# --- intent field extractors --------------------------------------------------
+
+def _metric_key(intent: Any) -> str:
+    if hasattr(intent, "metrics") and intent.metrics:
+        return intent.metrics[0].name
+    if isinstance(intent, dict):
+        return intent.get("metric", "")
+    return ""
+
+
+def _time_col_key(intent: Any) -> str:
+    if hasattr(intent, "time") and intent.time:
+        col = intent.time.dimension or ""
+        return f"{col}.{intent.time.granularity}" if intent.time.granularity else col
+    return ""
+
+
+def _group_keys(intent: Any) -> list[str]:
+    if hasattr(intent, "group_by"):
+        return intent.group_by or []
+    if isinstance(intent, dict):
+        return intent.get("group_by", [])
+    return []
+
+
+# --- numeric helpers ----------------------------------------------------------
+
+def _pp_to_float(val: Any) -> Optional[float]:
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val.replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def _pp_safe_growth(curr: Optional[float], prev: Optional[float]) -> Optional[float]:
+    if curr is None or prev is None or prev == 0:
+        return None
+    return (curr - prev) / prev
+
+
+def _pp_group_key(row: dict[str, Any], group_keys: list[str]) -> tuple:
+    return tuple(str(row.get(k, "")) for k in group_keys)
 
 
 # =============================================================================

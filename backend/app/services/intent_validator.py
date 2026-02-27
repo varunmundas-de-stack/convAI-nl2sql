@@ -154,7 +154,9 @@ class IntentValidator:
         # --- Rule 6: Growth without comparison window → clarify ---
         has_growth = bool(
             intent.post_processing and
-            intent.post_processing.derived_metric in ("mom_growth", "yoy_growth")
+            intent.post_processing.derived_metric in (
+                "mom_growth", "yoy_growth", "wow_growth", "period_change"
+            )
         )
         if has_growth:
             has_comparison_window = bool(

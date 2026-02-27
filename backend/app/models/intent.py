@@ -202,7 +202,8 @@ class PostProcessing(BaseModel):
         description="Comparison configuration (period or dimension)"
     )
     derived_metric: Optional[Literal[
-        "none", "mom_growth", "yoy_growth", "contribution_percent", "avg_price"
+        "none", "wow_growth", "mom_growth", "yoy_growth", "period_change",
+        "contribution_percent", "avg_price"
     ]] = Field(
         default="none",
         description="Derived metric to compute after aggregation"

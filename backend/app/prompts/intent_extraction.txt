@@ -36,7 +36,7 @@ Output ONLY valid JSON. No explanation. No markdown.
       "comparison_window": "<time_window | null>"
     } | null,
 
-    "derived_metric": "null | mom_growth | yoy_growth | contribution_percent | avg_price"
+    "derived_metric": "null | wow_growth | mom_growth | yoy_growth | period_change | contribution_percent | avg_price"
   } | null
 }
 

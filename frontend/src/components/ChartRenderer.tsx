@@ -23,7 +23,6 @@ interface VisualSpec {
     columns?: string[];
     rows?: any[];
     empty?: boolean;
-    granularity?: string; // "day" | "week" | "month" | "quarter" | "year"
 }
 
 interface Axis {
@@ -568,57 +567,7 @@ function formatNumber(value: number): string {
     }
 }
 
-// ─── Date label formatter for line-chart x-axis ──────────────────────────────
-// Formats an ISO date string (e.g. "2025-02-15T00:00:00.000Z") or plain date
-// according to the time granularity used in the query.
-function formatDateLabel(raw: any, granularity?: string): string {
-    if (raw === null || raw === undefined) return "";
-    const s = String(raw);
-    // Try to parse as a date
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s; // Not a date — return as-is
-
-    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const m = MONTHS[d.getUTCMonth()];
-    const yr2 = String(d.getUTCFullYear()).slice(-2);
-    const yr4 = d.getUTCFullYear();
-
-    switch (granularity) {
-        case "day": {
-            // dd-Mon-'yy  →  15-Feb-'25
-            const dd = String(d.getUTCDate()).padStart(2, "0");
-            return `${dd}-${m}-'${yr2}`;
-        }
-        case "week": {
-            // Wk{n} - Mon  →  Wk8 - Feb
-            // ISO week number
-            const jan1 = new Date(Date.UTC(yr4, 0, 1));
-            const weekNum = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getUTCDay() + 1) / 7);
-            return `Wk${weekNum} - ${m}`;
-        }
-        case "month": {
-            // Mon 'yy  →  Feb '25
-            return `${m} '${yr2}`;
-        }
-        case "quarter": {
-            // Q{n} 'yy  →  Q1 '25
-            const q = Math.floor(d.getUTCMonth() / 3) + 1;
-            return `Q${q} '${yr2}`;
-        }
-        case "year": {
-            return `${yr4}`;
-        }
-        default:
-            // Fallback: try to detect from the string itself
-            if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-                const dd = String(d.getUTCDate()).padStart(2, "0");
-                return `${dd}-${m}-'${yr2}`;
-            }
-            return s;
-    }
-}
-
-// Clean up column label for display (remove table prefixes, format nicely)
+// Clean column name for display (remove table prefixes, format nicely)
 function cleanColumnName(col: string): string {
     if (!col) return "Value";
 
@@ -1062,7 +1011,6 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                     {yValues.map((value, idx) => {
                         const x = leftPadding + idx * pointSpacing;
                         const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
-                        const formattedLabel = formatDateLabel(xLabels[idx], spec.granularity);
 
                         return (
                             <circle
@@ -1072,9 +1020,9 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                                 r={4}
                                 fill={lineColor}
                                 className="hover:r-6 transition-all"
-                                aria-label={`${formattedLabel}: ${formatNumber(value)}`}
+                                aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
                             >
-                                <title>{`${formattedLabel}: ${formatNumber(value)}`}</title>
+                                <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
                             </circle>
                         );
                     })}
@@ -1082,7 +1030,6 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                     {/* X-axis labels */}
                     {xLabels.map((label, idx) => {
                         const x = leftPadding + idx * pointSpacing;
-                        const formatted = formatDateLabel(label, spec.granularity);
                         return (
                             <text
                                 key={idx}
@@ -1092,7 +1039,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                                 transform={`rotate(-45, ${x}, ${topPadding + chartHeight + 12})`}
                                 className="text-xs fill-gray-600"
                             >
-                                {formatted}
+                                {String(label)}
                             </text>
                         );
                     })}

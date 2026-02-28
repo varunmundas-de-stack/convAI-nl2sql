@@ -83,12 +83,19 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
     const tableData = useMemo(() => {
         if (!visual_spec) return { columns: [], rows: [] };
 
-        // For native table specs, use stored rows/columns directly
+        // Prefer the raw columns/rows the backend attaches to every spec.
+        // This gives all DB columns (all group_by dims + metric), not just
+        // the x-axis dim + series that the chart builder picks.
+        if (visual_spec.columns && visual_spec.rows && visual_spec.rows.length > 0) {
+            return { columns: visual_spec.columns, rows: visual_spec.rows };
+        }
+
+        // Fallback: for native table specs with rows but no chart axes
         if (visual_spec.chart_type === "table" && visual_spec.columns && visual_spec.rows) {
             return { columns: visual_spec.columns, rows: visual_spec.rows };
         }
 
-        // For charts, reconstruct a table from x_axis labels + series values
+        // Legacy fallback: reconstruct from x_axis labels + series values
         const xLabels: any[] = visual_spec.x_axis?.values ?? [];
         const series = visual_spec.series ?? [];
         if (xLabels.length === 0 && series.length === 0) return { columns: [], rows: [] };
@@ -424,7 +431,7 @@ function FlatTableInline({ columns, rows }: { columns: string[]; rows: any[] }) 
                         <tr>
                             {columns.map((col, i) => (
                                 <th key={i} className={`px-5 py-3 text-xs font-semibold tracking-wider text-gray-500 uppercase border-b border-gray-200 ${numericCols.has(col) ? "text-right" : "text-left"}`}>
-                                    {col.replace(/_/g, " ")}
+                                    {cleanColumnName(col)}
                                 </th>
                             ))}
                         </tr>

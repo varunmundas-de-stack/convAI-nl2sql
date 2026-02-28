@@ -78,8 +78,11 @@ class RefinedInsightResult(BaseModel):
     insights: list[RefinedInsight] = Field(default_factory=list)
     primary_insight: Optional[RefinedInsight] = None
     
-    # New: LLM-added executive summary
+    # LLM-generated narrative (Layer 3)
     executive_summary: Optional[str] = None
+    key_risks: list[str] = Field(default_factory=list)
+    possible_drivers: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
 
 
 class InsightRefinerError(Exception):
@@ -152,8 +155,9 @@ def _build_data_summary(insight_result: InsightResult, data: list[dict[str, Any]
     Build a compact summary of data + insights for LLM.
     
     We do NOT pass 1000 raw rows. We pass aggregated statistics.
+    Includes Layer 1 (MetricsFact) and Layer 2 (RuleInsights) for structured LLM input.
     """
-    summary = {
+    summary: dict[str, Any] = {
         "total_rows": insight_result.total_rows,
         "total_value": insight_result.total_value,
         "total_formatted": insight_result.total_formatted,
@@ -162,11 +166,52 @@ def _build_data_summary(insight_result: InsightResult, data: list[dict[str, Any]
         "intent_type": insight_result.intent_type,
         "has_previous_context": insight_result.has_previous_context,
     }
-    
-    # Add sample data points (max 5 rows)
+
+    # Layer 1: structured metrics facts (pure math)
+    if insight_result.metrics_facts:
+        mf = insight_result.metrics_facts
+        summary["metrics_facts"] = {
+            "trend_class": mf.trend_class,
+            "percent_change_latest": mf.percent_change_latest,
+            "percent_change_overall": mf.percent_change_overall,
+            "growth_acceleration": mf.growth_acceleration,
+            "is_accelerating": mf.is_accelerating,
+            "consecutive_growth_periods": mf.consecutive_growth_periods,
+            "consecutive_decline_periods": mf.consecutive_decline_periods,
+            "largest_drop_period": mf.largest_drop_period,
+            "largest_drop_pct": mf.largest_drop_pct,
+            "largest_gain_period": mf.largest_gain_period,
+            "largest_gain_pct": mf.largest_gain_pct,
+            "mean": mf.mean,
+            "std_dev": mf.std_dev,
+            "coefficient_of_variation": mf.coefficient_of_variation,
+            "volatility_flag": mf.volatility_flag,
+            "anomaly_flag": mf.anomaly_flag,
+            "anomaly_periods": mf.anomaly_periods,
+            "top_contributor": mf.top_contributor,
+            "top_contributor_pct": mf.top_contributor_pct,
+            "top3_contributor_pct": mf.top3_contributor_pct,
+            "concentration_flag": mf.concentration_flag,
+        }
+
+    # Layer 2: rule-triggered insights (business logic)
+    if insight_result.rule_insights:
+        summary["rule_insights"] = [
+            {
+                "type": ri.type,
+                "severity": ri.severity.value,
+                "message_key": ri.message_key,
+                "description": ri.description,
+                "context": ri.context,
+                "triggered_by": ri.triggered_by,
+            }
+            for ri in insight_result.rule_insights
+        ]
+
+    # Sample data points (max 5 rows — for grounding)
     if data:
         summary["sample_data"] = data[:5]
-    
+
     return summary
 
 
@@ -188,29 +233,11 @@ def _build_prompt(
     input_data = {
         "query": query,
         "data_summary": data_summary,
-        "insights": [
-            {
-                "label": i.label,
-                "insight_type": i.insight_type.value,
-                "headline": i.headline,
-                "severity": i.severity.value,
-                "confidence": i.confidence,
-                "metric_value": i.metric_value,
-                "metric_formatted": i.metric_formatted,
-                "comparison_value": i.comparison_value,
-                "comparison_formatted": i.comparison_formatted,
-                "change_pct": i.change_pct,
-                "direction": i.direction.value,
-                "dimension": i.dimension,
-                "dimension_value": i.dimension_value,
-            }
-            for i in insight_result.insights
-        ],
         "previous_context": (
             {
                 "metric": previous_qco.metric,
                 "sales_scope": previous_qco.sales_scope,
-                "time_range": previous_qco.time_range,
+                "time_range": previous_qco.time_range.model_dump() if previous_qco.time_range else None,
                 "previous_query": previous_qco.original_query,
             }
             if previous_qco
@@ -230,7 +257,11 @@ def _parse_refinements(raw_text: str) -> dict[str, Any]:
     
     Expected format:
     {
-      "insights": [
+      "executive_summary": "...",
+      "key_risks": ["risk 1", "risk 2"],
+      "possible_drivers": ["driver 1", "driver 2"],
+      "recommendations": ["action 1", "action 2"],
+      "refined_insights": [
         {
           "label": "...",
           "headline": "...",
@@ -238,8 +269,7 @@ def _parse_refinements(raw_text: str) -> dict[str, Any]:
           "confidence": 0.8,
           "context_note": "..."
         }
-      ],
-      "executive_summary": "..."
+      ]
     }
     """
     # Extract JSON from markdown code blocks if present
@@ -270,10 +300,10 @@ def _apply_refinements(
     CRITICAL: Only interpretation fields are modified.
     All numeric fields are preserved from the original.
     """
-    # Build refinement map by label
+    # Build refinement map by label — support both old "insights" key and new "refined_insights" key
     refinement_map = {
         r["label"]: r
-        for r in refinements.get("insights", [])
+        for r in (refinements.get("refined_insights") or refinements.get("insights") or [])
     }
     
     # Convert insights to refined format
@@ -317,8 +347,11 @@ def _apply_refinements(
         # Refined insights
         insights=refined_insights,
         
-        # Executive summary (new)
+        # LLM-generated narrative (Layer 3)
         executive_summary=refinements.get("executive_summary"),
+        key_risks=refinements.get("key_risks") or [],
+        possible_drivers=refinements.get("possible_drivers") or [],
+        recommendations=refinements.get("recommendations") or [],
     )
     
     # Set primary insight (highest severity + confidence)

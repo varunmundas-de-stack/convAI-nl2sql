@@ -138,6 +138,7 @@ class OrchestratorResponse:
     merged_intent: Optional[Dict[str, Any]] = None
     clarification: Optional[Dict[str, Any]] = None
     validated_intent: Optional[Dict[str, Any]] = None
+    original_intent: Optional[Dict[str, Any]] = None
     cube_query: Optional[Dict[str, Any]] = None
     period_strategy: Optional[str] = None   # QueryStrategy value for period/growth queries
     data: Optional[List[Dict[str, Any]]] = None
@@ -170,11 +171,15 @@ class OrchestratorResponse:
             "clarification": self.clarification,
             "missing_fields": self.missing_fields,
             "clarification_message": self.clarification_message,
-            "allowed_values": self.allowed_values,
             "validated_intent": (
                 self.validated_intent.model_dump()
                 if self.validated_intent is not None
                 else None
+            ),
+            "original_intent": (
+                self.original_intent.model_dump()
+                if self.original_intent is not None and hasattr(self.original_intent, "model_dump")
+                else self.original_intent
             ),
             "cube_query": self.cube_query,
             "period_strategy": self.period_strategy,
@@ -349,7 +354,7 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
     # -------------------------------------------------------------------------
     if session_id and response.validated_intent:
         try:
-            qco = resolve_qco(response.validated_intent, query)
+            qco = resolve_qco(response.original_intent or response.validated_intent, query)
             save_qco(session_id, qco)
             response.stage = PipelineStage.QCO_RESOLVED
             logger.info(f"QCO resolved and saved for session {session_id}")
@@ -627,6 +632,7 @@ def _build_cube_query(response: OrchestratorResponse, start_time: float) -> Orch
             response.period_strategy = strategy.value
 
         # --- Stage 2: transform_intent_for_strategy ---
+        response.original_intent = response.validated_intent
         transformed_intent = transform_intent_for_strategy(response.validated_intent, strategy)
         # Store back so _execute_cube_query uses the transformed version
         response.validated_intent = transformed_intent
@@ -777,7 +783,16 @@ def _generate_insights_and_spec(
             "comparison":   "bar_chart",
             # "snapshot" intentionally omitted — let visual spec auto-detect (number_card for 1 row, bar for multiple)
         }
-        chart_type_hint = _chart_hint_map.get(_intent_type_str, None)  # None = let visual spec auto-detect
+        
+        strategy = response.period_strategy
+        if strategy == QueryStrategy.CONTRIBUTION.value:
+            chart_type_hint = "bar_chart"
+        elif strategy == QueryStrategy.SINGLE_TIME_SERIES.value:
+            chart_type_hint = "line_chart"
+        elif strategy == QueryStrategy.DUAL_QUERY.value:
+            chart_type_hint = "grouped_bar_chart"
+        else:
+            chart_type_hint = _chart_hint_map.get(_intent_type_str, None)
         
         # Step 7a: Insight Engine (post-processing + pure math analysis, no LLM)
         insight_result = generate_insights(

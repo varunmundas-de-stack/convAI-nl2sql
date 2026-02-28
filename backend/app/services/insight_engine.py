@@ -255,6 +255,13 @@ def generate_insights(
     )
     logger.info(f"Generating insights: {len(data)} rows, metric={_log_metric}")
 
+    if not data:
+        return InsightResult(
+            insights=[],
+            primary_insight=None,
+            summary="No data found for the selected period."
+        )
+
     # ------------------------------------------------------------------
     # Step 0: Post-process raw Cube data by strategy
     # ------------------------------------------------------------------

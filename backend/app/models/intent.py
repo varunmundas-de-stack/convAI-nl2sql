@@ -304,10 +304,18 @@ def derive_intent_type(intent: Intent) -> IntentType:
         intent.post_processing.comparison and
         intent.post_processing.comparison.type in {"period", "dimension"}
     )
+    has_growth_metric = bool(
+        intent.post_processing and
+        intent.post_processing.derived_metric in {"period_growth", "yoy_growth", "mom_growth", "wow_growth", "mtm_growth"}
+    )
 
     # Comparison always wins (explicit dual-axis)
     if has_comparison:
         return IntentType.COMPARISON
+
+    # Growth queries inherently represent trends (even if ranked for ordering)
+    if has_growth_metric:
+        return IntentType.TREND
 
     # Ranking (ordering + limit)
     if has_ranking:

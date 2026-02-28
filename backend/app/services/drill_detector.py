@@ -352,7 +352,10 @@ def _check_time_change(
         return None
 
     prev_gran = previous_qco.time_granularity
-    if prev_gran and new_gran != prev_gran and new_gran in TIME_GRANULARITY_ORDER:
+    # BUG-08 FIX: fire when prev_gran is None too — a snapshot context gaining a
+    # granularity is still a time_change that should be detected and applied correctly.
+    granularity_changed = (new_gran != prev_gran) and new_gran in TIME_GRANULARITY_ORDER
+    if granularity_changed:
         # Only treat as time_change if nothing else is changing
         new_group_by = new_intent.get("group_by") or []
         prev_group_by = previous_qco.group_by or []

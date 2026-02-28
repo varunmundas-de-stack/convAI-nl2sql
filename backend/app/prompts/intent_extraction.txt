@@ -77,8 +77,8 @@ Output ONLY valid JSON. No explanation. No markdown.
    - monthly / weekly / daily / quarterly / yearly
    - "trend" or "over time"
 
-### Rule 4: Trend Without Granularity → Output Null Granularity
-8. If the user says "trend" but does NOT specify a granularity (day/week/month/quarter/year), set "time.granularity" to null. Do NOT auto-infer.
+### Rule 4: Trend Without Explicit Granularity → Default to "week"
+8. If the user says "trend", "trending", "over time", or similar but does NOT specify a granularity, set "time.granularity" to "week". NEVER leave granularity null when the query requests a trend.
 
 ### Rule 5: Ranking Without group_by → Output Null Ranking
 9. If "top N" or "bottom N" is requested but there is no breakdown dimension, set ranking to null.
@@ -303,6 +303,60 @@ Output JSON:
     "comparison": null,
     "derived_metric": "mom_growth"
   }
+}
+
+
+Query: Show trend for 5 kg pack size last 30 days.
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": ["net_value"],
+  "group_by": null,
+  "filters": [{ "dimension": "pack_size", "operator": "equals", "value": "5 kg" }],
+  "time": {
+    "dimension": "invoice_date",
+    "window": "last_30_days",
+    "start_date": null,
+    "end_date": null,
+    "granularity": "week"
+  },
+  "post_processing": null
+}
+
+
+Query: How has Aashirvaad been trending this quarter?
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": ["net_value"],
+  "group_by": null,
+  "filters": [{ "dimension": "brand", "operator": "equals", "value": "Aashirvaad" }],
+  "time": {
+    "dimension": "invoice_date",
+    "window": "quarter_to_date",
+    "start_date": null,
+    "end_date": null,
+    "granularity": "week"
+  },
+  "post_processing": null
+}
+
+
+Query: Show the sales trajectory by zone over last 90 days.
+Output JSON:
+{
+  "sales_scope": "SECONDARY",
+  "metrics": ["net_value"],
+  "group_by": ["zone"],
+  "filters": null,
+  "time": {
+    "dimension": "invoice_date",
+    "window": "last_90_days",
+    "start_date": null,
+    "end_date": null,
+    "granularity": "week"
+  },
+  "post_processing": null
 }
 
 

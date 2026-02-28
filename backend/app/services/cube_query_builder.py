@@ -111,7 +111,12 @@ def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
     return [td]
 
 def _build_order(intent: Intent) -> dict[str, str]:
-    # Order by the first (primary) metric; direction comes from ranking spec if present
+    # BUG-06 FIX: For time-series queries (granularity set), order by the time
+    # dimension ascending so Cube returns rows in chronological order.
+    if intent.time and intent.time.granularity and intent.time.dimension:
+        return {intent.time.dimension: "asc"}
+
+    # For all other queries: order by the primary metric; direction from ranking spec
     primary = intent.metrics[0].name
     if "." not in primary:
         raise ValueError(f"CubeQueryBuilder received non-normalized order metric: {primary}")

@@ -227,6 +227,13 @@ def generate_visual_spec(
     else:
         spec = _build_table_spec(data, insights)
     
+    # Always attach the full raw data so the frontend table-view gets ALL columns,
+    # not just the x-axis dim + metric the chart uses.
+    # (TABLE spec already populates these; all other builders leave them None.)
+    if spec.columns is None and data:
+        spec.columns = list(data[0].keys())
+        spec.rows = data
+
     # Enrich with insights
     spec.title = _make_title(query, insights)
     spec.subtitle = _make_subtitle(insights)
@@ -234,9 +241,10 @@ def generate_visual_spec(
     spec.markers = _insights_to_markers(insights)
     spec.total_rows = len(data)
     spec.metric = insights.metric
-    
+
     logger.info(f"Visual spec generated: chart_type={chart_type}, {len(spec.annotations)} annotations, {len(spec.markers)} markers")
     return spec
+
 
 
 # =============================================================================
@@ -246,6 +254,11 @@ def generate_visual_spec(
 def _resolve_chart_type(hint: Optional[str], insights: InsightResult, data: list) -> ChartType:
     """Resolve the chart type from hint, intent, and data shape."""
     
+    # If the query returns more than 2 columns (e.g. multiple dimensions + a metric),
+    # our simple 2D charts (bar, pie, single-line) will drop data. Force a table view.
+    if data and len(data[0].keys()) > 2:
+        return ChartType.TABLE
+
     # Direct mapping from hint
     hint_map = {
         "bar_chart": ChartType.BAR,
@@ -382,32 +395,132 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     return spec
 
 
+# Granularity names Cube appends to time dimension keys (e.g. invoice_date.week)
+_GRANULARITY_SUFFIXES: dict[str, str] = {
+    "day":     "Day",
+    "week":    "Week",
+    "month":   "Month",
+    "quarter": "Quarter",
+    "year":    "Year",
+}
+
+
+def _resolve_time_dim_key(
+    dim_key: Optional[str],
+    sample_row: dict,
+) -> tuple[Optional[str], str]:
+    """
+    Detect the granularity-suffixed Cube key for a time dimension.
+
+    Cube stores time-bucketed rows under a key like::
+
+        fact_secondary_sales.invoice_date.week
+        fact_secondary_sales.invoice_date.month
+
+    rather than the bare ``invoice_date`` field.  This helper scans the
+    first data row for such a key and returns:
+
+    * the exact dict key to use when extracting x-values
+    * a human-readable axis label ("Week", "Month", …, or "Time" as fallback)
+
+    Two-pass strategy
+    -----------------
+    Pass 1 — expected pattern: look for ``{dim_key}.{granularity}`` in the row.
+    Pass 2 — full-row scan: if dim_key is a group_by dimension (e.g. pack_size)
+             rather than the time dimension, pass 1 finds nothing. Scan every
+             row key for any key ending with a known granularity suffix and use
+             the first match. This covers trend+group_by queries where
+             ``insights.dimensions[0]`` is the group_by field, not the time field.
+    """
+    if not sample_row:
+        return dim_key, "Time"
+
+    # Pass 1: expected pattern using dim_key prefix
+    if dim_key:
+        for suffix, label in _GRANULARITY_SUFFIXES.items():
+            candidate = f"{dim_key}.{suffix}"
+            if candidate in sample_row:
+                return candidate, label
+
+    # Pass 2: full-row scan — finds invoice_date.week regardless of dim_key
+    for key in sample_row:
+        for suffix, label in _GRANULARITY_SUFFIXES.items():
+            if key.endswith(f".{suffix}"):
+                return key, label
+
+    # No granularity suffix present — use the base key, generic label
+    return dim_key, "Time"
+
+def _format_time_label(iso_value: str, granularity_label: str) -> str:
+    """
+    Format a raw Cube ISO timestamp into a granularity-aware display label.
+
+    Cube returns time-bucket keys as full ISO strings regardless of granularity,
+    e.g. ``"2026-01-26T00:00:00.000"`` for a week bucket.  This converts them
+    to the most readable form for the chosen granularity:
+
+    ========= ======================== ==========
+    Granularity  Input                   Output
+    ========= ======================== ==========
+    day        2026-01-26T00:00:00.000  Jan 26
+    week       2026-01-26T00:00:00.000  Jan 26
+    month      2026-02-01T00:00:00.000  Feb '26
+    quarter    2026-01-01T00:00:00.000  Q1 2026
+    year       2026-01-01T00:00:00.000  2026
+    ========= ======================== ==========
+    """
+    from datetime import datetime
+
+    try:
+        # Cube timestamps: "2026-01-26T00:00:00.000" or "2026-01-26T00:00:00"
+        clean = iso_value.split(".")[0]          # strip milliseconds
+        dt = datetime.fromisoformat(clean)
+    except (ValueError, AttributeError):
+        return iso_value  # unknown format — return as-is
+
+    g = granularity_label.lower()
+    if g in ("day", "week"):
+        return dt.strftime("%b %d")              # "Jan 26"
+    elif g == "month":
+        return dt.strftime("%b '%y")             # "Feb '26"
+    elif g == "quarter":
+        q = (dt.month - 1) // 3 + 1
+        return f"Q{q} {dt.year}"                 # "Q1 2026"
+    elif g == "year":
+        return str(dt.year)                       # "2026"
+    else:
+        return dt.strftime("%b %d, %Y")          # fallback
+
+
 def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     """Build a line chart spec."""
     spec = VisualSpec(chart_type=ChartType.LINE)
-    
+
     metric_key = insights.metric or ""
     dim_key = insights.dimensions[0] if insights.dimensions and len(insights.dimensions) > 0 else None
-    
+
+    # Resolve the exact Cube key (may include granularity suffix, e.g. invoice_date.week)
+    # and derive the human-readable x-axis label from it.
+    sample_row = data[0] if data else {}
+    time_key, x_label = _resolve_time_dim_key(dim_key, sample_row)
+
     x_values = []
     y_values = []
-    
+
     for row in data:
-        x_val = _get_dim_value(row, dim_key) if dim_key else str(len(x_values))
+        x_val = _get_dim_value(row, time_key) if time_key else str(len(x_values))
         y_val = _get_metric_value(row, metric_key)
         x_values.append(x_val)
         y_values.append(y_val)
-    
-    # Determine axis type
-    axis_type = "categorical"
-    if dim_key and any(kw in dim_key.lower() for kw in ["date", "time", "month", "year", "quarter"]):
-        axis_type = "time"
-    
+
+    # Format raw ISO timestamps into granularity-aware display labels
+    x_values = [_format_time_label(v, x_label) for v in x_values]
+
     spec.x_axis = Axis(
-        label=_clean_label(dim_key) if dim_key else "Time",
+        label=x_label,
         values=x_values,
-        format="date" if axis_type == "time" else None,
-        axis_type=axis_type,
+        format="date",
+        axis_type="time",
     )
     spec.y_axis = Axis(
         label=_clean_label(metric_key),
@@ -415,7 +528,7 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
         format="number",
         axis_type="linear",
     )
-    
+
     # Determine color hint and trend slope from trend insight
     color_hint = "primary"
     trend_slope = None
@@ -425,26 +538,23 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
                 color_hint = "positive"
             elif insight.direction == Direction.DOWN:
                 color_hint = "negative"
-            # Extract slope from change_pct
             if insight.change_pct is not None:
                 trend_slope = insight.change_pct
             break
-    
+
     spec.series = [DataSeries(
         label=_clean_label(metric_key),
         values=y_values,
         color_hint=color_hint,
     )]
-    
-    # Add trend slope to spec
+
     if trend_slope is not None:
         spec.trend_slope = trend_slope
-    
-    # Populate primary/secondary values
+
     if insights.total_value is not None:
         spec.primary_value = insights.total_formatted
         spec.primary_label = f"Total {_clean_label(metric_key)}"
-    
+
     return spec
 
 

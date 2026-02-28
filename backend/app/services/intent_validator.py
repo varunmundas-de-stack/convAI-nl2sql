@@ -242,10 +242,26 @@ class IntentValidator:
         if intent.filters:
             self._validate_filters(intent.filters)
         
+        
         if missing_fields:
+            allowed_values: Optional[list[str]] = None
+            first_missing = missing_fields[0]
+            
+            if first_missing == "metrics":
+                allowed_values = list(self.catalog.raw_catalog().get("metrics", {}).keys())
+            elif first_missing == "group_by":
+                allowed_values = list(self.catalog.raw_catalog().get("dimensions", {}).keys())
+            elif first_missing == "time.granularity":
+                allowed_values = ["day", "week", "month", "quarter", "year"]
+            elif first_missing in ("time", "time.window"):
+                allowed_values = list(self.catalog.raw_catalog().get("time_windows", {}).keys())
+            elif first_missing == "post_processing.comparison.comparison_window":
+                allowed_values = ["previous_period", "last_month", "last_quarter", "last_year"]
+                
             raise IntentIncompleteError(
                 missing_fields=missing_fields,
                 clarification_message=" ".join(clarification_questions),
+                allowed_values=allowed_values
             )
         return intent
 

@@ -13,7 +13,8 @@ export function parseClarificationAnswers(
         : [userInput.trim()];
 
     missingFields.forEach((field, idx) => {
-        const answer = userAnswers[idx] || userAnswers[0];
+        const answer = userAnswers[idx];
+        if (!answer) return; // Only process answers that were actually provided
 
         if (field === "time_dimension") {
             // Parse time dimension: expect "granularity" or "dimension, granularity"

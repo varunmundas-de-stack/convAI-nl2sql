@@ -39,7 +39,7 @@ from app.services.cube_client import (
     CubeQueryExecutionError,
     CubeHTTPError,
 )
-from app.services.intent_normalizer import normalize_intent
+from app.services.intent_normalizer import normalize_intent, patch_trend_intent
 from app.services.intent_merger import merge_intent
 from app.services.qco_resolver import resolve_qco
 from app.services.drill_detector import detect_drill, apply_drill_mutation
@@ -151,9 +151,10 @@ class OrchestratorResponse:
     error: Optional[OrchestratorError] = None
     
     # Metadata
-    request_id: str = uuid.uuid4().hex
+    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     missing_fields: Optional[List[str]] = None
     clarification_message: Optional[str] = None
+    allowed_values: Optional[List[str]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dict."""
@@ -169,6 +170,7 @@ class OrchestratorResponse:
             "clarification": self.clarification,
             "missing_fields": self.missing_fields,
             "clarification_message": self.clarification_message,
+            "allowed_values": self.allowed_values,
             "validated_intent": (
                 self.validated_intent.model_dump()
                 if self.validated_intent is not None
@@ -383,7 +385,7 @@ def execute_query_dict(query: str, session_id: Optional[str] = None) -> Dict[str
     """
     response = execute_query(query, session_id=session_id)
     return response.to_dict()
-
+ 
 
 def resume_query(request_id: str, clarification_answers: dict, session_id: Optional[str] = None) -> dict:
     start_time = time.monotonic()
@@ -414,18 +416,30 @@ def resume_query(request_id: str, clarification_answers: dict, session_id: Optio
     # Recover session_id from state if not provided by caller
     resolved_session_id = session_id or state.session_id
 
-    # Merge user answers into existing intent
-    merged_intent = {
+    # BUG-02 FIX: Load previous QCO so merge_intent can apply inheritance rules
+    previous_qco = None
+    if resolved_session_id:
+        try:
+            previous_qco = load_qco(resolved_session_id)
+        except Exception as e:
+            logger.warning(f"Could not load QCO on resume for session {resolved_session_id}: {e}")
+
+    # Patch the saved intent with the user's clarification answers
+    patched_intent = {
         **state.intent,
         **{k: v for k, v in clarification_answers.items() if k in state.missing_fields}
     }
-    logger.info(f"Merged intent: {merged_intent}")
-    delete_state(request_id)
+
+    # Run through full merge pipeline so QCO context (filters, group_by, etc.) is inherited
+    merged_intent = merge_intent(patched_intent, previous_qco) if previous_qco else patched_intent
+    logger.info(f"Resume merged intent: {merged_intent}")
+
+    # BUG-01 FIX: do NOT delete state here — delete only after full pipeline success
     response = OrchestratorResponse(
         query=state.original_query,
         success=False,
         stage=PipelineStage.INTENT_EXTRACTED,
-        raw_intent=merged_intent,
+        raw_intent=patched_intent,
         merged_intent=merged_intent,
         request_id=request_id,
         session_id=resolved_session_id,
@@ -455,7 +469,8 @@ def resume_query(request_id: str, clarification_answers: dict, session_id: Optio
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
 
-        response = _generate_insights_and_spec(response, start_time)
+        # BUG-09 FIX: forward previous_qco so the insight engine has delta/comparison context
+        response = _generate_insights_and_spec(response, start_time, previous_qco=previous_qco)
         if response.error:
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
@@ -563,7 +578,10 @@ def _validate_intent(response: OrchestratorResponse, start_time: float) -> Orche
         # Use merged_intent if available, otherwise fall back to raw_intent
         intent_to_validate = response.merged_intent or response.raw_intent
         normalized_intent = normalize_intent(intent_to_validate)
-        validated_intent = validate_intent(normalized_intent, catalog)
+        # Fix 2: Keyword-driven trend patcher — runs before validation so the
+        # validator sees a correct TREND intent even if the LLM missed granularity.
+        normalized_intent = patch_trend_intent(normalized_intent, response.query)
+        validated_intent = validate_intent(normalized_intent, catalog, original_query=response.query)
         response.validated_intent = validated_intent
         response.stage = PipelineStage.INTENT_VALIDATED
         logger.info(f"Intent validated: {validated_intent}")
@@ -574,6 +592,7 @@ def _validate_intent(response: OrchestratorResponse, start_time: float) -> Orche
         response.clarification = True
         response.missing_fields = e.missing_fields
         response.clarification_message = e.clarification_message
+        response.allowed_values = e.allowed_values
         response.stage = PipelineStage.CLARIFICATION_REQUESTED
         response.error = None
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -595,7 +614,7 @@ def _validate_intent(response: OrchestratorResponse, start_time: float) -> Orche
 
 def _build_cube_query(response: OrchestratorResponse, start_time: float) -> OrchestratorResponse:
     try:
-        logger.info("Step 3: Building Cube query...")
+        logger.info("Step 5: Building Cube query...")
 
         # --- Stage 1: determine_strategy ---
         try:
@@ -733,15 +752,32 @@ def _generate_insights_and_spec(
         
         intent = response.validated_intent
         
-        # Extract chart type hint from intent
-        if intent is None:
-            chart_type_hint = "table"
-        elif hasattr(intent, 'visualization_type'):
-            chart_type_hint = intent.visualization_type or "table"
-        elif isinstance(intent, dict):
-            chart_type_hint = intent.get("visualization_type", "table") or "table"
-        else:
-            chart_type_hint = "table"
+        # Derive chart type hint from intent_type
+        # Intent has no visualization_type field — derive from intent_type instead
+        _intent_type_str = ""
+        if intent is not None:
+            if hasattr(intent, "time") and intent.time and intent.time.granularity:
+                _intent_type_str = "trend"
+            elif hasattr(intent, "post_processing") and intent.post_processing:
+                pp = intent.post_processing
+                dm = pp.derived_metric or "none"
+                if dm != "none":
+                    _intent_type_str = "trend"
+                elif pp.ranking and pp.ranking.enabled:
+                    _intent_type_str = "ranking"
+            if not _intent_type_str and hasattr(intent, "group_by") and intent.group_by:
+                _intent_type_str = "distribution"
+            if not _intent_type_str:
+                _intent_type_str = "snapshot"
+
+        _chart_hint_map = {
+            "trend":        "line_chart",
+            "ranking":      "horizontal_bar_chart",
+            "distribution": "bar_chart",
+            "comparison":   "bar_chart",
+            # "snapshot" intentionally omitted — let visual spec auto-detect (number_card for 1 row, bar for multiple)
+        }
+        chart_type_hint = _chart_hint_map.get(_intent_type_str, None)  # None = let visual spec auto-detect
         
         # Step 7a: Insight Engine (post-processing + pure math analysis, no LLM)
         insight_result = generate_insights(
@@ -777,8 +813,7 @@ def _generate_insights_and_spec(
         # Step 7c: Visual Spec Generator (declarative spec, no rendering)
         logger.info("Step 7c: Generating visual spec...")
         # Use refined insights if available, otherwise fall back to original
-        # insights_for_spec = response.refined_insights or insight_result
-        insights_for_spec = response.refined_insights
+        insights_for_spec = response.refined_insights or insight_result
         visual_spec = generate_visual_spec(
             data=response.data or [],
             insights=insights_for_spec,

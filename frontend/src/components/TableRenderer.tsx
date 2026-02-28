@@ -92,8 +92,8 @@ function FlatTable({ columns, rows }: { columns: string[]; rows: any[] }) {
                                         <td
                                             key={ci}
                                             className={`px-5 py-3 text-gray-800 ${numericColumns.has(col)
-                                                    ? "text-right font-mono tabular-nums"
-                                                    : "text-left"
+                                                ? "text-right font-mono tabular-nums"
+                                                : "text-left"
                                                 }`}
                                         >
                                             {formatCellValue(row[col])}
@@ -333,25 +333,27 @@ export default function TableRenderer({ data }: TableRendererProps) {
                         onClick={() => setView("flat")}
                         title="Flat table view"
                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${view === "flat"
-                                ? "bg-white text-gray-800 shadow-sm"
-                                : "text-gray-500 hover:text-gray-700"
+                            ? "bg-white text-gray-800 shadow-sm"
+                            : "text-gray-500 hover:text-gray-700"
                             }`}
                     >
                         <Table2 className="h-3.5 w-3.5" />
                         Flat
                     </button>
-                    <button
-                        id="table-view-pivot"
-                        onClick={() => setView("pivot")}
-                        title="Pivot table view"
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${view === "pivot"
+                    {columns.length > 2 && (
+                        <button
+                            id="table-view-pivot"
+                            onClick={() => setView("pivot")}
+                            title="Pivot table view"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${view === "pivot"
                                 ? "bg-white text-gray-800 shadow-sm"
                                 : "text-gray-500 hover:text-gray-700"
-                            }`}
-                    >
-                        <LayoutGrid className="h-3.5 w-3.5" />
-                        Pivot
-                    </button>
+                                }`}
+                        >
+                            <LayoutGrid className="h-3.5 w-3.5" />
+                            Pivot
+                        </button>
+                    )}
                 </div>
             </div>
 

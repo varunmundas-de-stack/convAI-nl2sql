@@ -1,8 +1,20 @@
 # app/services/intent_normalizer.py
 import copy
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# TREND KEYWORD CONSTANTS
+# ---------------------------------------------------------------------------
+
+TREND_KEYWORDS: frozenset[str] = frozenset({
+    "trend", "trending", "trended", "trajectory", "progression",
+    "over time", "week by week", "month by month", "day by day",
+    "daily", "weekly", "monthly", "quarterly", "yearly",
+    "how has", "how have", "how did",                  # e.g. "how has X trended"
+})
 
 # =============================================================================
 # METRIC MAP
@@ -255,6 +267,50 @@ def normalize_intent(raw_intent: dict) -> dict:
             "dimension": resolve_time_dimension("invoice_date", scope),
             "granularity": None,
         }
+
+    return intent
+
+
+# =============================================================================
+# TREND INTENT PATCHER
+# =============================================================================
+
+def patch_trend_intent(intent: dict, original_query: Optional[str]) -> dict:
+    """
+    Safety net: if the user's query contains trend language but the LLM
+    did not set time.granularity, inject a sensible FMCG default ("week").
+
+    Called after normalize_intent() but before validate_intent() so the
+    validator sees a fully-formed TREND intent and routes it correctly.
+
+    Args:
+        intent:         The normalized intent dict (will be mutated in-place).
+        original_query: The raw NL query from the user.
+
+    Returns:
+        The (possibly patched) intent dict.
+    """
+    if not original_query:
+        return intent
+
+    query_lower = original_query.lower()
+    has_trend_keyword = any(kw in query_lower for kw in TREND_KEYWORDS)
+
+    if not has_trend_keyword:
+        return intent
+
+    time = intent.get("time")
+    if not isinstance(time, dict):
+        return intent
+
+    if not time.get("granularity"):
+        time["granularity"] = "week"   # sensible default for FMCG daily ops
+        intent["time"] = time
+        logger.info(
+            "[TrendPatcher] Injected granularity='week' — "
+            f"query has trend keyword but LLM omitted granularity. "
+            f"query='{original_query[:80]}'"
+        )
 
     return intent
 

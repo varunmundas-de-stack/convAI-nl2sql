@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart2, Table2, LayoutGrid } from "lucide-react";
 import TableRenderer from "./TableRenderer";
 
 // Types matching backend VisualSpec
@@ -23,6 +23,7 @@ interface VisualSpec {
     columns?: string[];
     rows?: any[];
     empty?: boolean;
+    granularity?: string; // "day" | "week" | "month" | "quarter" | "year"
 }
 
 interface Axis {
@@ -72,10 +73,51 @@ interface ChartRendererProps {
 export default function ChartRenderer({ visual_spec, refined_insights }: ChartRendererProps) {
     const [showContextNotes, setShowContextNotes] = useState(false);
     const [isClient, setIsClient] = useState(false);
+    const [viewMode, setViewMode] = useState<"chart" | "table">("chart");
+    const [pivotMode, setPivotMode] = useState(false);
 
     useEffect(() => {
         setIsClient(true);
     }, []);
+
+    // Build a flat column/row dataset from the visual_spec for the table view
+    const tableData = useMemo(() => {
+        if (!visual_spec) return { columns: [], rows: [] };
+
+        // For native table specs, use stored rows/columns directly
+        if (visual_spec.chart_type === "table" && visual_spec.columns && visual_spec.rows) {
+            return { columns: visual_spec.columns, rows: visual_spec.rows };
+        }
+
+        // For charts, reconstruct a table from x_axis labels + series values
+        const xLabels: any[] = visual_spec.x_axis?.values ?? [];
+        const series = visual_spec.series ?? [];
+        if (xLabels.length === 0 && series.length === 0) return { columns: [], rows: [] };
+
+        const columns: string[] = [
+            visual_spec.x_axis?.label || "Category",
+            ...series.map(s => s.label || "Value"),
+        ];
+
+        const rows = xLabels.map((label, i) => {
+            const row: Record<string, any> = { [columns[0]]: label };
+            series.forEach((s, si) => {
+                row[columns[si + 1]] = s.values?.[i] ?? null;
+            });
+            return row;
+        });
+
+        // For number_card / specs with no x labels, collapse series into single rows
+        if (xLabels.length === 0 && series.length > 0) {
+            const row: Record<string, any> = {};
+            series.forEach(s => { row[s.label || "Value"] = s.values?.[0] ?? null; });
+            return { columns: series.map(s => s.label || "Value"), rows: [row] };
+        }
+
+        return { columns, rows };
+    }, [visual_spec]);
+
+    const canPivot = tableData.columns.length > 2;
 
     if (!isClient) {
         return (
@@ -101,10 +143,12 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
         );
     }
 
+    const isChartType = visual_spec.chart_type !== "number_card" && visual_spec.chart_type !== "table";
     const { chart_type, title, subtitle, primary_value, primary_label, secondary_value, secondary_label, direction, trend_slope } = visual_spec;
 
     return (
         <div className="space-y-4">
+
             {/* Title Section */}
             {title && (
                 <div className="space-y-1">
@@ -227,53 +271,269 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                 </div>
             )}
 
-            {/* Primary/Secondary Values for Number Cards and Snapshots */}
-            {chart_type === "number_card" && primary_value && (
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                    <div className="space-y-4">
-                        <div>
-                            <p className="text-sm text-gray-600 mb-1">{primary_label || "Value"}</p>
-                            <div className="flex items-baseline gap-3">
-                                <p className="text-4xl font-bold text-gray-900">{primary_value}</p>
-                                {direction && direction !== "unknown" && trend_slope !== undefined && (
-                                    <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${direction === "up" ? "bg-green-100 text-green-700" :
-                                        direction === "down" ? "bg-red-100 text-red-700" :
-                                            "bg-gray-100 text-gray-700"
-                                        }`}>
-                                        {direction === "up" && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
-                                        {direction === "down" && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
-                                        {direction === "flat" && <Minus className="h-4 w-4" aria-hidden="true" />}
-                                        <span>{Math.abs(trend_slope).toFixed(1)}%</span>
+            {/* ── View toggle bar (below insights, above chart) ──────── */}
+            {isChartType && (
+                <div className="flex items-center justify-end gap-2">
+                    {/* Chart / Table toggle */}
+                    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                        <button
+                            id="view-toggle-chart"
+                            onClick={() => { setViewMode("chart"); setPivotMode(false); }}
+                            title="Chart view"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${viewMode === "chart"
+                                ? "bg-white text-gray-800 shadow-sm"
+                                : "text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <BarChart2 className="h-3.5 w-3.5" />
+                            Chart
+                        </button>
+                        <button
+                            id="view-toggle-table"
+                            onClick={() => setViewMode("table")}
+                            title="Table view"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${viewMode === "table"
+                                ? "bg-white text-gray-800 shadow-sm"
+                                : "text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <Table2 className="h-3.5 w-3.5" />
+                            Table
+                        </button>
+                    </div>
+
+                    {/* Pivot toggle — only in table mode with >2 columns */}
+                    {viewMode === "table" && canPivot && (
+                        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                            <button
+                                id="view-toggle-flat"
+                                onClick={() => setPivotMode(false)}
+                                title="Flat table"
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${!pivotMode
+                                    ? "bg-white text-gray-800 shadow-sm"
+                                    : "text-gray-500 hover:text-gray-700"
+                                    }`}
+                            >
+                                <Table2 className="h-3.5 w-3.5" />
+                                Flat
+                            </button>
+                            <button
+                                id="view-toggle-pivot"
+                                onClick={() => setPivotMode(true)}
+                                title="Pivot table"
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${pivotMode
+                                    ? "bg-white text-gray-800 shadow-sm"
+                                    : "text-gray-500 hover:text-gray-700"
+                                    }`}
+                            >
+                                <LayoutGrid className="h-3.5 w-3.5" />
+                                Pivot
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {viewMode === "table" && isChartType ? (
+                tableData.rows.length > 0 ? (
+                    pivotMode && canPivot ? (
+                        <PivotTableInline columns={tableData.columns} rows={tableData.rows} />
+                    ) : (
+                        <FlatTableInline columns={tableData.columns} rows={tableData.rows} />
+                    )
+                ) : (
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 text-center text-gray-500 text-sm">
+                        No tabular data available for this chart.
+                    </div>
+                )
+            ) : (
+                <>
+                    {/* Primary/Secondary Values for Number Cards and Snapshots */}
+                    {chart_type === "number_card" && primary_value && (
+                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-sm text-gray-600 mb-1">{primary_label || "Value"}</p>
+                                    <div className="flex items-baseline gap-3">
+                                        <p className="text-4xl font-bold text-gray-900">{primary_value}</p>
+                                        {direction && direction !== "unknown" && trend_slope !== undefined && (
+                                            <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${direction === "up" ? "bg-green-100 text-green-700" :
+                                                direction === "down" ? "bg-red-100 text-red-700" :
+                                                    "bg-gray-100 text-gray-700"
+                                                }`}>
+                                                {direction === "up" && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
+                                                {direction === "down" && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
+                                                {direction === "flat" && <Minus className="h-4 w-4" aria-hidden="true" />}
+                                                <span>{Math.abs(trend_slope).toFixed(1)}%</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                {secondary_value && (
+                                    <div className="pt-4 border-t border-blue-200">
+                                        <p className="text-xs text-gray-500">{secondary_label || "Secondary"}</p>
+                                        <p className="text-lg font-semibold text-gray-700">{secondary_value}</p>
                                     </div>
                                 )}
                             </div>
                         </div>
-                        {secondary_value && (
-                            <div className="pt-4 border-t border-blue-200">
-                                <p className="text-xs text-gray-500">{secondary_label || "Secondary"}</p>
-                                <p className="text-lg font-semibold text-gray-700">{secondary_value}</p>
-                            </div>
-                        )}
+                    )}
+
+                    {/* Chart Rendering */}
+                    {chart_type === "table" && visual_spec.columns && visual_spec.rows ? (
+                        <TableRenderer data={{ type: "table", columns: visual_spec.columns, rows: visual_spec.rows }} />
+                    ) : chart_type === "bar" || chart_type === "horizontal_bar" || chart_type === "stacked_bar" ? (
+                        <BarChartRenderer spec={visual_spec} />
+                    ) : chart_type === "line" ? (
+                        <LineChartRenderer spec={visual_spec} />
+                    ) : chart_type === "pie" ? (
+                        <PieChartRenderer spec={visual_spec} />
+                    ) : chart_type !== "number_card" ? (
+                        <div className="bg-white p-2 rounded-lg border border-gray-200">
+                            <p className="text-gray-500">Unsupported chart type: {chart_type}</p>
+                        </div>
+                    ) : null}
+                </>
+            )}
+        </div>
+    );
+}
+
+// ─── Inline table helpers for chart → table view ─────────────────────────────
+
+function _formatCell(value: any): string {
+    if (value === null || value === undefined || value === "") return "–";
+    if (typeof value === "number") {
+        if (Number.isInteger(value) || Math.abs(value) > 100)
+            return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+        return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return String(value);
+}
+
+function _isNumeric(rows: any[], col: string): boolean {
+    return rows.slice(0, 5).map(r => r[col]).filter(v => v != null).some(v => typeof v === "number");
+}
+
+function FlatTableInline({ columns, rows }: { columns: string[]; rows: any[] }) {
+    const numericCols = new Set(columns.filter(c => _isNumeric(rows, c)));
+    return (
+        <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
+            <div className="max-h-[560px] overflow-y-auto">
+                <table className="min-w-full divide-y divide-gray-100 text-sm">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                        <tr>
+                            {columns.map((col, i) => (
+                                <th key={i} className={`px-5 py-3 text-xs font-semibold tracking-wider text-gray-500 uppercase border-b border-gray-200 ${numericCols.has(col) ? "text-right" : "text-left"}`}>
+                                    {col.replace(/_/g, " ")}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                        {rows.length === 0 ? (
+                            <tr><td colSpan={columns.length} className="px-5 py-10 text-center text-gray-400 italic">No data</td></tr>
+                        ) : rows.map((row, ri) => (
+                            <tr key={ri} className={`transition-colors duration-100 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-blue-50/40`}>
+                                {columns.map((col, ci) => (
+                                    <td key={ci} className={`px-5 py-3 text-gray-800 ${numericCols.has(col) ? "text-right font-mono tabular-nums" : "text-left"}`}>
+                                        {_formatCell(row[col])}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+function PivotTableInline({ columns, rows }: { columns: string[]; rows: any[] }) {
+    const { useState: _useState, useMemo: _useMemo } = { useState, useMemo };
+    const numericCols = columns.filter(c => _isNumeric(rows, c));
+    const categoricalCols = columns.filter(c => !_isNumeric(rows, c));
+
+    const [rowDim, setRowDim] = _useState(categoricalCols[0] ?? columns[0] ?? "");
+    const [colDim, setColDim] = _useState(categoricalCols[1] ?? categoricalCols[0] ?? columns[0] ?? "");
+    const [valMetric, setValMetric] = _useState(numericCols[0] ?? columns[columns.length - 1] ?? "");
+
+    const { rowKeys, colKeys, matrix } = _useMemo(() => {
+        const rkSet = new Set<string>(); const ckSet = new Set<string>();
+        const cells: Record<string, Record<string, number[]>> = {};
+        for (const row of rows) {
+            const rk = String(row[rowDim] ?? "–"); const ck = String(row[colDim] ?? "–");
+            const num = parseFloat(row[valMetric]);
+            rkSet.add(rk); ckSet.add(ck);
+            if (!cells[rk]) cells[rk] = {};
+            if (!cells[rk][ck]) cells[rk][ck] = [];
+            if (!isNaN(num)) cells[rk][ck].push(num);
+        }
+        const rowKeys = Array.from(rkSet).sort(); const colKeys = Array.from(ckSet).sort();
+        const matrix: Record<string, Record<string, number | null>> = {};
+        for (const rk of rowKeys) { matrix[rk] = {}; for (const ck of colKeys) { const v = cells[rk]?.[ck]; matrix[rk][ck] = v?.length ? v.reduce((a, b) => a + b, 0) : null; } }
+        return { rowKeys, colKeys, matrix };
+    }, [rows, rowDim, colDim, valMetric]);
+
+    const rowTotals = rowKeys.map(rk => colKeys.reduce((s, ck) => s + (matrix[rk][ck] ?? 0), 0));
+    const colTotals = colKeys.map(ck => rowKeys.reduce((s, rk) => s + (matrix[rk][ck] ?? 0), 0));
+    const grandTotal = rowTotals.reduce((a, b) => a + b, 0);
+    const maxVal = Math.max(...rowTotals, 1);
+    const heat = (v: number | null) => {
+        if (!v) return ""; const p = (v / maxVal) * 100;
+        return p > 80 ? "bg-blue-100 text-blue-900" : p > 50 ? "bg-blue-50 text-blue-800" : p > 20 ? "bg-sky-50 text-sky-700" : "";
+    };
+
+    const Sel = ({ label, value, opts, set }: { label: string; value: string; opts: string[]; set: (v: string) => void }) => (
+        <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">{label}</span>
+            <select value={value} onChange={e => set(e.target.value)} className="appearance-none w-36 pl-3 pr-6 py-1.5 text-sm bg-white border border-gray-200 rounded-lg shadow-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300 cursor-pointer">
+                {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
+            </select>
+        </div>
+    );
+
+    return (
+        <div className="space-y-3">
+            <div className="flex flex-wrap items-end gap-4 px-1">
+                <Sel label="Rows" value={rowDim} opts={columns} set={setRowDim} />
+                <Sel label="Columns" value={colDim} opts={columns} set={setColDim} />
+                <Sel label="Values" value={valMetric} opts={columns} set={setValMetric} />
+            </div>
+            {rowDim === colDim ? (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Row and column dimensions must be different.</p>
+            ) : (
+                <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
+                    <div className="max-h-[560px] overflow-y-auto">
+                        <table className="min-w-full text-sm border-collapse">
+                            <thead className="sticky top-0 z-10">
+                                <tr className="bg-gray-50 border-b border-gray-200">
+                                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200 min-w-[140px]">
+                                        {rowDim.replace(/_/g, " ")} / {colDim.replace(/_/g, " ")}
+                                    </th>
+                                    {colKeys.map(ck => <th key={ck} className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap">{ck}</th>)}
+                                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700 bg-gray-100 border-l border-gray-200">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {rowKeys.map((rk, ri) => (
+                                    <tr key={rk} className={`transition-colors hover:bg-blue-50/30 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
+                                        <td className="px-5 py-3 text-left font-medium text-gray-700 border-r border-gray-100 whitespace-nowrap">{rk}</td>
+                                        {colKeys.map(ck => { const v = matrix[rk][ck]; return <td key={ck} className={`px-4 py-3 text-right tabular-nums font-mono ${heat(v)}`}>{v !== null ? _formatCell(v) : "–"}</td>; })}
+                                        <td className="px-4 py-3 text-right tabular-nums font-mono font-semibold text-gray-800 bg-gray-50 border-l border-gray-200">{_formatCell(rowTotals[ri])}</td>
+                                    </tr>
+                                ))}
+                                <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold text-gray-800">
+                                    <td className="px-5 py-3 text-left text-xs uppercase tracking-wider border-r border-gray-200">Total</td>
+                                    {colTotals.map((t, i) => <td key={i} className="px-4 py-3 text-right tabular-nums font-mono">{_formatCell(t)}</td>)}
+                                    <td className="px-4 py-3 text-right tabular-nums font-mono text-blue-700 bg-blue-50 border-l border-gray-200">{_formatCell(grandTotal)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
-
-            {/* Chart Rendering */}
-            {chart_type === "table" && visual_spec.columns && visual_spec.rows ? (
-                <TableRenderer data={{ type: "table", columns: visual_spec.columns, rows: visual_spec.rows }} />
-            ) : chart_type === "bar" || chart_type === "horizontal_bar" || chart_type === "stacked_bar" ? (
-                <BarChartRenderer spec={visual_spec} />
-            ) : chart_type === "line" ? (
-                <LineChartRenderer spec={visual_spec} />
-            ) : chart_type === "pie" ? (
-                <PieChartRenderer spec={visual_spec} />
-            ) : chart_type !== "number_card" ? (
-                <div className="bg-white p-2 rounded-lg border border-gray-200">
-                    <p className="text-gray-500">Unsupported chart type: {chart_type}</p>
-                </div>
-            ) : null}
-
-
+            <p className="text-[10px] text-gray-400 px-1">{rowKeys.length} rows × {colKeys.length} columns · values summed</p>
         </div>
     );
 }
@@ -308,7 +568,57 @@ function formatNumber(value: number): string {
     }
 }
 
-// Clean column name for display (remove table prefixes, format nicely)
+// ─── Date label formatter for line-chart x-axis ──────────────────────────────
+// Formats an ISO date string (e.g. "2025-02-15T00:00:00.000Z") or plain date
+// according to the time granularity used in the query.
+function formatDateLabel(raw: any, granularity?: string): string {
+    if (raw === null || raw === undefined) return "";
+    const s = String(raw);
+    // Try to parse as a date
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s; // Not a date — return as-is
+
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const m = MONTHS[d.getUTCMonth()];
+    const yr2 = String(d.getUTCFullYear()).slice(-2);
+    const yr4 = d.getUTCFullYear();
+
+    switch (granularity) {
+        case "day": {
+            // dd-Mon-'yy  →  15-Feb-'25
+            const dd = String(d.getUTCDate()).padStart(2, "0");
+            return `${dd}-${m}-'${yr2}`;
+        }
+        case "week": {
+            // Wk{n} - Mon  →  Wk8 - Feb
+            // ISO week number
+            const jan1 = new Date(Date.UTC(yr4, 0, 1));
+            const weekNum = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getUTCDay() + 1) / 7);
+            return `Wk${weekNum} - ${m}`;
+        }
+        case "month": {
+            // Mon 'yy  →  Feb '25
+            return `${m} '${yr2}`;
+        }
+        case "quarter": {
+            // Q{n} 'yy  →  Q1 '25
+            const q = Math.floor(d.getUTCMonth() / 3) + 1;
+            return `Q${q} '${yr2}`;
+        }
+        case "year": {
+            return `${yr4}`;
+        }
+        default:
+            // Fallback: try to detect from the string itself
+            if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+                const dd = String(d.getUTCDate()).padStart(2, "0");
+                return `${dd}-${m}-'${yr2}`;
+            }
+            return s;
+    }
+}
+
+// Clean up column label for display (remove table prefixes, format nicely)
 function cleanColumnName(col: string): string {
     if (!col) return "Value";
 
@@ -752,6 +1062,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                     {yValues.map((value, idx) => {
                         const x = leftPadding + idx * pointSpacing;
                         const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
+                        const formattedLabel = formatDateLabel(xLabels[idx], spec.granularity);
 
                         return (
                             <circle
@@ -761,9 +1072,9 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                                 r={4}
                                 fill={lineColor}
                                 className="hover:r-6 transition-all"
-                                aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
+                                aria-label={`${formattedLabel}: ${formatNumber(value)}`}
                             >
-                                <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
+                                <title>{`${formattedLabel}: ${formatNumber(value)}`}</title>
                             </circle>
                         );
                     })}
@@ -771,6 +1082,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                     {/* X-axis labels */}
                     {xLabels.map((label, idx) => {
                         const x = leftPadding + idx * pointSpacing;
+                        const formatted = formatDateLabel(label, spec.granularity);
                         return (
                             <text
                                 key={idx}
@@ -780,7 +1092,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                                 transform={`rotate(-45, ${x}, ${topPadding + chartHeight + 12})`}
                                 className="text-xs fill-gray-600"
                             >
-                                {String(label)}
+                                {formatted}
                             </text>
                         );
                     })}

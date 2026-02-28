@@ -79,7 +79,7 @@ def merge_intent(
             "granularity": previous_qco.time_granularity,  # keep granularity if it was set
         }
         logger.debug(
-            f"Inherited time: {previous_qco.time_range.start_date} → "
+            f"Inherited time: {previous_qco.time_range.start_date} -> "
             f"{previous_qco.time_range.end_date}, "
             f"granularity={previous_qco.time_granularity}"
         )
@@ -113,12 +113,17 @@ def merge_intent(
     # RULE 5: group_by — hierarchy-aware
     # Drill mutation is applied BEFORE this merger (Step 2.5 in orchestrator).
     # If drill already set group_by → use it as-is.
-    # If no group_by and previous QCO has one → inherit for continuation queries.
+    #
+    # BUG-07 FIX: distinguish "key absent" (inherit) from "key explicitly null"
+    # (user wants no grouping, e.g. "just show me total sales").
     # -------------------------------------------------------------------------
-    if not merged.get("group_by") and previous_qco.group_by:
-        # Inherit previous group_by for continuation (e.g. "show me last month" keeps group_by)
+    if "group_by" not in new_intent and previous_qco.group_by:
+        # Key was absent from the LLM output — inherit for continuation queries
         merged["group_by"] = list(previous_qco.group_by)
         logger.debug(f"Inherited group_by: {previous_qco.group_by}")
+    elif "group_by" in new_intent and not new_intent["group_by"]:
+        # Key is present but null/empty — user explicitly wants no grouping; respect it
+        logger.debug("group_by explicitly null in new intent — not inheriting from QCO")
 
     # -------------------------------------------------------------------------
     # RULE 6: visualization_type — inherit if missing

@@ -19,6 +19,7 @@ from typing import Optional
 from app.models.intent import Intent
 from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter, QCOMetric
 from app.models.hierarchy import get_axis
+from app.services.cube_query_builder import resolve_time_window
 
 logger = logging.getLogger(__name__)
 
@@ -147,46 +148,20 @@ def _resolve_time_range(intent: Intent) -> Optional[QCOTimeRange]:
     return None
 
 
-
 def _resolve_window_to_dates(window: str) -> tuple[date, date]:
-    """Resolve a named time window to concrete start and end dates."""
-    today = date.today()
+    """
+    Resolve a named time window to concrete start and end dates.
 
-    if window == "today":
-        return today, today
-    elif window == "yesterday":
-        d = today - timedelta(days=1)
-        return d, d
-    elif window == "last_7_days":
-        return today - timedelta(days=7), today
-    elif window == "last_30_days":
-        return today - timedelta(days=30), today
-    elif window == "last_90_days":
-        return today - timedelta(days=90), today
-    elif window == "month_to_date":
-        return today.replace(day=1), today
-    elif window == "quarter_to_date":
-        q_start = ((today.month - 1) // 3) * 3 + 1
-        return date(today.year, q_start, 1), today
-    elif window == "year_to_date":
-        return date(today.year, 1, 1), today
-    elif window == "last_month":
-        first = today.replace(day=1)
-        last_end = first - timedelta(days=1)
-        return last_end.replace(day=1), last_end
-    elif window == "last_quarter":
-        q = (today.month - 1) // 3
-        if q == 0:
-            return date(today.year - 1, 10, 1), date(today.year - 1, 12, 31)
-        sm = (q - 1) * 3 + 1
-        return date(today.year, sm, 1), date(today.year, sm + 3, 1) - timedelta(days=1)
-    elif window == "last_year":
-        return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
-    elif window == "all_time":
-        return date(today.year - ALL_TIME_YEARS_BACK, 1, 1), today
-    else:
-        # Fallback: just use last 30 days
+    BUG-05 FIX: Delegates to the canonical resolve_time_window() in
+    cube_query_builder so both resolvers are always in sync and cover
+    all named windows (last_14_days, last_2_months, etc.).
+    """
+    try:
+        start_str, end_str = resolve_time_window(window)
+        return date.fromisoformat(start_str), date.fromisoformat(end_str)
+    except (ValueError, KeyError):
         logger.warning(f"Unknown time window '{window}', defaulting to last 30 days")
+        today = date.today()
         return today - timedelta(days=30), today
 
 
@@ -194,12 +169,13 @@ def _to_semantic_name(cube_field: Optional[str]) -> str:
     """
     Strip the Cube prefix from a field name to get the semantic name.
 
-    e.g. 'fact_secondary_sales.net_value' → 'net_value'
-         'net_value' → 'net_value'  (already semantic)
-         None → ''  (empty string for None)
+    e.g. 'fact_secondary_sales.net_value' -> 'net_value'
+         'net_value' -> 'net_value'  (already semantic)
+         None -> ''  (empty string for None)
     """
     if not cube_field:
         return ""
     if "." in cube_field:
         return cube_field.split(".", 1)[1]
     return cube_field
+

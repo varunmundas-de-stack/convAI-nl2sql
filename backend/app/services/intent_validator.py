@@ -12,8 +12,8 @@ Responsibilities:
 NO business logic. NO LLM logic. Only validation.
 """
 
-from typing import Any, Dict, List, Optional
 import logging
+from typing import Any, Dict, List, Optional
 
 from app.models.intent import (
     Intent,
@@ -57,7 +57,7 @@ class IntentValidator:
     def __init__(self, catalog: CatalogManager):
         self.catalog = catalog
     
-    def validate(self, raw_intent: Dict[str, Any]) -> Intent:
+    def validate(self, raw_intent: Dict[str, Any], original_query: Optional[str] = None) -> Intent:
         """
         Validate a raw intent dictionary and return a validated Intent object.
 
@@ -67,6 +67,11 @@ class IntentValidator:
         3. Dimension validation (group_by fields exist)
         4. Time & clarification rule enforcement (8 rules)
         5. Filter validation
+
+        Args:
+            raw_intent:     Raw intent dict from the LLM / normalizer.
+            original_query: The user's original NL query string. Used by Fix 3
+                            to detect trend intent that the LLM missed.
         """
         intent = self._parse_intent(raw_intent)
         missing_fields: list[str] = []
@@ -121,14 +126,50 @@ class IntentValidator:
                 )
 
         # --- Rule 4: Trend without granularity → clarify ---
+        # Exception: if a derived_metric is present that the period planner
+        # will auto-inject granularity for (SINGLE_TIME_SERIES path), skip clarification.
         if intent_type == IntentType.TREND:
             if intent.time is None:
-                # Already caught by Rule 1
-                pass
+                pass  # Already flagged by Rule 1
             elif intent.time.granularity is None:
+                # BUG-03 FIX: don't ask for granularity if period_planner will inject it
+                _planner_injected_metrics = {"wow_growth", "mom_growth", "yoy_growth", "period_change"}
+                _derived = (
+                    intent.post_processing.derived_metric
+                    if intent.post_processing else None
+                )
+                if _derived not in _planner_injected_metrics:
+                    missing_fields.append("time.granularity")
+                    clarification_questions.append(
+                        "What time granularity would you like? "
+                        "(e.g., day, week, month, quarter, year)"
+                    )
+
+        # --- Fix 3: Keyword-driven trend guard (chicken-and-egg breaker) ---
+        # Rule 4 above cannot fire if derive_intent_type() returned SNAPSHOT
+        # because granularity is missing — that's the chicken-and-egg problem.
+        # This block catches trend-language queries where the LLM AND the
+        # patch_trend_intent() patcher both failed to set granularity.
+        if (
+            original_query
+            and intent_type != IntentType.TREND          # Rule 4 didn’t fire above
+            and "time.granularity" not in missing_fields  # not already flagged
+        ):
+            from app.services.intent_normalizer import TREND_KEYWORDS
+            _query_lower = original_query.lower()
+            _has_trend_kw = any(kw in _query_lower for kw in TREND_KEYWORDS)
+            _granularity_missing = (
+                intent.time is None or intent.time.granularity is None
+            )
+            if _has_trend_kw and _granularity_missing:
+                logger.warning(
+                    "[Fix3] Trend keyword detected in query but granularity still missing after "
+                    "patcher. Asking for clarification. "
+                    f"intent_type={intent_type}, query='{original_query[:80]}'"
+                )
                 missing_fields.append("time.granularity")
                 clarification_questions.append(
-                    "What time granularity would you like? "
+                    "What time granularity would you like the trend shown at? "
                     "(e.g., day, week, month, quarter, year)"
                 )
 
@@ -151,7 +192,9 @@ class IntentValidator:
                 missing_fields.append("group_by")
                 clarification_questions.append("What would you like to group by?")
 
-        # --- Rule 6: Growth without comparison window → clarify ---
+        # --- Rule 6: Growth without comparison window → clarify (DUAL_QUERY path only) ---
+        # SINGLE_TIME_SERIES (rolling windows) expands the window implicitly and never
+        # calls build_comparison_query, so comparison_window is not needed there.
         has_growth = bool(
             intent.post_processing and
             intent.post_processing.derived_metric in (
@@ -159,17 +202,27 @@ class IntentValidator:
             )
         )
         if has_growth:
-            has_comparison_window = bool(
-                intent.post_processing and
-                intent.post_processing.comparison and
-                intent.post_processing.comparison.comparison_window
+            # Only fire on DUAL_QUERY path: explicit dates or non-contiguous (to-date) windows
+            _NON_CONTIGUOUS = {"month_to_date", "quarter_to_date", "year_to_date", "today", "yesterday"}
+            _is_explicit_dates = bool(
+                intent.time and intent.time.start_date
             )
-            if not has_comparison_window:
-                missing_fields.append("post_processing.comparison.comparison_window")
-                clarification_questions.append(
-                    "Growth requires a comparison period. "
-                    "What period should we compare against? (e.g., last_month, last_quarter)"
+            _is_non_contiguous_window = bool(
+                intent.time and intent.time.window and intent.time.window in _NON_CONTIGUOUS
+            )
+            _needs_dual_query = _is_explicit_dates or _is_non_contiguous_window
+            if _needs_dual_query:
+                has_comparison_window = bool(
+                    intent.post_processing and
+                    intent.post_processing.comparison and
+                    intent.post_processing.comparison.comparison_window
                 )
+                if not has_comparison_window:
+                    missing_fields.append("post_processing.comparison.comparison_window")
+                    clarification_questions.append(
+                        "Growth requires a comparison period. "
+                        "What period should we compare against? (e.g., last_month, last_quarter)"
+                    )
 
         # --- Rule 7: Period comparison without window → clarify ---
         has_period_comparison = bool(
@@ -416,13 +469,15 @@ def derive_intent_type_safe(intent: Intent) -> IntentType:
         return IntentType.SNAPSHOT
 
 
-def validate_intent(raw_intent: Dict[str, Any], catalog: CatalogManager) -> Intent:
+def validate_intent(raw_intent: Dict[str, Any], catalog: CatalogManager, original_query: Optional[str] = None) -> Intent:
     """
     Convenience function to validate an intent.
     
     Args:
-        raw_intent: Raw intent dictionary
-        catalog: CatalogManager instance
+        raw_intent:     Raw intent dictionary
+        catalog:        CatalogManager instance
+        original_query: Optional original NL query string for keyword-based
+                        trend detection (Fix 3).
         
     Returns:
         Validated Intent object
@@ -443,4 +498,4 @@ def validate_intent(raw_intent: Dict[str, Any], catalog: CatalogManager) -> Inte
         'total_quantity'
     """
     validator = IntentValidator(catalog)
-    return validator.validate(raw_intent)
+    return validator.validate(raw_intent, original_query=original_query)

@@ -407,18 +407,28 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
 
 // ─── Inline table helpers for chart → table view ─────────────────────────────
 
-function _formatCell(value: any): string {
+function _formatCell(value: any, isPrice: boolean = false): string {
     if (value === null || value === undefined || value === "") return "–";
+    if (typeof value === "string" && !isNaN(Number(value)) && value.trim() !== "") {
+        value = Number(value);
+    }
     if (typeof value === "number") {
+        const prefix = isPrice ? "₹ " : "";
         if (Number.isInteger(value) || Math.abs(value) > 100)
-            return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
-        return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return prefix + value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+        return prefix + value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     return String(value);
 }
 
+function _isPriceColumn(col: string): boolean {
+    if (!col) return false;
+    const lower = col.toLowerCase();
+    return lower.includes("sales") || lower.includes("value") || lower.includes("revenue") || lower.includes("amount") || lower.includes("price") || lower.includes("cost") || lower.includes("margin");
+}
+
 function _isNumeric(rows: any[], col: string): boolean {
-    return rows.slice(0, 5).map(r => r[col]).filter(v => v != null).some(v => typeof v === "number");
+    return rows.slice(0, 5).map(r => r[col]).filter(v => v != null).some(v => typeof v === "number" || (typeof v === "string" && !isNaN(Number(v)) && v.trim() !== ""));
 }
 
 function FlatTableInline({ columns, rows }: { columns: string[]; rows: any[] }) {
@@ -443,7 +453,7 @@ function FlatTableInline({ columns, rows }: { columns: string[]; rows: any[] }) 
                             <tr key={ri} className={`transition-colors duration-100 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-blue-50/40`}>
                                 {columns.map((col, ci) => (
                                     <td key={ci} className={`px-5 py-3 text-gray-800 ${numericCols.has(col) ? "text-right font-mono tabular-nums" : "text-left"}`}>
-                                        {_formatCell(row[col])}
+                                        {_formatCell(row[col], _isPriceColumn(col))}
                                     </td>
                                 ))}
                             </tr>
@@ -612,7 +622,7 @@ function cleanColumnName(col: string): string {
 }
 
 // Format cell values with proper number and date formatting
-function formatCellValue(value: any): string {
+function formatCellValue(value: any, isPrice: boolean = false): string {
     if (value === null || value === undefined || value === "") {
         return "-";
     }
@@ -632,14 +642,19 @@ function formatCellValue(value: any): string {
         }
     }
 
+    if (typeof value === "string" && !isNaN(Number(value)) && value.trim() !== "") {
+        value = Number(value);
+    }
+
     // Handle numbers - add comma separators for large numbers
     if (typeof value === "number") {
+        const prefix = isPrice ? "₹ " : "";
         // For integers or numbers with less than 2 decimal places, show as integer
         if (Number.isInteger(value) || Math.abs(value) > 100) {
-            return value.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+            return prefix + value.toLocaleString('en-IN', { maximumFractionDigits: 0 });
         }
         // For small decimal numbers, show 2 decimal places
-        return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return prefix + value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     return String(value);
@@ -649,16 +664,11 @@ function formatCellValue(value: any): string {
 function isNumericColumn(rows: any[], columnName: string): boolean {
     if (rows.length === 0) return false;
 
-    // Check first 5 non-null values
-    const samples = rows
-        .slice(0, 5)
-        .map(row => row[columnName])
-        .filter(val => val !== null && val !== undefined);
-
+    // Check first 5 non-null rows
+    const samples = rows.map(r => r[columnName]).filter(v => v != null).slice(0, 5);
     if (samples.length === 0) return false;
 
-    // If any sample is a number, consider it numeric
-    return samples.some(val => typeof val === "number");
+    return samples.some(v => typeof v === "number" || (typeof v === "string" && !isNaN(Number(v)) && v.trim() !== ""));
 }
 
 // Bar Chart Renderer (SVG implementation)

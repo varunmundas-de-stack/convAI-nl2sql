@@ -43,10 +43,10 @@ export function useConversation() {
         if (response.type === "text") {
             addAssistantMessage(response.content, response);
         } else if (response.type === "table") {
-            const content = response.explanation || "Here's the data:";
+            const content = response.explanation || "";
             addAssistantMessage(content, response);
         } else if (response.type === "chart") {
-            const content = response.explanation || "Here's the visualization:";
+            const content = response.explanation || "";
             addAssistantMessage(content, response);
         } else if (response.type === "error") {
             addAssistantMessage(`Error: ${response.message}`, response);

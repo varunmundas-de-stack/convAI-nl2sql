@@ -28,7 +28,7 @@ function cleanColumnName(col: string): string {
     return cleaned.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function formatCellValue(value: any): string {
+function formatCellValue(value: any, isPrice: boolean = false): string {
     if (value === null || value === undefined || value === "") return "–";
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
         try {
@@ -37,17 +37,27 @@ function formatCellValue(value: any): string {
             });
         } catch { return String(value); }
     }
+    if (typeof value === "string" && !isNaN(Number(value)) && value.trim() !== "") {
+        value = Number(value);
+    }
     if (typeof value === "number") {
+        const prefix = isPrice ? "₹ " : "";
         if (Number.isInteger(value) || Math.abs(value) > 100)
-            return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
-        return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return prefix + value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+        return prefix + value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     return String(value);
 }
 
 function isNumericColumn(rows: any[], col: string): boolean {
     const samples = rows.slice(0, 5).map(r => r[col]).filter(v => v != null);
-    return samples.length > 0 && samples.some(v => typeof v === "number");
+    return samples.length > 0 && samples.some(v => typeof v === "number" || (typeof v === "string" && !isNaN(Number(v)) && v.trim() !== ""));
+}
+
+function isPriceColumn(col: string): boolean {
+    if (!col) return false;
+    const lower = col.toLowerCase();
+    return lower.includes("sales") || lower.includes("value") || lower.includes("revenue") || lower.includes("amount") || lower.includes("price") || lower.includes("cost") || lower.includes("margin");
 }
 
 // ─── Flat table ───────────────────────────────────────────────────────────────
@@ -96,7 +106,7 @@ function FlatTable({ columns, rows }: { columns: string[]; rows: any[] }) {
                                                 : "text-left"
                                                 }`}
                                         >
-                                            {formatCellValue(row[col])}
+                                            {formatCellValue(row[col], isPriceColumn(col))}
                                         </td>
                                     ))}
                                 </tr>
@@ -209,6 +219,7 @@ function PivotTable({
     }
 
     const allCols = columns;
+    const isPrice = isPriceColumn(valMetric);
 
     return (
         <div className="space-y-3">
@@ -265,12 +276,12 @@ function PivotTable({
                                                     key={ck}
                                                     className={`px-4 py-3 text-right tabular-nums font-mono ${heatColor(val)}`}
                                                 >
-                                                    {val !== null ? formatCellValue(val) : "–"}
+                                                    {val !== null ? formatCellValue(val, isPrice) : "–"}
                                                 </td>
                                             );
                                         })}
                                         <td className="px-4 py-3 text-right tabular-nums font-mono font-semibold text-gray-800 bg-gray-50 border-l border-gray-200">
-                                            {formatCellValue(rowTotals[ri])}
+                                            {formatCellValue(rowTotals[ri], isPrice)}
                                         </td>
                                     </tr>
                                 ))}
@@ -282,11 +293,11 @@ function PivotTable({
                                     </td>
                                     {colTotals.map((t, i) => (
                                         <td key={i} className="px-4 py-3 text-right tabular-nums font-mono">
-                                            {formatCellValue(t)}
+                                            {formatCellValue(t, isPrice)}
                                         </td>
                                     ))}
                                     <td className="px-4 py-3 text-right tabular-nums font-mono text-blue-700 bg-blue-50 border-l border-gray-200">
-                                        {formatCellValue(grandTotal)}
+                                        {formatCellValue(grandTotal, isPrice)}
                                     </td>
                                 </tr>
                             </tbody>

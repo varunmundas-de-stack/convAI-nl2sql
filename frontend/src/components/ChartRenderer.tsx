@@ -409,7 +409,7 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
     const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
     const chartHeight = 300;
     const topPadding = 40;
-    const bottomPadding = 60;
+    const bottomPadding = 100;
     const leftPadding = 60;  // Space for Y-axis labels
     const rightPadding = 20;
     const totalHeight = chartHeight + topPadding + bottomPadding;
@@ -556,11 +556,12 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
                                     {/* X-axis label */}
                                     <text
                                         x={x + barWidth / 2}
-                                        y={topPadding + chartHeight + 20}
-                                        textAnchor="middle"
+                                        y={topPadding + chartHeight + 12}
+                                        textAnchor="end"
+                                        transform={`rotate(-45, ${x + barWidth / 2}, ${topPadding + chartHeight + 12})`}
                                         className="text-xs fill-gray-600"
                                     >
-                                        {String(xLabels[idx] || idx).substring(0, 20)}
+                                        {String(xLabels[idx] || idx)}
                                     </text>
                                 </g>
                             );
@@ -612,7 +613,7 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     const minValue = Math.min(...yValues.map(v => typeof v === 'number' ? v : 0));
     const chartHeight = 300;
     const topPadding = 40;
-    const bottomPadding = 60;
+    const bottomPadding = 100;
     const leftPadding = 60;
     const rightPadding = 20;
     const totalHeight = chartHeight + topPadding + bottomPadding;
@@ -774,11 +775,12 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                             <text
                                 key={idx}
                                 x={x}
-                                y={topPadding + chartHeight + 20}
-                                textAnchor="middle"
+                                y={topPadding + chartHeight + 12}
+                                textAnchor="end"
+                                transform={`rotate(-45, ${x}, ${topPadding + chartHeight + 12})`}
                                 className="text-xs fill-gray-600"
                             >
-                                {String(label).substring(0, 20)}
+                                {String(label)}
                             </text>
                         );
                     })}

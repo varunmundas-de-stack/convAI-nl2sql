@@ -494,7 +494,7 @@ function PivotTableInline({ columns, rows }: { columns: string[]; rows: any[] })
         <div className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">{label}</span>
             <select value={value} onChange={e => set(e.target.value)} className="appearance-none w-36 pl-3 pr-6 py-1.5 text-sm bg-white border border-gray-200 rounded-lg shadow-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300 cursor-pointer">
-                {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
+                {opts.map(o => <option key={o} value={o}>{cleanColumnName(o)}</option>)}
             </select>
         </div>
     );
@@ -515,7 +515,7 @@ function PivotTableInline({ columns, rows }: { columns: string[]; rows: any[] })
                             <thead className="sticky top-0 z-10">
                                 <tr className="bg-gray-50 border-b border-gray-200">
                                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200 min-w-[140px]">
-                                        {rowDim.replace(/_/g, " ")} / {colDim.replace(/_/g, " ")}
+                                        {cleanColumnName(rowDim)} / {cleanColumnName(colDim)}
                                     </th>
                                     {colKeys.map(ck => <th key={ck} className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap">{ck}</th>)}
                                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700 bg-gray-100 border-l border-gray-200">Total</th>

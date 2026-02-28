@@ -95,6 +95,32 @@ export default function ChatWindow() {
         }
     }
 
+    async function submitClarification(answerValue: string) {
+        if (isLoading || !isBackendAvailable || !pendingClarification || !backendResponse) return;
+
+        addUserMessage(answerValue);
+        setIsLoading(true);
+
+        try {
+            const missingFields = backendResponse.missing_fields || [];
+            const answers = parseClarificationAnswers(answerValue, missingFields);
+
+            const result = await clarify({
+                request_id: backendResponse.request_id,
+                answers: answers,
+            });
+
+            handleResponse(result.response, result.raw);
+        } catch (error) {
+            handleResponse({
+                type: "error",
+                message: error instanceof Error ? error.message : "Unknown error occurred",
+            });
+        } finally {
+            setIsLoading(false);
+        }
+    }
+
     function handleNewConversation() {
         if (confirm("Start a new conversation? This will clear the current chat history.")) {
             resetSession();
@@ -110,6 +136,8 @@ export default function ChatWindow() {
             onSend();
         }
     }
+
+    // console.log("backendResponse in render:", backendResponse);
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -162,7 +190,7 @@ export default function ChatWindow() {
                 )}
 
                 {messages.map((msg) => (
-                    <MessageBubble key={msg.id} message={msg} responseData={msg.responseData} />
+                    <MessageBubble key={msg.id} message={msg} responseData={msg.responseData} onClarify={submitClarification} />
                 ))}
 
                 {isLoading && (
@@ -188,18 +216,7 @@ export default function ChatWindow() {
                     </div>
                 )}
 
-                {pendingClarification && backendResponse && (
-                    <div className="mb-3 bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-lg text-sm space-y-1">
-                        <div>
-                            <strong>Clarification needed:</strong> {backendResponse.missing_fields?.join(", ")}
-                        </div>
-                        <div className="text-xs space-y-0.5">
-                            <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
-                            <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
-                            <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
-                        </div>
-                    </div>
-                )}
+
 
                 <div className="flex gap-3">
                     <textarea

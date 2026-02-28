@@ -8,9 +8,10 @@ import ClarificationPrompt from "./ClarificationPrompt";
 interface MessageBubbleProps {
     message: ChatMessage;
     responseData?: ChatResponse;
+    onClarify?: (value: string) => void;
 }
 
-export default function MessageBubble({ message, responseData }: MessageBubbleProps) {
+export default function MessageBubble({ message, responseData, onClarify }: MessageBubbleProps) {
     const isUser = message.role === "user";
     const isSystem = message.role === "system";
 
@@ -47,7 +48,12 @@ export default function MessageBubble({ message, responseData }: MessageBubblePr
                             />
                         )}
                         {responseData.type === "clarification_required" && (
-                            <ClarificationPrompt question={responseData.question} />
+                            <ClarificationPrompt
+                                question={responseData.question}
+                                allowed_values={responseData.allowed_values}
+                                missing_fields={responseData.missing_fields}
+                                onClarify={onClarify}
+                            />
                         )}
                         {responseData.type === "error" && (
                             <div className="bg-red-50 text-red-800 p-4 rounded-lg border border-red-200">

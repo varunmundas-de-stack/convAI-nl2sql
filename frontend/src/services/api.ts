@@ -49,6 +49,8 @@ function transformBackendResponse(backendResponse: any): ChatResponse {
         return {
             type: "clarification_required",
             question: questions,
+            allowed_values: backendResponse.allowed_values,
+            missing_fields: backendResponse.missing_fields,
         };
     }
 

@@ -98,7 +98,10 @@ export default function ChatWindow() {
     async function submitClarification(answerValue: string) {
         if (isLoading || !isBackendAvailable || !pendingClarification || !backendResponse) return;
 
-        addUserMessage(answerValue);
+        // Show friendly message to user
+        const displayValue = answerValue.replace(/_/g, " ");
+        addUserMessage(displayValue);
+
         setIsLoading(true);
 
         try {
@@ -138,6 +141,12 @@ export default function ChatWindow() {
     }
 
     // console.log("backendResponse in render:", backendResponse);
+
+    const isClarificationWithButtons = Boolean(
+        pendingClarification &&
+        pendingClarification.allowed_values &&
+        pendingClarification.allowed_values.length > 0
+    );
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -190,7 +199,13 @@ export default function ChatWindow() {
                 )}
 
                 {messages.map((msg) => (
-                    <MessageBubble key={msg.id} message={msg} responseData={msg.responseData} onClarify={submitClarification} />
+                    <MessageBubble
+                        key={msg.id}
+                        message={msg}
+                        responseData={msg.responseData}
+                        onClarify={submitClarification}
+                        isActiveClarification={pendingClarification === msg.responseData}
+                    />
                 ))}
 
                 {isLoading && (
@@ -223,18 +238,20 @@ export default function ChatWindow() {
                         className="flex-1 border border-gray-300 text-black rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
                         rows={2}
                         placeholder={
-                            isBackendAvailable
-                                ? "Type your question... (Enter to send, Shift+Enter for new line)"
-                                : "Backend unavailable..."
+                            !isBackendAvailable
+                                ? "Backend unavailable..."
+                                : isClarificationWithButtons
+                                    ? "Please select an option above..."
+                                    : "Type your question... (Enter to send, Shift+Enter for new line)"
                         }
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        disabled={!isBackendAvailable || isLoading}
+                        disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
                     />
                     <button
                         onClick={onSend}
-                        disabled={!isBackendAvailable || isLoading || !input.trim()}
+                        disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
                         className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                     >
                         Send

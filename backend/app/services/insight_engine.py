@@ -27,6 +27,7 @@ from enum import Enum
 
 from app.models.intent import Intent
 from app.models.qco import QueryContextObject
+from app.services.pivot_utils import merge_dual_query
 
 logger = logging.getLogger(__name__)
 
@@ -445,7 +446,7 @@ def _post_process_by_strategy(
         return _compute_row_wise_growth(data_a, _metric_key(intent), _time_col_key(intent))
 
     if strategy == QueryStrategy.DUAL_QUERY.value:
-        return _merge_and_compute_growth(data_a, data_b or [], _metric_key(intent), _group_keys(intent))
+        return merge_dual_query(data_a, data_b or [], _group_keys(intent), _metric_key(intent))
 
     if strategy == QueryStrategy.CONTRIBUTION.value:
         return _compute_contribution(data_a, data_b or [], _metric_key(intent))

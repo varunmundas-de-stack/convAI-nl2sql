@@ -112,7 +112,6 @@ class IntentValidator:
             missing_fields.append("time")
             clarification_questions.append(
                 "What time range should this query cover? "
-                "(e.g., last 30 days, this month, year to date)"
             )
         else:
             has_range = bool(intent.time.window) or bool(
@@ -122,7 +121,6 @@ class IntentValidator:
                 missing_fields.append("time.window")
                 clarification_questions.append(
                     "What time range should this query cover? "
-                    "(e.g., last 30 days, this month, year to date)"
                 )
 
         # --- Rule 4: Trend without granularity → clarify ---

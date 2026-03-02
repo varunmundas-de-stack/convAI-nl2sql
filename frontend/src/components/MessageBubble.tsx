@@ -9,9 +9,10 @@ interface MessageBubbleProps {
     message: ChatMessage;
     responseData?: ChatResponse;
     onClarify?: (value: string) => void;
+    isActiveClarification?: boolean;
 }
 
-export default function MessageBubble({ message, responseData, onClarify }: MessageBubbleProps) {
+export default function MessageBubble({ message, responseData, onClarify, isActiveClarification }: MessageBubbleProps) {
     const isUser = message.role === "user";
     const isSystem = message.role === "system";
 
@@ -47,7 +48,7 @@ export default function MessageBubble({ message, responseData, onClarify }: Mess
                                 refined_insights={responseData.data?.refined_insights}
                             />
                         )}
-                        {responseData.type === "clarification_required" && (
+                        {responseData.type === "clarification_required" && isActiveClarification && (
                             <ClarificationPrompt
                                 question={responseData.question}
                                 allowed_values={responseData.allowed_values}

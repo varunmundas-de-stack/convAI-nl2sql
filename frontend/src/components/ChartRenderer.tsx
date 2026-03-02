@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart2, Table2, LayoutGrid } from "lucide-react";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from "recharts";
 import TableRenderer from "./TableRenderer";
 
 // Types matching backend VisualSpec
@@ -11,7 +12,7 @@ interface VisualSpec {
     subtitle?: string;
     x_axis?: Axis;
     y_axis?: Axis;
-    series?: DataSeries[];
+    series?: any[];
     annotations?: InsightAnnotation[];
     markers?: Marker[];
     primary_value?: string;
@@ -23,6 +24,13 @@ interface VisualSpec {
     columns?: string[];
     rows?: any[];
     empty?: boolean;
+    pivot_config?: {
+        index_dimension: string;
+        stack_dimension: string;
+        stack_keys: string[];
+    };
+    data?: any[];
+    x_axis_key?: string;
 }
 
 interface Axis {
@@ -73,7 +81,6 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
     const [showContextNotes, setShowContextNotes] = useState(false);
     const [isClient, setIsClient] = useState(false);
     const [viewMode, setViewMode] = useState<"chart" | "table">("chart");
-    const [pivotMode, setPivotMode] = useState(false);
 
     useEffect(() => {
         setIsClient(true);
@@ -122,8 +129,6 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
 
         return { columns, rows };
     }, [visual_spec]);
-
-    const canPivot = tableData.columns.length > 2;
 
     if (!isClient) {
         return (
@@ -284,7 +289,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                     <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                         <button
                             id="view-toggle-chart"
-                            onClick={() => { setViewMode("chart"); setPivotMode(false); }}
+                            onClick={() => setViewMode("chart")}
                             title="Chart view"
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${viewMode === "chart"
                                 ? "bg-white text-gray-800 shadow-sm"
@@ -308,45 +313,12 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                         </button>
                     </div>
 
-                    {/* Pivot toggle — only in table mode with >2 columns */}
-                    {viewMode === "table" && canPivot && (
-                        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                            <button
-                                id="view-toggle-flat"
-                                onClick={() => setPivotMode(false)}
-                                title="Flat table"
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${!pivotMode
-                                    ? "bg-white text-gray-800 shadow-sm"
-                                    : "text-gray-500 hover:text-gray-700"
-                                    }`}
-                            >
-                                <Table2 className="h-3.5 w-3.5" />
-                                Flat
-                            </button>
-                            <button
-                                id="view-toggle-pivot"
-                                onClick={() => setPivotMode(true)}
-                                title="Pivot table"
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${pivotMode
-                                    ? "bg-white text-gray-800 shadow-sm"
-                                    : "text-gray-500 hover:text-gray-700"
-                                    }`}
-                            >
-                                <LayoutGrid className="h-3.5 w-3.5" />
-                                Pivot
-                            </button>
-                        </div>
-                    )}
                 </div>
             )}
 
             {viewMode === "table" && isChartType ? (
                 tableData.rows.length > 0 ? (
-                    pivotMode && canPivot ? (
-                        <PivotTableInline columns={tableData.columns} rows={tableData.rows} />
-                    ) : (
-                        <FlatTableInline columns={tableData.columns} rows={tableData.rows} />
-                    )
+                    <TableRenderer data={{ type: "table", columns: tableData.columns, rows: tableData.rows }} />
                 ) : (
                     <div className="bg-white p-4 rounded-lg border border-gray-200 text-center text-gray-500 text-sm">
                         No tabular data available for this chart.
@@ -388,7 +360,9 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                     {/* Chart Rendering */}
                     {chart_type === "table" && visual_spec.columns && visual_spec.rows ? (
                         <TableRenderer data={{ type: "table", columns: visual_spec.columns, rows: visual_spec.rows }} />
-                    ) : chart_type === "bar" || chart_type === "horizontal_bar" || chart_type === "stacked_bar" ? (
+                    ) : chart_type === "grouped_bar" || chart_type === "stacked_bar" || chart_type === "multi_line" ? (
+                        <RechartsRenderer spec={visual_spec} />
+                    ) : chart_type === "bar" || chart_type === "horizontal_bar" ? (
                         <BarChartRenderer spec={visual_spec} />
                     ) : chart_type === "line" ? (
                         <LineChartRenderer spec={visual_spec} />
@@ -1150,6 +1124,110 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
                     ))}
                 </div>
             </div>
+        </div>
+    );
+}
+
+// Recharts implementation for advanced multi-dimensional charts
+function RechartsRenderer({ spec }: { spec: VisualSpec }) {
+    if (!spec.data || spec.data.length === 0) return null;
+
+    const data = spec.data;
+    const xAxisKey = spec.x_axis_key || "label";
+
+    // Default palette for series/bars
+    const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
+
+    return (
+        <div className="bg-white p-8 rounded-lg border border-gray-200" style={{ height: 450 }}>
+            {/* Header / Titles */}
+            {spec.primary_value && (
+                <div className="mb-6 flex items-baseline gap-4">
+                    <div>
+                        <p className="text-xs text-gray-500">{spec.primary_label || "Total"}</p>
+                        <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
+                    </div>
+                </div>
+            )}
+
+            <ResponsiveContainer width="100%" height={320}>
+                {spec.chart_type === "multi_line" ? (
+                    <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                        <XAxis
+                            dataKey={xAxisKey}
+                            tick={{ fontSize: 12, fill: '#6b7280' }}
+                            tickMargin={10}
+                            angle={-45}
+                            textAnchor="end"
+                        />
+                        <YAxis
+                            tick={{ fontSize: 12, fill: '#6b7280' }}
+                            tickFormatter={(val) => formatCellValue(val, false)}
+                        />
+                        <RechartsTooltip
+                            formatter={(value: number) => formatCellValue(value, false)}
+                            labelStyle={{ color: '#111827', fontWeight: 'bold', marginBottom: 4 }}
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                        {spec.pivot_config?.stack_keys?.map((key, i) => (
+                            <Line
+                                key={key}
+                                type="monotone"
+                                dataKey={key}
+                                name={cleanColumnName(key)}
+                                stroke={colors[i % colors.length]}
+                                strokeWidth={2}
+                                dot={{ r: 3, fill: colors[i % colors.length], strokeWidth: 0 }}
+                                activeDot={{ r: 5, strokeWidth: 0 }}
+                            />
+                        ))}
+                    </LineChart>
+                ) : (
+                    <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                        <XAxis
+                            dataKey={xAxisKey}
+                            tick={{ fontSize: 12, fill: '#6b7280' }}
+                            tickMargin={10}
+                            angle={-45}
+                            textAnchor="end"
+                        />
+                        <YAxis
+                            tick={{ fontSize: 12, fill: '#6b7280' }}
+                            tickFormatter={(val) => formatCellValue(val, false)}
+                        />
+                        <RechartsTooltip
+                            formatter={(value: number) => formatCellValue(value, false)}
+                            labelStyle={{ color: '#111827', fontWeight: 'bold', marginBottom: 4 }}
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+
+                        {spec.chart_type === "stacked_bar" && spec.pivot_config?.stack_keys?.map((key, i) => (
+                            <Bar
+                                key={key}
+                                dataKey={key}
+                                name={cleanColumnName(key)}
+                                stackId="a"
+                                fill={colors[i % colors.length]}
+                                radius={[i === spec.pivot_config!.stack_keys.length - 1 ? 4 : 0, i === spec.pivot_config!.stack_keys.length - 1 ? 4 : 0, 0, 0]}
+                            />
+                        ))}
+
+                        {spec.chart_type === "grouped_bar" && spec.series?.map((s, i) => (
+                            <Bar
+                                key={s.key}
+                                dataKey={s.key}
+                                name={s.label}
+                                fill={colors[i % colors.length]}
+                                radius={[4, 4, 0, 0]}
+                            />
+                        ))}
+                    </BarChart>
+                )}
+            </ResponsiveContainer>
         </div>
     );
 }

@@ -48,7 +48,8 @@ from app.services.period_planner import determine_strategy, QueryStrategy, trans
 from app.services.catalog_manager import CatalogManager
 from app.services.insight_engine import generate_insights, InsightResult, InsightEngineError
 from app.services.insight_refiner import refine_insights, RefinedInsightResult, InsightRefinerError
-from app.services.visual_spec_generator import generate_visual_spec, VisualSpec
+from app.services.visual_spec_generator import generate_visual_spec
+from app.models.visual_spec import VisualSpec
 from app.pipeline.pipeline_state import PipelineState
 from app.pipeline.state_store import save_state, load_state, delete_state, PipelineStateNotFound
 from app.pipeline.qco_store import save_qco, load_qco
@@ -171,6 +172,7 @@ class OrchestratorResponse:
             "clarification": self.clarification,
             "missing_fields": self.missing_fields,
             "clarification_message": self.clarification_message,
+            "allowed_values": self.allowed_values,
             "validated_intent": (
                 self.validated_intent.model_dump()
                 if self.validated_intent is not None
@@ -758,41 +760,7 @@ def _generate_insights_and_spec(
         
         intent = response.validated_intent
         
-        # Derive chart type hint from intent_type
-        # Intent has no visualization_type field — derive from intent_type instead
-        _intent_type_str = ""
-        if intent is not None:
-            if hasattr(intent, "time") and intent.time and intent.time.granularity:
-                _intent_type_str = "trend"
-            elif hasattr(intent, "post_processing") and intent.post_processing:
-                pp = intent.post_processing
-                dm = pp.derived_metric or "none"
-                if dm != "none":
-                    _intent_type_str = "trend"
-                elif pp.ranking and pp.ranking.enabled:
-                    _intent_type_str = "ranking"
-            if not _intent_type_str and hasattr(intent, "group_by") and intent.group_by:
-                _intent_type_str = "distribution"
-            if not _intent_type_str:
-                _intent_type_str = "snapshot"
-
-        _chart_hint_map = {
-            "trend":        "line_chart",
-            "ranking":      "horizontal_bar_chart",
-            "distribution": "bar_chart",
-            "comparison":   "bar_chart",
-            # "snapshot" intentionally omitted — let visual spec auto-detect (number_card for 1 row, bar for multiple)
-        }
-        
-        strategy = response.period_strategy
-        if strategy == QueryStrategy.CONTRIBUTION.value:
-            chart_type_hint = "bar_chart"
-        elif strategy == QueryStrategy.SINGLE_TIME_SERIES.value:
-            chart_type_hint = "line_chart"
-        elif strategy == QueryStrategy.DUAL_QUERY.value:
-            chart_type_hint = "grouped_bar_chart"
-        else:
-            chart_type_hint = _chart_hint_map.get(_intent_type_str, None)
+        pass
         
         # Step 7a: Insight Engine (post-processing + pure math analysis, no LLM)
         insight_result = generate_insights(
@@ -832,8 +800,11 @@ def _generate_insights_and_spec(
         visual_spec = generate_visual_spec(
             data=response.data or [],
             insights=insights_for_spec,
-            chart_type_hint=chart_type_hint,
+            chart_type_hint=None,
             query=response.query,
+            comparison_data=response.comparison_data,
+            strategy=response.period_strategy,
+            intent=response.validated_intent,
         )
         response.visual_spec = visual_spec
         response.stage = PipelineStage.VISUAL_SPEC_GENERATED

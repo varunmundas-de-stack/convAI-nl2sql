@@ -39,6 +39,9 @@ services:
       CUBEJS_DB_PASS: postgres
       CUBEJS_API_SECRET: mysecretkey123
       CUBEJS_DB_CONNECT_TIMEOUT: 120000
+      CUBEJS_LOG_LEVEL: "trace"
+      CUBESTORE_LOG_LEVEL: "debug"
+      CUBEJS_CACHE_MODE: "no-cache"
 
   redis:
     image: redis:7-alpine

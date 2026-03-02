@@ -260,7 +260,12 @@ class CubeClient:
         query: dict[str, Any],
         request_id: str,
     ) -> CubeResponse:
-        """Execute HTTP request to Cube."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"[Cube Request] Sending query to {url}")
+        logger.debug(f"[Cube Request] Query Payload: {query}")
+        
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.post(
@@ -268,6 +273,10 @@ class CubeClient:
                     json={"query": query},
                     headers=headers,
                 )
+                logger.info(f"[Cube Response] Status Code: {response.status_code}")
+                # For error-like codes, log the body
+                if response.status_code >= 400:
+                    logger.error(f"[Cube Error Response] {response.text}")
         except httpx.ConnectError as e:
             raise CubeConnectionError(f"Cannot connect to Cube at {url}: {e}") from e
         except httpx.TimeoutException as e:

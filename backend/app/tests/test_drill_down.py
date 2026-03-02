@@ -28,7 +28,7 @@ from app.services.drill_detector import (
     DrillResult,
     _enforce_axis_limits,
 )
-from app.models.qco import QueryContextObject, QCOFilter
+from app.models.qco import QueryContextObject, QCOFilter, QCOMetric
 
 
 # =============================================================================
@@ -49,7 +49,7 @@ def _make_qco(
         original_query=original_query,
         intent_type=intent_type,
         sales_scope=sales_scope,
-        metric=metric,
+        metrics=[QCOMetric(name=metric, aggregation="sum")],
         group_by=group_by,
         time_granularity=time_granularity,
         filters=filters,

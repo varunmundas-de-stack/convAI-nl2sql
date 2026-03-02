@@ -29,179 +29,35 @@ TABLE_THRESHOLD = 20
 AXIS_TICK_COUNT = 5  # Target number of ticks for numeric axes
 
 
-# =============================================================================
-# SPEC TYPES
-# =============================================================================
-
-class ChartType(str, Enum):
-    BAR = "bar"
-    LINE = "line"
-    PIE = "pie"
-    NUMBER_CARD = "number_card"
-    TABLE = "table"
-    STACKED_BAR = "stacked_bar"
-    HORIZONTAL_BAR = "horizontal_bar"
-
-
-class EmphasisLevel(str, Enum):
-    NONE = "none"
-    SUBTLE = "subtle"       # Slightly highlighted
-    STRONG = "strong"       # Clearly highlighted
-    CRITICAL = "critical"   # Demands attention
-
-
-class MarkerType(str, Enum):
-    OUTLIER = "outlier"
-    TREND_LINE = "trend_line"
-    THRESHOLD = "threshold"
-    ANNOTATION = "annotation"
-    PEAK = "peak"
-    TROUGH = "trough"
-
-
-class ColorPalette:
-    """Standard color palette for visuals."""
-    PRIMARY = "#3b82f6"     # Blue
-    POSITIVE = "#10b981"    # Green
-    NEGATIVE = "#ef4444"    # Red
-    WARNING = "#f59e0b"     # Amber
-    MUTED = "#94a3b8"       # Slate
-    NEUTRAL = "#64748b"     # Gray
-
-
-# =============================================================================
-# SPEC MODELS
-# =============================================================================
-
-
-class DataSeries(BaseModel):
-    """A single data series to be plotted."""
-    label: str
-    values: list[Any]
-    emphasis: EmphasisLevel = EmphasisLevel.NONE
-    color_hint: Optional[str] = None  # Semantic hint: "positive", "negative", "primary", "muted"
-    point_emphasis: Optional[list[EmphasisLevel]] = None
-    point_colors: Optional[list[Optional[str]]] = None  # Per-point color mapping (e.g., ["#ff0000", "#00ff00"])
-
-
-class Axis(BaseModel):
-    """
-    Axis specification.
-    
-    The 'values' field contains:
-    - For categorical/time axes: Explicit tick labels (e.g., ["Jan", "Feb", "Mar"])
-    - For numeric/linear axes: Computed tick positions (e.g., [0, 500, 1000, 1500, 2000])
-    
-    Note: For numeric axes, values are TICK POSITIONS, not the data itself.
-    The actual data points are in series.values.
-    
-    Example:
-        Data points: [2100, 2500, 2800]
-        axis.values: [0, 500, 1000, 1500, 2000, 2500, 3000] (nice round numbers)
-        series.values: [2100, 2500, 2800] (actual data)
-    """
-    label: str
-    values: Optional[list[Any]] = None  # Categorical labels OR numeric tick positions
-    format: Optional[str] = None  # "number", "currency", "percent", "date"
-    axis_type: Optional[str] = None  # "time", "categorical", "linear" - helps frontend choose scale
-
-
-class Marker(BaseModel):
-    """An annotation or marker on the chart."""
-    marker_type: MarkerType
-    label: str
-    position: Optional[Any] = None     # x-value, index, or category
-    value: Optional[float] = None      # y-value
-    emphasis: EmphasisLevel = EmphasisLevel.SUBTLE
-
-
-class InsightAnnotation(BaseModel):
-    """A machine-readable insight annotation for the visual."""
-    text: str
-    severity: Severity
-    direction: Optional[Direction] = None
-    position: Optional[str] = None  # "header", "footer", "inline", "tooltip"
-
-
-class VisualSpec(BaseModel):
-    """
-    Complete declarative visual specification.
-    
-    This is the contract between backend intelligence and frontend rendering.
-    The frontend receives this and decides HOW to render it.
-    """
-    # What to draw
-    chart_type: ChartType
-    
-    # Data
-    x_axis: Optional[Axis] = None
-    y_axis: Optional[Axis] = None
-    series: list[DataSeries] = Field(default_factory=list)
-    
-    # For number cards
-    primary_value: Optional[str] = None
-    primary_label: Optional[str] = None
-    secondary_value: Optional[str] = None
-    secondary_label: Optional[str] = None
-    direction: Optional[Direction] = None
-    
-    # For tables
-    columns: Optional[list[str]] = None
-    rows: Optional[list[dict[str, Any]]] = None
-    
-    # Annotations from insights
-    title: str = ""
-    subtitle: Optional[str] = None
-    annotations: list[InsightAnnotation] = Field(default_factory=list)
-    markers: list[Marker] = Field(default_factory=list)
-    
-    # Metadata
-    total_rows: int = 0
-    metric: Optional[str] = None
-    empty: bool = False
-    trend_slope: Optional[float] = None  # For trend visuals: normalized slope percentage
-
-
-
-
+from app.models.visual_spec import (
+    ChartType, EmphasisLevel, MarkerType, ColorPalette, 
+    DataSeries, SeriesConfig, PivotConfig, Axis, Marker, 
+    InsightAnnotation, VisualSpec
+)
 
 # =============================================================================
 # GENERATOR
 # =============================================================================
 
+from app.services.pivot_utils import pivot_rows, merge_dual_query, strip_cube_prefix
+
 def generate_visual_spec(
     data: list[dict[str, Any]],
-    insights: InsightResult,  # InsightResult or RefinedInsightResult (duck-typed for compatibility)
+    insights: InsightResult,
     chart_type_hint: Optional[str] = None,
     query: Optional[str] = None,
+    comparison_data: Optional[list[dict[str, Any]]] = None,
+    strategy: Optional[str] = None,
+    intent: Optional[Any] = None,
 ) -> VisualSpec:
     """
-    Generate a declarative visual specification.
-    
-    This is the ONLY public function.
-    
-    Args:
-        data: Raw query result rows
-        insights: InsightResult or RefinedInsightResult from insight engine/refiner
-        chart_type_hint: Suggested chart type from intent (e.g., "bar_chart", "line_chart", "pie_chart", 
-                        "number_card", "table", "horizontal_bar_chart", "stacked_bar_chart"). Can be overridden.
-        query: Original NL query for title generation. If None, title will be generated from metric/dimensions.
-        
-    Returns:
-        VisualSpec — declarative spec for the frontend to render
-        
-    Raises:
-        Exception: If spec generation fails critically (logged but not raised for non-fatal errors)
+    Generate a declarative visual specification based on query strategy.
     """
-    logger.info(f"Generating visual spec: {len(data)} rows, hint={chart_type_hint}")
+    logger.info(f"Generating visual spec: {len(data)} rows, strategy={strategy}")
     
-    # Resolve chart type
-    chart_type = _resolve_chart_type(chart_type_hint, insights, data)
-    
-    # Handle empty data
     if not data:
         return VisualSpec(
-            chart_type=chart_type,
+            chart_type=ChartType.NUMBER_CARD,
             title=_make_title(query, insights),
             empty=True,
             total_rows=0,
@@ -212,86 +68,150 @@ def generate_visual_spec(
                 position="header",
             )],
         )
+
+    group_by = insights.dimensions or []
+    metric = insights.metric or ""
+    metric_clean = strip_cube_prefix(metric)
     
-    # Dispatch to type-specific builder
+    # Try to extract time_dim from intent if needed
+    time_dim = None
+    if intent and hasattr(intent, "time") and intent.time and intent.time.dimension:
+        time_dim_base = intent.time.dimension
+        for row_key in data[0].keys():
+            if time_dim_base in row_key:
+                time_dim = row_key
+                break
+        if not time_dim:
+            time_dim = time_dim_base
+    elif intent and isinstance(intent, dict) and intent.get("time"):
+        time_dim_base = intent["time"].get("dimension")
+        if time_dim_base:
+            for row_key in data[0].keys():
+                if time_dim_base in row_key:
+                    time_dim = row_key
+                    break
+            if not time_dim:
+                time_dim = time_dim_base
+
+    # Fallback to group_by[0] if missing
+    if strategy == "single_time_series" and not time_dim and group_by:
+        time_dim = group_by[0]
+
+    chart_type = ChartType.TABLE
+    pivot_config = None
+    series = []
+    out_data = data
+    x_axis_key = None
+    
+    # NEW PRIORITY ROUTING LOGIC
+    if strategy == "contribution":
+        if len(group_by) == 1:
+            chart_type = ChartType.BAR
+            x_axis_key = group_by[0]
+        elif len(group_by) >= 2:
+            chart_type = ChartType.STACKED_BAR
+            x_axis_key = group_by[0]
+            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
+            pivot_config = PivotConfig(
+                index_dimension=strip_cube_prefix(group_by[0]),
+                stack_dimension=strip_cube_prefix(group_by[1]),
+                stack_keys=stack_keys
+            )
+            out_data = pivoted
+        else:
+            chart_type = ChartType.PIE
+            
+    elif strategy == "dual_query":
+        out_data = merge_dual_query(data, comparison_data or [], group_by, metric)
+        if not group_by:
+            chart_type = ChartType.NUMBER_CARD
+        else:
+            chart_type = ChartType.GROUPED_BAR
+            x_axis_key = group_by[0]
+            series = [
+                SeriesConfig(key=metric_clean, label="Current Period"),
+                SeriesConfig(key=f"{metric_clean}_comparison", label="Previous Period"),
+            ]
+            
+    elif strategy == "single_time_series":
+        if not group_by:
+            chart_type = ChartType.LINE
+            x_axis_key = time_dim
+        else:
+            chart_type = ChartType.MULTI_LINE
+            pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by[0], values=metric)
+            pivot_config = PivotConfig(
+                index_dimension=strip_cube_prefix(time_dim),
+                stack_dimension=strip_cube_prefix(group_by[0]),
+                stack_keys=stack_keys
+            )
+            out_data = pivoted
+            x_axis_key = pivot_config.index_dimension
+            
+    else:  # SINGLE_QUERY matches
+        if not group_by:
+            chart_type = ChartType.NUMBER_CARD
+        elif len(group_by) == 1:
+            chart_type = ChartType.BAR
+            x_axis_key = group_by[0]
+        else:
+            chart_type = ChartType.STACKED_BAR
+            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
+            pivot_config = PivotConfig(
+                index_dimension=strip_cube_prefix(group_by[0]),
+                stack_dimension=strip_cube_prefix(group_by[1]),
+                stack_keys=stack_keys
+            )
+            out_data = pivoted
+            x_axis_key = pivot_config.index_dimension
+
+    # Ensure table view logic holds if > 2 raw keys without group_by pivots protecting them
+    if not pivot_config and chart_type not in (ChartType.GROUPED_BAR, ChartType.NUMBER_CARD) and data and len(data[0].keys()) > 2 and len(group_by) > 1:
+        chart_type = ChartType.TABLE
+
+    # Build base visual spec based on specific types
     if chart_type == ChartType.NUMBER_CARD:
-        spec = _build_number_card_spec(data, insights)
+        spec = _build_number_card_spec(out_data, insights)
     elif chart_type == ChartType.TABLE:
-        spec = _build_table_spec(data, insights)
-    elif chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR, ChartType.STACKED_BAR):
-        spec = _build_bar_spec(data, insights, chart_type)
+        spec = _build_table_spec(out_data, insights)
+    elif chart_type in (ChartType.STACKED_BAR, ChartType.GROUPED_BAR, ChartType.MULTI_LINE):
+        spec = VisualSpec(chart_type=chart_type)
+        spec.series = series
+        spec.pivot_config = pivot_config
+        spec.x_axis_key = strip_cube_prefix(x_axis_key) if x_axis_key else None
+        spec.data = out_data
     elif chart_type == ChartType.LINE:
-        spec = _build_line_spec(data, insights)
+        spec = _build_line_spec(out_data, insights)
     elif chart_type == ChartType.PIE:
-        spec = _build_pie_spec(data, insights)
+        spec = _build_pie_spec(out_data, insights)
+    elif chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR):
+        spec = _build_bar_spec(out_data, insights, chart_type)
     else:
-        spec = _build_table_spec(data, insights)
-    
-    # Always attach the full raw data so the frontend table-view gets ALL columns,
-    # not just the x-axis dim + metric the chart uses.
-    # (TABLE spec already populates these; all other builders leave them None.)
+        spec = _build_table_spec(out_data, insights)
+
+    # Always ensure data / x_axis_key are set if available
+    spec.data = out_data if chart_type in (
+        ChartType.STACKED_BAR,
+        ChartType.GROUPED_BAR,
+        ChartType.MULTI_LINE
+    ) else data
+    if x_axis_key and not spec.x_axis_key:
+        spec.x_axis_key = strip_cube_prefix(x_axis_key)
+        
     if spec.columns is None and data:
         spec.columns = list(data[0].keys())
         spec.rows = data
 
-    # Enrich with insights
+    # Common fields
     spec.title = _make_title(query, insights)
     spec.subtitle = _make_subtitle(insights)
     spec.annotations = _insights_to_annotations(insights)
     spec.markers = _insights_to_markers(insights)
     spec.total_rows = len(data)
-    spec.metric = insights.metric
+    spec.metric = metric_clean
 
-    logger.info(f"Visual spec generated: chart_type={chart_type}, {len(spec.annotations)} annotations, {len(spec.markers)} markers")
+    logger.info(f"Visual spec generated: chart_type={chart_type}, annotations={len(spec.annotations)}")
     return spec
-
-
-
-# =============================================================================
-# CHART TYPE RESOLUTION
-# =============================================================================
-
-def _resolve_chart_type(hint: Optional[str], insights: InsightResult, data: list) -> ChartType:
-    """Resolve the chart type from hint, intent, and data shape."""
-    
-    # If the query returns more than 2 columns (e.g. multiple dimensions + a metric),
-    # our simple 2D charts (bar, pie, single-line) will drop data. Force a table view.
-    if data and len(data[0].keys()) > 2:
-        return ChartType.TABLE
-
-    # Direct mapping from hint
-    hint_map = {
-        "bar_chart": ChartType.BAR,
-        "line_chart": ChartType.LINE,
-        "pie_chart": ChartType.PIE,
-        "number_card": ChartType.NUMBER_CARD,
-        "table": ChartType.TABLE,
-        "horizontal_bar_chart": ChartType.HORIZONTAL_BAR,
-        "stacked_bar_chart": ChartType.STACKED_BAR,
-    }
-    
-    if hint and hint in hint_map:
-        return hint_map[hint]
-    
-    # Auto-detect from data shape
-    if len(data) == 1 and not insights.dimensions:
-        return ChartType.NUMBER_CARD
-    
-    # Check intent_type safely (may not exist on all insight types)
-    intent_type = getattr(insights, 'intent_type', None)
-    if intent_type == "trend":
-        return ChartType.LINE
-    
-    if intent_type == "distribution":
-        return ChartType.PIE
-    
-    if intent_type == "ranking":
-        return ChartType.HORIZONTAL_BAR
-    
-    if len(data) > TABLE_THRESHOLD:
-        return ChartType.TABLE
-    
-    return ChartType.BAR
 
 
 # =============================================================================

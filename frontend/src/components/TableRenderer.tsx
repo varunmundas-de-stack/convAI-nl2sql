@@ -102,7 +102,7 @@ function FlatTable({ columns, rows }: { columns: string[]; rows: any[] }) {
                                         <td
                                             key={ci}
                                             className={`px-5 py-3 text-gray-800 ${numericColumns.has(col)
-                                                ? "text-right font-mono tabular-nums"
+                                                ? "text-right font-mono tabular-nums whitespace-nowrap"
                                                 : "text-left"
                                                 }`}
                                         >
@@ -274,13 +274,13 @@ function PivotTable({
                                             return (
                                                 <td
                                                     key={ck}
-                                                    className={`px-4 py-3 text-right tabular-nums font-mono ${heatColor(val)}`}
+                                                    className={`px-4 py-3 text-right tabular-nums font-mono whitespace-nowrap ${heatColor(val)}`}
                                                 >
                                                     {val !== null ? formatCellValue(val, isPrice) : "–"}
                                                 </td>
                                             );
                                         })}
-                                        <td className="px-4 py-3 text-right tabular-nums font-mono font-semibold text-gray-800 bg-gray-50 border-l border-gray-200">
+                                        <td className="px-4 py-3 text-right tabular-nums font-mono font-semibold text-gray-800 bg-gray-50 border-l border-gray-200 whitespace-nowrap">
                                             {formatCellValue(rowTotals[ri], isPrice)}
                                         </td>
                                     </tr>
@@ -292,11 +292,11 @@ function PivotTable({
                                         Total
                                     </td>
                                     {colTotals.map((t, i) => (
-                                        <td key={i} className="px-4 py-3 text-right tabular-nums font-mono">
+                                        <td key={i} className="px-4 py-3 text-right tabular-nums font-mono whitespace-nowrap">
                                             {formatCellValue(t, isPrice)}
                                         </td>
                                     ))}
-                                    <td className="px-4 py-3 text-right tabular-nums font-mono text-blue-700 bg-blue-50 border-l border-gray-200">
+                                    <td className="px-4 py-3 text-right tabular-nums font-mono text-blue-700 bg-blue-50 border-l border-gray-200 whitespace-nowrap">
                                         {formatCellValue(grandTotal, isPrice)}
                                     </td>
                                 </tr>

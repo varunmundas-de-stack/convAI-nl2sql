@@ -126,8 +126,11 @@ def refine_insights(
         # Call LLM
         logger.debug(f"Calling LLM for insight refinement (prompt length: {len(prompt)} chars)")
         response = call_claude(prompt)
-        token_count = count_tokens(prompt)
-        logger.debug(f"Token count for insight engine: {token_count}")
+        try:
+            token_count = count_tokens(prompt)
+            logger.info(f"Input token count: {token_count.input_tokens}")
+        except Exception as e:
+            logger.warning(f"Error counting tokens: {e}")
         # Parse response
         raw_text = response.content[0].text
         refinements = _parse_refinements(raw_text)

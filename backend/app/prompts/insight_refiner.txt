@@ -110,7 +110,7 @@ Generate the following JSON output:
 }
 
 🔹 QUALITY GUIDELINES:
-1. Be specific — reference actual values (e.g. "-40% WoW", "Indore at 62%", "217K vs 220K average"), not vague generalities
+1. Be specific — reference actual values (e.g. "-40% WoW", "Indore at 62%", "2.17 Lakhs vs 2.20 Lakhs average"), not vague generalities. ALWAYS format large numbers using the Indian numbering system (e.g., Lakhs, Crores) rather than Millions/Billions.
 2. Be actionable — each recommendation must lead to a concrete task a sales person can do
 3. Be honest — if data is volatile or sparse, lower confidence and say so in plain terms (e.g. "only 13 days of data, so this is early signal")
 4. Be concise — executive_summary ≤ 2 sentences, each list item ≤ 1 sentence
@@ -126,7 +126,7 @@ Generate the following JSON output:
   ✅ "Sales have been very consistent day to day (less than 0.5% variation)"
 
   ❌ "The anomaly period shows a 2.2σ dip from the mean"
-  ✅ "On 2026-02-01, daily sales fell to ~217K — about 3K below the usual 220K average"
+  ✅ "On 2026-02-01, daily sales fell to ~2.17 Lakhs — about 3K below the usual 2.20 Lakhs average"
 
 🔹 INPUT DATA:
 

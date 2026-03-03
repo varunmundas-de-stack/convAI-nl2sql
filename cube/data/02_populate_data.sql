@@ -285,13 +285,13 @@ CROSS JOIN LATERAL (
     (8    + random() * 4)::NUMERIC    AS tdisc,
     GREATEST(1, (
       CASE src.category
-        WHEN 'Cigarettes'    THEN  50 + (random() * 450)
-        WHEN 'Aata'          THEN  20 + (random() * 180)
-        WHEN 'Oil'           THEN  30 + (random() * 270)
-        WHEN 'Agarbatti'     THEN 100 + (random() * 900)
-        WHEN 'Matches'       THEN 200 + (random() * 1800)
-        WHEN 'Personal Care' THEN  50 + (random() * 250)
-        ELSE                       10 + (random() * 90)
+        WHEN 'Cigarettes'    THEN  10 + (random() * 40) 
+        WHEN 'Aata'          THEN   5 + (random() * 25) 
+        WHEN 'Oil'           THEN   8 + (random() * 32) 
+        WHEN 'Agarbatti'     THEN  20 + (random() * 80) 
+        WHEN 'Matches'       THEN  40 + (random() * 110)
+        WHEN 'Personal Care' THEN  10 + (random() * 40) 
+        ELSE                        5 + (random() * 20) 
       END
       * src.season_factor
       * src.demand_skew
@@ -372,13 +372,13 @@ CROSS JOIN LATERAL (
     (10   + random() * 8)::NUMERIC    AS tdisc,
     GREATEST(1, (
       CASE src.category
-        WHEN 'Cigarettes'    THEN  1 + (random() * 19)
-        WHEN 'Aata'          THEN  2 + (random() * 28)
-        WHEN 'Oil'           THEN  2 + (random() * 23)
-        WHEN 'Agarbatti'     THEN  5 + (random() * 45)
-        WHEN 'Matches'       THEN 10 + (random() * 90)
-        WHEN 'Personal Care' THEN  3 + (random() * 27)
-        ELSE                       1 + (random() * 9)
+        WHEN 'Cigarettes'    THEN  1 + (random() * 9) 
+        WHEN 'Aata'          THEN  1 + (random() * 9) 
+        WHEN 'Oil'           THEN  1 + (random() * 9) 
+        WHEN 'Agarbatti'     THEN  3 + (random() * 17)
+        WHEN 'Matches'       THEN  5 + (random() * 25)
+        WHEN 'Personal Care' THEN  2 + (random() * 8) 
+        ELSE                       1 + (random() * 4) 
       END
       * src.type_multiplier
       * src.season_factor

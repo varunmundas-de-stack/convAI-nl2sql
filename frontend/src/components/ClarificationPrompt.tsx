@@ -28,7 +28,7 @@ export default function ClarificationPrompt({ question, allowed_values, missing_
                     <p className="text-sm font-medium text-amber-800">
                         Clarification needed
                     </p>
-                    <p className="mt-1 text-sm text-amber-700">{question}</p>
+                    {/* <p className="mt-1 text-sm text-amber-700">{question}</p> */}
 
                     {allowed_values && allowed_values.length > 0 ? (
                         <div className="flex flex-wrap gap-2 mt-3">

@@ -57,6 +57,11 @@ function isNumericColumn(rows: any[], col: string): boolean {
 function isPriceColumn(col: string): boolean {
     if (!col) return false;
     const lower = col.toLowerCase();
+
+    if (lower.includes("qty") || lower.includes("quantity") || lower.includes("volume") || lower.includes("count")) {
+        return false;
+    }
+
     return lower.includes("sales") || lower.includes("value") || lower.includes("revenue") || lower.includes("amount") || lower.includes("price") || lower.includes("cost") || lower.includes("margin");
 }
 

@@ -73,12 +73,18 @@ def generate_visual_spec(
     metric = insights.metric or ""
     metric_clean = strip_cube_prefix(metric)
     
-    # Try to extract time_dim from intent if needed
+    # Resolve time_dim from intent — prefer explicit intent.time.dimension, then
+    # fall back to a full row-key scan for granularity-suffixed Cube keys such as
+    # "invoice_date.week".  This runs for ALL strategies so that the SINGLE_QUERY
+    # fallback can also promote a trend query to a LINE chart.
     time_dim = None
+    sample_row = data[0] if data else {}
+
     if intent and hasattr(intent, "time") and intent.time and intent.time.dimension:
         time_dim_base = intent.time.dimension
-        for row_key in data[0].keys():
-            if time_dim_base in row_key:
+        # Prefer exact granularity-suffixed key (e.g. invoice_date.week)
+        for row_key in sample_row.keys():
+            if row_key.startswith(time_dim_base + ".") or row_key == time_dim_base:
                 time_dim = row_key
                 break
         if not time_dim:
@@ -86,14 +92,24 @@ def generate_visual_spec(
     elif intent and isinstance(intent, dict) and intent.get("time"):
         time_dim_base = intent["time"].get("dimension")
         if time_dim_base:
-            for row_key in data[0].keys():
-                if time_dim_base in row_key:
+            for row_key in sample_row.keys():
+                if row_key.startswith(time_dim_base + ".") or row_key == time_dim_base:
                     time_dim = row_key
                     break
             if not time_dim:
                 time_dim = time_dim_base
 
-    # Fallback to group_by[0] if missing
+    # If still not resolved, do a pass-2 scan for any granularity-suffixed key
+    # (covers cases where intent.time is missing but data clearly has a time column)
+    if not time_dim and sample_row:
+        _GRANULARITY_SUFFIXES_SET = {"day", "week", "month", "quarter", "year"}
+        for row_key in sample_row.keys():
+            parts = row_key.rsplit(".", 1)
+            if len(parts) == 2 and parts[1] in _GRANULARITY_SUFFIXES_SET:
+                time_dim = row_key
+                break
+
+    # Fallback to group_by[0] when strategy explicitly says single_time_series
     if strategy == "single_time_series" and not time_dim and group_by:
         time_dim = group_by[0]
 
@@ -148,12 +164,42 @@ def generate_visual_spec(
             out_data = pivoted
             x_axis_key = pivot_config.index_dimension
             
-    else:  # SINGLE_QUERY matches
+    else:  # SINGLE_QUERY (and any unrecognised strategy)
         if not group_by:
-            chart_type = ChartType.NUMBER_CARD
+            # ── Trend detection override ────────────────────────────────────
+            # If the data has a time dimension with ≥2 distinct points, render
+            # as a line chart rather than a flat number card.  This covers the
+            # case where the strategy was not identified as single_time_series
+            # (e.g. period_planner produced a plain SINGLE_QUERY despite the
+            # user asking for a sales trend over the last 30 days).
+            if time_dim and len(data) >= 2:
+                chart_type = ChartType.LINE
+                x_axis_key = time_dim
+                logger.info(
+                    f"SINGLE_QUERY with time_dim='{time_dim}' and {len(data)} rows → "
+                    "promoting chart type to LINE"
+                )
+            else:
+                chart_type = ChartType.NUMBER_CARD
         elif len(group_by) == 1:
-            chart_type = ChartType.BAR
-            x_axis_key = group_by[0]
+            # Also detect time-series with a group breakdown
+            if time_dim and time_dim not in group_by and len(data) >= 2:
+                chart_type = ChartType.MULTI_LINE
+                pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by[0], values=metric)
+                pivot_config = PivotConfig(
+                    index_dimension=strip_cube_prefix(time_dim),
+                    stack_dimension=strip_cube_prefix(group_by[0]),
+                    stack_keys=stack_keys
+                )
+                out_data = pivoted
+                x_axis_key = pivot_config.index_dimension
+                logger.info(
+                    f"SINGLE_QUERY with time_dim='{time_dim}' + group_by='{group_by[0]}' → "
+                    "promoting chart type to MULTI_LINE"
+                )
+            else:
+                chart_type = ChartType.BAR
+                x_axis_key = group_by[0]
         else:
             chart_type = ChartType.STACKED_BAR
             pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
@@ -269,8 +315,10 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     
     # Determine axis type based on dimension
     axis_type = "categorical"
-    if dim_key and any(kw in dim_key.lower() for kw in ["date", "time", "month", "year", "quarter"]):
-        axis_type = "time"
+    if dim_key:
+        dim_key_lower = dim_key.lower()
+        if any(kw in dim_key_lower for kw in ["date", "time", "month", "year", "quarter"]):
+            axis_type = "time"
     
     spec.x_axis = Axis(
         label=_clean_label(dim_key) if dim_key else "Category",

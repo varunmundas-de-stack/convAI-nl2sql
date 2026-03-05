@@ -328,29 +328,45 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                 <>
                     {/* Primary/Secondary Values for Number Cards and Snapshots */}
                     {chart_type === "number_card" && primary_value && (
-                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                            <div className="space-y-4">
-                                <div>
-                                    <p className="text-sm text-gray-600 mb-1">{primary_label || "Value"}</p>
-                                    <div className="flex items-baseline gap-3">
-                                        <p className="text-4xl font-bold text-gray-900">{primary_value}</p>
+                        <div className="relative bg-gradient-to-br from-blue-50 to-indigo-50/80 rounded-2xl border border-blue-100 shadow-sm p-6 overflow-hidden">
+                            {/* Decorative Background Element */}
+                            <div className="absolute -top-6 -right-6 text-blue-600/5 pointer-events-none">
+                                {direction === "up" ? (
+                                    <TrendingUp className="w-40 h-40" />
+                                ) : direction === "down" ? (
+                                    <TrendingDown className="w-40 h-40" />
+                                ) : (
+                                    <BarChart2 className="w-40 h-40" />
+                                )}
+                            </div>
+
+                            <div className="relative z-10 flex flex-col gap-6">
+                                {/* Primary Metric */}
+                                <div className="space-y-2">
+                                    <p className="text-sm font-semibold text-blue-700/80 uppercase tracking-wider">{primary_label || "Value"}</p>
+                                    <div className="flex flex-wrap items-baseline gap-4">
+                                        <p className="text-5xl font-extrabold text-blue-950 tracking-tight">{primary_value}</p>
+
+                                        {/* Trend Badge */}
                                         {direction && direction !== "unknown" && trend_slope !== undefined && (
-                                            <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${direction === "up" ? "bg-green-100 text-green-700" :
-                                                direction === "down" ? "bg-red-100 text-red-700" :
-                                                    "bg-gray-100 text-gray-700"
+                                            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold shadow-sm border ${direction === "up" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                                    direction === "down" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                                                        "bg-gray-50 text-gray-700 border-gray-200"
                                                 }`}>
-                                                {direction === "up" && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
-                                                {direction === "down" && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
-                                                {direction === "flat" && <Minus className="h-4 w-4" aria-hidden="true" />}
+                                                {direction === "up" && <TrendingUp className="h-4 w-4 stroke-[2.5]" aria-hidden="true" />}
+                                                {direction === "down" && <TrendingDown className="h-4 w-4 stroke-[2.5]" aria-hidden="true" />}
+                                                {direction === "flat" && <Minus className="h-4 w-4 stroke-[2.5]" aria-hidden="true" />}
                                                 <span>{Math.abs(trend_slope).toFixed(1)}%</span>
                                             </div>
                                         )}
                                     </div>
                                 </div>
+
+                                {/* Secondary Metric (if present) */}
                                 {secondary_value && (
-                                    <div className="pt-4 border-t border-blue-200">
-                                        <p className="text-xs text-gray-500">{secondary_label || "Secondary"}</p>
-                                        <p className="text-lg font-semibold text-gray-700">{secondary_value}</p>
+                                    <div className="pt-5 border-t border-blue-200/50 flex flex-col gap-1">
+                                        <p className="text-xs font-semibold text-blue-800/60 uppercase tracking-widest">{secondary_label || "Secondary"}</p>
+                                        <p className="text-2xl font-bold text-blue-900">{secondary_value}</p>
                                     </div>
                                 )}
                             </div>
@@ -398,6 +414,11 @@ function _formatCell(value: any, isPrice: boolean = false): string {
 function _isPriceColumn(col: string): boolean {
     if (!col) return false;
     const lower = col.toLowerCase();
+
+    if (lower.includes("qty") || lower.includes("quantity") || lower.includes("volume") || lower.includes("count")) {
+        return false;
+    }
+
     return lower.includes("sales") || lower.includes("value") || lower.includes("revenue") || lower.includes("amount") || lower.includes("price") || lower.includes("cost") || lower.includes("margin");
 }
 
@@ -483,6 +504,8 @@ function PivotTableInline({ columns, rows }: { columns: string[]; rows: any[] })
         </div>
     );
 
+    const isPrice = _isPriceColumn(valMetric);
+
     return (
         <div className="space-y-3">
             <div className="flex flex-wrap items-end gap-4 px-1">
@@ -509,14 +532,14 @@ function PivotTableInline({ columns, rows }: { columns: string[]; rows: any[] })
                                 {rowKeys.map((rk, ri) => (
                                     <tr key={rk} className={`transition-colors hover:bg-blue-50/30 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}>
                                         <td className="px-5 py-3 text-left font-medium text-gray-700 border-r border-gray-100 whitespace-nowrap">{rk}</td>
-                                        {colKeys.map(ck => { const v = matrix[rk][ck]; return <td key={ck} className={`px-4 py-3 text-right tabular-nums font-mono ${heat(v)}`}>{v !== null ? _formatCell(v) : "–"}</td>; })}
-                                        <td className="px-4 py-3 text-right tabular-nums font-mono font-semibold text-gray-800 bg-gray-50 border-l border-gray-200">{_formatCell(rowTotals[ri])}</td>
+                                        {colKeys.map(ck => { const v = matrix[rk][ck]; return <td key={ck} className={`px-4 py-3 text-right tabular-nums font-mono ${heat(v)}`}>{v !== null ? _formatCell(v, isPrice) : "–"}</td>; })}
+                                        <td className="px-4 py-3 text-right tabular-nums font-mono font-semibold text-gray-800 bg-gray-50 border-l border-gray-200">{_formatCell(rowTotals[ri], isPrice)}</td>
                                     </tr>
                                 ))}
                                 <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold text-gray-800">
                                     <td className="px-5 py-3 text-left text-xs uppercase tracking-wider border-r border-gray-200">Total</td>
-                                    {colTotals.map((t, i) => <td key={i} className="px-4 py-3 text-right tabular-nums font-mono">{_formatCell(t)}</td>)}
-                                    <td className="px-4 py-3 text-right tabular-nums font-mono text-blue-700 bg-blue-50 border-l border-gray-200">{_formatCell(grandTotal)}</td>
+                                    {colTotals.map((t, i) => <td key={i} className="px-4 py-3 text-right tabular-nums font-mono">{_formatCell(t, isPrice)}</td>)}
+                                    <td className="px-4 py-3 text-right tabular-nums font-mono text-blue-700 bg-blue-50 border-l border-gray-200">{_formatCell(grandTotal, isPrice)}</td>
                                 </tr>
                             </tbody>
                         </table>

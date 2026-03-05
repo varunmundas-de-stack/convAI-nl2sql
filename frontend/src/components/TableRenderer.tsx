@@ -65,6 +65,29 @@ function isPriceColumn(col: string): boolean {
     return lower.includes("sales") || lower.includes("value") || lower.includes("revenue") || lower.includes("amount") || lower.includes("price") || lower.includes("cost") || lower.includes("margin");
 }
 
+// ─── Column deduplication ─────────────────────────────────────────────────────
+// When a granularity-suffixed column (e.g. "invoice_date.day", "invoice_date.week")
+// exists, suppress the bare base column (e.g. "invoice_date") to avoid showing
+// duplicate date information.
+const TIME_GRANULARITIES = new Set(["day", "week", "month", "quarter", "year"]);
+
+function deduplicateTimeColumns(columns: string[]): string[] {
+    // Collect all base columns that have a granularity-suffixed sibling
+    const shadowed = new Set<string>();
+    for (const col of columns) {
+        const lastDot = col.lastIndexOf(".");
+        if (lastDot === -1) continue;
+        const suffix = col.substring(lastDot + 1);
+        if (TIME_GRANULARITIES.has(suffix)) {
+            // The base is everything before the last dot segment
+            const base = col.substring(0, lastDot);
+            shadowed.add(base);
+        }
+    }
+    if (shadowed.size === 0) return columns;
+    return columns.filter(col => !shadowed.has(col));
+}
+
 // ─── Flat table ───────────────────────────────────────────────────────────────
 
 function FlatTable({ columns, rows }: { columns: string[]; rows: any[] }) {
@@ -321,7 +344,8 @@ function PivotTable({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TableRenderer({ data }: TableRendererProps) {
-    const { columns, rows, explanation } = data;
+    const { columns: rawColumns, rows, explanation } = data;
+    const columns = useMemo(() => deduplicateTimeColumns(rawColumns), [rawColumns]);
     const [view, setView] = useState<"flat" | "pivot">("flat");
 
     return (

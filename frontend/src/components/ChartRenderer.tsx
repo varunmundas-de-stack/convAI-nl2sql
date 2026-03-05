@@ -350,8 +350,8 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                                         {/* Trend Badge */}
                                         {direction && direction !== "unknown" && trend_slope !== undefined && (
                                             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold shadow-sm border ${direction === "up" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                                    direction === "down" ? "bg-rose-50 text-rose-700 border-rose-200" :
-                                                        "bg-gray-50 text-gray-700 border-gray-200"
+                                                direction === "down" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                                                    "bg-gray-50 text-gray-700 border-gray-200"
                                                 }`}>
                                                 {direction === "up" && <TrendingUp className="h-4 w-4 stroke-[2.5]" aria-hidden="true" />}
                                                 {direction === "down" && <TrendingDown className="h-4 w-4 stroke-[2.5]" aria-hidden="true" />}
@@ -426,8 +426,26 @@ function _isNumeric(rows: any[], col: string): boolean {
     return rows.slice(0, 5).map(r => r[col]).filter(v => v != null).some(v => typeof v === "number" || (typeof v === "string" && !isNaN(Number(v)) && v.trim() !== ""));
 }
 
-function FlatTableInline({ columns, rows }: { columns: string[]; rows: any[] }) {
+const _TIME_GRANULARITIES = new Set(["day", "week", "month", "quarter", "year"]);
+
+function _deduplicateTimeColumns(columns: string[]): string[] {
+    const shadowed = new Set<string>();
+    for (const col of columns) {
+        const lastDot = col.lastIndexOf(".");
+        if (lastDot === -1) continue;
+        const suffix = col.substring(lastDot + 1);
+        if (_TIME_GRANULARITIES.has(suffix)) {
+            shadowed.add(col.substring(0, lastDot));
+        }
+    }
+    if (shadowed.size === 0) return columns;
+    return columns.filter(col => !shadowed.has(col));
+}
+
+function FlatTableInline({ columns: rawColumns, rows }: { columns: string[]; rows: any[] }) {
+    const columns = _deduplicateTimeColumns(rawColumns);
     const numericCols = new Set(columns.filter(c => _isNumeric(rows, c)));
+
     return (
         <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
             <div className="max-h-[560px] overflow-y-auto">
@@ -460,14 +478,16 @@ function FlatTableInline({ columns, rows }: { columns: string[]; rows: any[] }) 
     );
 }
 
-function PivotTableInline({ columns, rows }: { columns: string[]; rows: any[] }) {
+function PivotTableInline({ columns: rawColumns, rows }: { columns: string[]; rows: any[] }) {
     const { useState: _useState, useMemo: _useMemo } = { useState, useMemo };
+    const columns = _deduplicateTimeColumns(rawColumns);
     const numericCols = columns.filter(c => _isNumeric(rows, c));
     const categoricalCols = columns.filter(c => !_isNumeric(rows, c));
 
     const [rowDim, setRowDim] = _useState(categoricalCols[0] ?? columns[0] ?? "");
     const [colDim, setColDim] = _useState(categoricalCols[1] ?? categoricalCols[0] ?? columns[0] ?? "");
     const [valMetric, setValMetric] = _useState(numericCols[0] ?? columns[columns.length - 1] ?? "");
+
 
     const { rowKeys, colKeys, matrix } = _useMemo(() => {
         const rkSet = new Set<string>(); const ckSet = new Set<string>();

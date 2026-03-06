@@ -277,7 +277,8 @@ FROM (
   LEFT JOIN ref_seasonal_index si      ON si.month_num = EXTRACT(MONTH FROM dt.invoice_date)
   LEFT JOIN ref_category_zone_skew czs ON czs.category = p.category AND czs.zone = d.zone
   LEFT JOIN ref_dow_factor dw          ON dw.dow        = EXTRACT(DOW FROM dt.invoice_date)
-  WHERE random() < LEAST(0.04, 0.006 * p.pop_weight)
+  WHERE (ABS(hashtext(d.distributor_code || p.sku_code || dt.invoice_date::TEXT)) % 10000) 
+        < LEAST(400, 60 * p.pop_weight::INT)
 ) src
 CROSS JOIN LATERAL (
   SELECT
@@ -364,7 +365,8 @@ FROM (
   LEFT JOIN ref_seasonal_index si      ON si.month_num    = EXTRACT(MONTH FROM dt.invoice_date)
   LEFT JOIN ref_category_zone_skew czs ON czs.category    = p.category AND czs.zone = r.zone
   LEFT JOIN ref_dow_factor dw          ON dw.dow           = EXTRACT(DOW FROM dt.invoice_date)
-  WHERE random() < LEAST(0.012, 0.002 * p.pop_weight)
+  WHERE (ABS(hashtext(r.retailer_code || p.sku_code || dt.invoice_date::TEXT)) % 10000)
+        < LEAST(120, 20 * p.pop_weight::INT)
 ) src
 CROSS JOIN LATERAL (
   SELECT

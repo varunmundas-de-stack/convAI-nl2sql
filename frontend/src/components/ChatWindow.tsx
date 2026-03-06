@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
+import { ArrowUp } from "lucide-react";
 import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
@@ -137,6 +138,12 @@ export default function ChatWindow() {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             onSend();
+            // reset height on send
+            requestAnimationFrame(() => {
+                if (e.target instanceof HTMLTextAreaElement) {
+                    e.target.style.height = 'auto';
+                }
+            });
         }
     }
 
@@ -149,7 +156,7 @@ export default function ChatWindow() {
     );
 
     return (
-        <div className="flex flex-col h-screen bg-gray-50">
+        <div className="flex flex-col h-screen bg-white">
             {/* Header */}
             <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -185,17 +192,12 @@ export default function ChatWindow() {
                 </div>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
+            {/* Messages — extra bottom padding so content clears the floating bar */}
+            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 pb-44 flex flex-col items-center">
                 <div className="w-full max-w-5xl flex flex-col h-full">
                     {messages.length === 0 && (
-                        <div className="flex items-center justify-center h-full">
-                            <div className="text-center text-gray-500">
-                                <p className="text-lg font-medium">Welcome to NL2SQL</p>
-                                <p className="text-sm mt-2">
-                                    Ask questions about your data in natural language
-                                </p>
-                            </div>
+                        <div className="flex flex-col items-center justify-center h-full">
+                            <h2 className="text-4xl font-semibold text-gray-800 mb-8 tracking-tight">What do you want to know?</h2>
                         </div>
                     )}
 
@@ -225,40 +227,54 @@ export default function ChatWindow() {
                 </div>
             </div>
 
-            {/* Input */}
-            <div className="bg-white border-t border-gray-200 px-4 md:px-8 py-4 flex flex-col items-center">
-                <div className="w-full max-w-5xl">
-                    {!isBackendAvailable && (
-                        <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
-                            Backend is unavailable. Please check your connection.
-                        </div>
-                    )}
-
-                    <div className="flex gap-3">
-                        <textarea
-                            className="flex-1 border border-gray-300 text-black rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                            rows={2}
-                            placeholder={
-                                !isBackendAvailable
-                                    ? "Backend unavailable..."
-                                    : isClarificationWithButtons
-                                        ? "Please select an option above..."
-                                        : "Type your question... (Enter to send, Shift+Enter for new line)"
-                            }
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
-                        />
-                        <button
-                            onClick={onSend}
-                            disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
-                            className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                        >
-                            Send
-                        </button>
-                    </div>
-                </div>
+            {/* Floating Input */}
+            <div
+                className={`
+                    fixed bottom-6 left-1/2 -translate-x-1/2
+                    flex items-end gap-2
+                    w-[calc(100%-2rem)] max-w-3xl
+                    bg-white border rounded-2xl px-4 py-2.5
+                    shadow-[0_2px_12px_rgba(0,0,0,0.08)]
+                    transition-all duration-150
+                    ${!isBackendAvailable
+                        ? 'border-red-200'
+                        : isClarificationWithButtons || isLoading
+                            ? 'border-gray-200'
+                            : 'border-gray-300 focus-within:border-gray-400 focus-within:shadow-[0_2px_16px_rgba(0,0,0,0.12)]'
+                    }
+                `}
+            >
+                <textarea
+                    className="flex-1 max-h-[160px] outline-none border-none resize-none bg-transparent text-gray-900 text-sm leading-relaxed placeholder:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed overflow-y-auto"
+                    rows={1}
+                    style={{ minHeight: '24px' }}
+                    placeholder={
+                        !isBackendAvailable
+                            ? "Backend unavailable..."
+                            : isClarificationWithButtons
+                                ? "Select an option above..."
+                                : "Ask anything..."
+                    }
+                    value={input}
+                    onChange={(e) => {
+                        setInput(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = e.target.scrollHeight + 'px';
+                    }}
+                    onKeyDown={handleKeyDown}
+                    disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
+                />
+                <button
+                    onClick={() => {
+                        onSend();
+                        const ta = document.querySelector('textarea');
+                        if (ta) ta.style.height = 'auto';
+                    }}
+                    disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
+                    className="shrink-0 p-1.5 rounded-full flex items-center justify-center text-white bg-black hover:bg-gray-800 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                    <ArrowUp size={15} strokeWidth={2.5} />
+                </button>
             </div>
         </div>
     );

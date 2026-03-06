@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart2, Table2, LayoutGrid } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, BarChart2, Table2, LayoutGrid } from "lucide-react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from "recharts";
 import TableRenderer from "./TableRenderer";
 
@@ -78,7 +78,6 @@ interface ChartRendererProps {
 }
 
 export default function ChartRenderer({ visual_spec, refined_insights }: ChartRendererProps) {
-    const [showContextNotes, setShowContextNotes] = useState(false);
     const [isClient, setIsClient] = useState(false);
     const [viewMode, setViewMode] = useState<"chart" | "table">("chart");
 
@@ -235,52 +234,6 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                     </div>
                 )}
 
-            {/* Context Notes (Collapsible via Dropdown) */}
-            {refined_insights?.insights && refined_insights.insights.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-                    <button
-                        onClick={() => setShowContextNotes(!showContextNotes)}
-                        className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
-                        aria-expanded={showContextNotes}
-                    >
-                        <div className="flex items-center gap-3">
-                            <span className="text-sm font-semibold text-gray-700">Detailed Insights</span>
-                            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
-                                {refined_insights.insights.length}
-                            </span>
-                        </div>
-                        {showContextNotes ? (
-                            <ChevronUp className="h-4 w-4 text-gray-500" aria-hidden="true" />
-                        ) : (
-                            <ChevronDown className="h-4 w-4 text-gray-500" aria-hidden="true" />
-                        )}
-                    </button>
-                    {showContextNotes && (
-                        <div className="divide-y divide-gray-100">
-                            {refined_insights.insights.map((insight: any, idx: number) => (
-                                <div key={idx} className="p-4 hover:bg-gray-50 transition-colors">
-                                    <div className="flex items-start gap-3">
-                                        <div className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${insight.severity === 'critical' ? 'bg-red-500 shadow-sm ring-1 ring-red-200' :
-                                            insight.severity === 'high' ? 'bg-orange-500 shadow-sm ring-1 ring-orange-200' :
-                                                insight.severity === 'medium' ? 'bg-yellow-500 shadow-sm ring-1 ring-yellow-200' :
-                                                    'bg-blue-400 shadow-sm ring-1 ring-blue-200'
-                                            }`} />
-                                        <div className="space-y-1">
-                                            <p className="text-sm text-gray-700 font-medium leading-normal">{insight.headline}</p>
-                                            {insight.context_note && (
-                                                <p className="text-sm text-gray-600 mt-1">{insight.context_note}</p>
-                                            )}
-                                            {insight.label && (
-                                                <p className="text-xs text-gray-400 uppercase tracking-tighter">{insight.label.replace(/_/g, " ")}</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
 
             {/* ── View toggle bar (below insights, above chart) ──────── */}
             {isChartType && (

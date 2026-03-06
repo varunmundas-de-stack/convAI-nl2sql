@@ -14,6 +14,7 @@ import logging
 import colorlog
 import os
 import uuid
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -23,9 +24,14 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from opentelemetry.trace import Status, StatusCode
 
 from app.services.query_orchestrator import execute_query as run_pipeline, resume_query, PipelineStage
 from app.services.catalog_manager import CatalogManager
+from app.utils.tracer import get_tracer
+
+# Module-level tracer (provider is set up by llm_service on first import)
+tracer = get_tracer(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -196,42 +202,68 @@ async def execute_query(request: QueryRequest):
     # Auto-generate session_id if not provided (enables context for follow-ups)
     session_id = request.session_id or f"sess_{uuid.uuid4().hex[:12]}"
     logger.info(f"Received query: {query} (session={session_id}, new={request.session_id is None})")
-    
-    # Delegate to orchestrator (does ALL the work)
-    response = run_pipeline(query, session_id=session_id)
-    
-    # Convert to dict for JSON response
-    response_dict = response.to_dict()
-    
-    # Check for clarification request - this is NOT an error, return 200
-    if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
-        logger.info(f"Clarification requested: {response.missing_fields}")
-        return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
-    
-    if not response.success:
-        # Pipeline failed - return error with appropriate HTTP status
-        error_type = response.error.error_type if response.error else "UnknownError"
-        stage = response.stage  # Use the actual stage from response, not from error
-        http_status = _get_http_status_for_stage(stage, error_type)
-        
-        logger.warning(f"Pipeline failed at stage '{stage}': {error_type}")
-        
-        # Convert the error object to a string or dict
-        if "error" in response_dict and isinstance(response_dict["error"], Exception):
-            response_dict["error"] = str(response_dict["error"]) 
 
-        raise HTTPException(status_code=http_status, detail=response_dict)
+    with tracer.start_as_current_span("http.query") as span:
+        span.set_attribute("http.method", "POST")
+        span.set_attribute("http.route", "/query")
+        span.set_attribute("input.query", query[:500])
+        span.set_attribute("input.value", json.dumps({"query": query, "session_id": session_id}))
+        span.set_attribute("input.session_id", session_id)
+        span.set_attribute("input.session_is_new", request.session_id is None)
 
-    if response.error:
-        raise HTTPException(
-            status_code=503,
-            detail="LLM temporarily unavailable"
-        )
-    
-    logger.info(f"Query executed successfully in {response.duration_ms}ms, {len(response.data or [])} rows")
-     
-    # Success - return full response
-    return JSONResponse(content=response_dict)
+        # Delegate to orchestrator (does ALL the work)
+        response = run_pipeline(query, session_id=session_id)
+
+        # Convert to dict for JSON response
+        response_dict = response.to_dict()
+
+        # Check for clarification request - this is NOT an error, return 200
+        if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
+            logger.info(f"Clarification requested: {response.missing_fields}")
+            span.set_attribute("output.clarification_requested", True)
+            span.set_attribute("output.missing_fields", str(response.missing_fields or []))
+            span.set_attribute("output.clarification_message", response.clarification_message or "")
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+            return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
+
+        if not response.success:
+            # Pipeline failed - return error with appropriate HTTP status
+            error_type = response.error.error_type if response.error else "UnknownError"
+            stage = response.stage  # Use the actual stage from response, not from error
+            http_status = _get_http_status_for_stage(stage, error_type)
+
+            logger.warning(f"Pipeline failed at stage '{stage}': {error_type}")
+            span.set_status(Status(StatusCode.ERROR, error_type))
+            span.set_attribute("error.type", error_type)
+            span.set_attribute("error.stage", stage)
+            span.set_attribute("http.status_code", http_status)
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+
+            # Convert the error object to a string or dict
+            if "error" in response_dict and isinstance(response_dict["error"], Exception):
+                response_dict["error"] = str(response_dict["error"]) 
+
+            raise HTTPException(status_code=http_status, detail=response_dict)
+
+        if response.error:
+            span.set_status(Status(StatusCode.ERROR, "LLM temporarily unavailable"))
+            span.set_attribute("http.status_code", 503)
+            raise HTTPException(
+                status_code=503,
+                detail="LLM temporarily unavailable"
+            )
+
+        logger.info(f"Query executed successfully in {response.duration_ms}ms, {len(response.data or [])} rows")
+        span.set_attribute("output.success", True)
+        span.set_attribute("output.duration_ms", response.duration_ms)
+        span.set_attribute("output.row_count", len(response.data or []))
+        if response.visual_spec:
+            span.set_attribute("output.chart_type", response.visual_spec.chart_type or "")
+        span.set_attribute("http.status_code", 200)
+        span.set_attribute("output.value", json.dumps(response_dict, default=str))
+
+        # Success - return full response
+        return JSONResponse(content=response_dict)
 
 
 @app.get("/catalog/metrics", tags=["Catalog"])
@@ -290,30 +322,53 @@ async def clarify_endpoint(req: ClarificationRequest):
 
     Returns the same response shape as /query.
     """
-    response_dict = resume_query(req.request_id, req.answers, session_id=req.session_id)
+    with tracer.start_as_current_span("http.clarify") as span:
+        span.set_attribute("http.method", "POST")
+        span.set_attribute("http.route", "/clarify")
+        span.set_attribute("input.request_id", req.request_id)
+        span.set_attribute("input.session_id", req.session_id or "")
+        span.set_attribute("input.answer_keys", str(list(req.answers.keys())))
+        span.set_attribute("input.answers", str(req.answers)[:500])
+        span.set_attribute("input.value", json.dumps(req.answers, default=str))
 
-    # Clarification requested again — not an error, return 200
-    if response_dict.get("stage") == PipelineStage.CLARIFICATION_REQUESTED:
+        response_dict = resume_query(req.request_id, req.answers, session_id=req.session_id)
+
+        # Clarification requested again — not an error, return 200
+        if response_dict.get("stage") == PipelineStage.CLARIFICATION_REQUESTED:
+            span.set_attribute("output.clarification_requested_again", True)
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+            return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
+
+        # State not found — treat as a client error (bad/expired request_id)
+        if (
+            not response_dict.get("success")
+            and response_dict.get("error", {}).get("error_type") == "PipelineStateNotFound"
+        ):
+            span.set_status(Status(StatusCode.ERROR, "PipelineStateNotFound"))
+            span.set_attribute("http.status_code", 404)
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=response_dict,
+            )
+
+        if not response_dict.get("success"):
+            error_type = response_dict.get("error", {}).get("error_type", "UnknownError")
+            stage = response_dict.get("stage", "")
+            http_status = _get_http_status_for_stage(stage, error_type)
+            logger.warning(f"Clarify pipeline failed at stage '{stage}': {error_type}")
+            span.set_status(Status(StatusCode.ERROR, error_type))
+            span.set_attribute("error.type", error_type)
+            span.set_attribute("error.stage", stage)
+            span.set_attribute("http.status_code", http_status)
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+            raise HTTPException(status_code=http_status, detail=response_dict)
+
+        span.set_attribute("output.success", True)
+        span.set_attribute("output.row_count", len(response_dict.get("data") or []))
+        span.set_attribute("http.status_code", 200)
+        span.set_attribute("output.value", json.dumps(response_dict, default=str))
         return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
-
-    # State not found — treat as a client error (bad/expired request_id)
-    if (
-        not response_dict.get("success")
-        and response_dict.get("error", {}).get("error_type") == "PipelineStateNotFound"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=response_dict,
-        )
-
-    if not response_dict.get("success"):
-        error_type = response_dict.get("error", {}).get("error_type", "UnknownError")
-        stage = response_dict.get("stage", "")
-        http_status = _get_http_status_for_stage(stage, error_type)
-        logger.warning(f"Clarify pipeline failed at stage '{stage}': {error_type}")
-        raise HTTPException(status_code=http_status, detail=response_dict)
-
-    return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
 
 
 # =============================================================================

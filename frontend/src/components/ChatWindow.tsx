@@ -192,8 +192,8 @@ export default function ChatWindow() {
                 </div>
             </div>
 
-            {/* Messages — extra bottom padding so content clears the floating bar */}
-            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 pb-44 flex flex-col items-center">
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
                 <div className="w-full max-w-5xl flex flex-col h-full">
                     {messages.length === 0 && (
                         <div className="flex flex-col items-center justify-center h-full">
@@ -223,6 +223,8 @@ export default function ChatWindow() {
                         </div>
                     )}
 
+                    {/* Explicit spacer to ensure scroll clears the floating input box securely */}
+                    <div className="h-24 shrink-0 w-full" />
                     <div ref={messagesEndRef} />
                 </div>
             </div>

@@ -87,8 +87,6 @@ def generate_visual_spec(
             if row_key.startswith(time_dim_base + ".") or row_key == time_dim_base:
                 time_dim = row_key
                 break
-        if not time_dim:
-            time_dim = time_dim_base
     elif intent and isinstance(intent, dict) and intent.get("time"):
         time_dim_base = intent["time"].get("dimension")
         if time_dim_base:
@@ -96,8 +94,6 @@ def generate_visual_spec(
                 if row_key.startswith(time_dim_base + ".") or row_key == time_dim_base:
                     time_dim = row_key
                     break
-            if not time_dim:
-                time_dim = time_dim_base
 
     # If still not resolved, do a pass-2 scan for any granularity-suffixed key
     # (covers cases where intent.time is missing but data clearly has a time column)

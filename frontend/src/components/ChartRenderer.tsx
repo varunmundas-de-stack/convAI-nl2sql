@@ -67,9 +67,9 @@ interface Marker {
 interface RefinedInsights {
     insights?: any[];
     executive_summary?: string;
-    key_risks?: string[];
-    possible_drivers?: string[];
-    recommendations?: string[];
+    key_risks?: Record<string, string>;
+    possible_drivers?: Record<string, string>;
+    recommendations?: Record<string, string>;
 }
 
 interface ChartRendererProps {
@@ -156,6 +156,10 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
     const isChartType = visual_spec.chart_type !== "number_card" && visual_spec.chart_type !== "table";
     const { chart_type, title, subtitle, primary_value, primary_label, secondary_value, secondary_label, direction, trend_slope } = visual_spec;
 
+    const keyRisksEntries = Object.entries(refined_insights?.key_risks || {});
+    const possibleDriversEntries = Object.entries(refined_insights?.possible_drivers || {});
+    const recommendationsEntries = Object.entries(refined_insights?.recommendations || {});
+
     return (
         <div className="space-y-4">
 
@@ -176,63 +180,61 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
             )}
 
             {/* Narrative Panels: Key Risks / Possible Drivers / Recommendations */}
-            {((refined_insights?.key_risks?.length ?? 0) > 0 ||
-                (refined_insights?.possible_drivers?.length ?? 0) > 0 ||
-                (refined_insights?.recommendations?.length ?? 0) > 0) && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {(keyRisksEntries.length > 0 || possibleDriversEntries.length > 0 || recommendationsEntries.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
-                        {/* Key Risks */}
-                        {refined_insights?.key_risks && refined_insights.key_risks.length > 0 && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                                <h4 className="text-xs font-bold text-red-800 mb-3 uppercase tracking-wide flex items-center gap-1.5">
-                                    <span aria-hidden="true">⚠️</span> Key Risks
-                                </h4>
-                                <ul className="space-y-2">
-                                    {refined_insights.key_risks.map((risk, idx) => (
-                                        <li key={idx} className="flex items-start gap-2">
-                                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" aria-hidden="true" />
-                                            <span className="text-sm text-red-900 leading-snug">{risk}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
+                    {/* Key Risks */}
+                    {keyRisksEntries.length > 0 && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                            <h4 className="text-xs font-bold text-red-800 mb-3 uppercase tracking-wide flex items-center gap-1.5">
+                                <span aria-hidden="true">⚠️</span> Key Risks
+                            </h4>
+                            <ul className="space-y-2">
+                                {keyRisksEntries.map(([key, risk]) => (
+                                    <li key={key} className="flex items-start gap-2">
+                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" aria-hidden="true" />
+                                        <span className="text-sm text-red-900 leading-snug">{risk}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
 
-                        {/* Possible Drivers */}
-                        {refined_insights?.possible_drivers && refined_insights.possible_drivers.length > 0 && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                                <h4 className="text-xs font-bold text-amber-800 mb-3 uppercase tracking-wide flex items-center gap-1.5">
-                                    <span aria-hidden="true">🔍</span> Possible Drivers
-                                </h4>
-                                <ul className="space-y-2">
-                                    {refined_insights.possible_drivers.map((driver, idx) => (
-                                        <li key={idx} className="flex items-start gap-2">
-                                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" aria-hidden="true" />
-                                            <span className="text-sm text-amber-900 leading-snug">{driver}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
+                    {/* Possible Drivers */}
+                    {possibleDriversEntries.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                            <h4 className="text-xs font-bold text-amber-800 mb-3 uppercase tracking-wide flex items-center gap-1.5">
+                                <span aria-hidden="true">🔍</span> Possible Drivers
+                            </h4>
+                            <ul className="space-y-2">
+                                {possibleDriversEntries.map(([key, driver]) => (
+                                    <li key={key} className="flex items-start gap-2">
+                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" aria-hidden="true" />
+                                        <span className="text-sm text-amber-900 leading-snug">{driver}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
 
-                        {/* Recommendations */}
-                        {refined_insights?.recommendations && refined_insights.recommendations.length > 0 && (
-                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                                <h4 className="text-xs font-bold text-green-800 mb-3 uppercase tracking-wide flex items-center gap-1.5">
-                                    <span aria-hidden="true">✅</span> Recommendations
-                                </h4>
-                                <ul className="space-y-2">
-                                    {refined_insights.recommendations.map((rec, idx) => (
-                                        <li key={idx} className="flex items-start gap-2">
-                                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" aria-hidden="true" />
-                                            <span className="text-sm text-green-900 leading-snug">{rec}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                    </div>
-                )}
+                    {/* Recommendations */}
+                    {recommendationsEntries.length > 0 && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <h4 className="text-xs font-bold text-green-800 mb-3 uppercase tracking-wide flex items-center gap-1.5">
+                                <span aria-hidden="true">✅</span> Recommendations
+                            </h4>
+                            <ul className="space-y-2">
+                                {recommendationsEntries.map(([key, rec]) => (
+                                    <li key={key} className="flex items-start gap-2">
+                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" aria-hidden="true" />
+                                        <span className="text-sm text-green-900 leading-snug">{rec}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            )}
 
 
             {/* ── View toggle bar (below insights, above chart) ──────── */}

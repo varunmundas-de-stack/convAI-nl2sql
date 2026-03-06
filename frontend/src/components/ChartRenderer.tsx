@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { TrendingUp, TrendingDown, Minus, BarChart2, Table2, LayoutGrid } from "lucide-react";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from "recharts";
 import TableRenderer from "./TableRenderer";
 
 // Types matching backend VisualSpec
@@ -163,13 +163,13 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
     return (
         <div className="space-y-4">
 
-            {/* Title Section */}
+            {/* Title Section
             {title && (
                 <div className="space-y-1">
                     <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
                     {subtitle && <p className="text-sm text-gray-600">{subtitle}</p>}
                 </div>
-            )}
+            )} */}
 
             {/* Executive Summary (Always Visible) */}
             {refined_insights?.executive_summary && (
@@ -643,39 +643,25 @@ function isNumericColumn(rows: any[], columnName: string): boolean {
     return samples.some(v => typeof v === "number" || (typeof v === "string" && !isNaN(Number(v)) && v.trim() !== ""));
 }
 
-// Bar Chart Renderer (SVG implementation)
 function BarChartRenderer({ spec }: { spec: VisualSpec }) {
     const series = spec.series?.[0];
-    const xLabels = spec.x_axis?.values || [];  // Category labels
-    const yValues = series?.values || [];       // Actual data values
-    const yAxisTicks = spec.y_axis?.values || [];  // Y-axis tick positions
+    const xLabels = spec.x_axis?.values || [];
+    const yValues = series?.values || [];
     const pointColors = series?.point_colors || [];
-    const pointEmphasis = series?.point_emphasis || [];
 
     if (yValues.length === 0) return null;
 
-    const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
-    const chartHeight = 300;
-    const topPadding = 40;
-    const bottomPadding = 100;
-    const leftPadding = 60;  // Space for Y-axis labels
-    const rightPadding = 20;
-    const totalHeight = chartHeight + topPadding + bottomPadding;
-    const chartWidth = Math.max(600, xLabels.length * 70);
-    const totalWidth = chartWidth + leftPadding + rightPadding;
-    const barWidth = Math.min(60, (chartWidth / yValues.length) * 0.8);
-
-    // Use backend tick values if available, otherwise compute
-    const tickValues = yAxisTicks.length > 0
-        ? yAxisTicks
-        : [0, maxValue * 0.25, maxValue * 0.5, maxValue * 0.75, maxValue];
-
-    const maxTickValue = Math.max(...tickValues.map(v => typeof v === 'number' ? v : 0));
+    // Build data array for recharts
+    const data = yValues.map((value: any, idx: number) => ({
+        name: xLabels[idx] || String(idx),
+        value: typeof value === 'number' ? value : 0,
+        color: pointColors[idx] || "#3b82f6"
+    }));
 
     return (
-        <div className="bg-white p-8 rounded-lg border border-gray-200">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 w-full">
             {spec.primary_value && (
-                <div className="mb-4 flex items-baseline gap-4">
+                <div className="mb-2 flex items-baseline gap-4">
                     <div>
                         <p className="text-xs text-gray-500">{spec.primary_label}</p>
                         <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
@@ -688,357 +674,117 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
                     )}
                 </div>
             )}
-            <div className="space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
-                </div>
-                <div className="overflow-x-auto">
-                    <svg
-                        width={totalWidth}
-                        height={totalHeight}
-                        viewBox={`0 0 ${totalWidth} ${totalHeight}`}
-                        role="img"
-                        aria-label={`Bar chart showing ${spec.y_axis?.label || "values"}`}
-                    >
-                        <title>{spec.title || `Bar chart of ${spec.y_axis?.label}`}</title>
-
-                        {/* Y-axis ticks and labels */}
-                        {tickValues.map((tickValue, idx) => {
-                            const y = topPadding + chartHeight - ((tickValue as number) / maxTickValue) * chartHeight;
-                            return (
-                                <g key={`y-tick-${idx}`}>
-                                    {/* Grid line */}
-                                    <line
-                                        x1={leftPadding}
-                                        y1={y}
-                                        x2={leftPadding + chartWidth}
-                                        y2={y}
-                                        stroke="#e5e7eb"
-                                        strokeWidth={1}
-                                        aria-hidden="true"
-                                    />
-                                    {/* Tick mark */}
-                                    <line
-                                        x1={leftPadding - 5}
-                                        y1={y}
-                                        x2={leftPadding}
-                                        y2={y}
-                                        stroke="#9ca3af"
-                                        strokeWidth={1}
-                                        aria-hidden="true"
-                                    />
-                                    {/* Y-axis label */}
-                                    <text
-                                        x={leftPadding - 10}
-                                        y={y}
-                                        textAnchor="end"
-                                        dominantBaseline="middle"
-                                        className="text-xs fill-gray-600"
-                                    >
-                                        {formatNumber(tickValue as number)}
-                                    </text>
-                                </g>
-                            );
-                        })}
-
-                        {/* Y-axis line */}
-                        <line
-                            x1={leftPadding}
-                            y1={topPadding}
-                            x2={leftPadding}
-                            y2={topPadding + chartHeight}
-                            stroke="#9ca3af"
-                            strokeWidth={2}
-                            aria-hidden="true"
+            <div className="h-[380px] w-full mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data} margin={{ top: 32, right: 24, left: 0, bottom: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                        <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 11, fill: '#9ca3af' }}
+                            tickMargin={8}
+                            angle={-40}
+                            textAnchor="end"
+                            height={40}
+                            interval={0}
                         />
-
-                        {/* X-axis line */}
-                        <line
-                            x1={leftPadding}
-                            y1={topPadding + chartHeight}
-                            x2={leftPadding + chartWidth}
-                            y2={topPadding + chartHeight}
-                            stroke="#9ca3af"
-                            strokeWidth={2}
-                            aria-hidden="true"
+                        <YAxis
+                            tick={{ fontSize: 11, fill: '#9ca3af' }}
+                            tickFormatter={(val) => formatNumber(val as number)}
+                            width={80}
+                            axisLine={false}
+                            tickLine={false}
                         />
-
-                        {/* Bars */}
-                        {yValues.map((value, idx) => {
-                            const height = maxTickValue > 0 ? (value / maxTickValue) * chartHeight : 0;
-                            const x = leftPadding + idx * (chartWidth / yValues.length) + (chartWidth / yValues.length - barWidth) / 2;
-                            const y = topPadding + (chartHeight - height);
-
-                            // Determine color
-                            let fillColor = pointColors[idx] || "#3b82f6"; // Default blue
-                            const emphasis = pointEmphasis[idx];
-
-                            // Adjust opacity based on emphasis
-                            const opacity = emphasis === "strong" || emphasis === "critical" ? 1 :
-                                emphasis === "subtle" ? 0.8 : 0.7;
-
-                            return (
-                                <g key={idx}>
-                                    <rect
-                                        x={x}
-                                        y={y}
-                                        width={barWidth}
-                                        height={height}
-                                        fill={fillColor}
-                                        opacity={opacity}
-                                        rx={4}
-                                        className="transition-all hover:opacity-100"
-                                        aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
-                                    >
-                                        <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
-                                    </rect>
-                                    {/* Value label on top of bar */}
-                                    <text
-                                        x={x + barWidth / 2}
-                                        y={y - 5}
-                                        textAnchor="middle"
-                                        className="text-xs fill-gray-700 font-medium"
-                                    >
-                                        {formatNumber(value)}
-                                    </text>
-                                    {/* X-axis label */}
-                                    <text
-                                        x={x + barWidth / 2}
-                                        y={topPadding + chartHeight + 12}
-                                        textAnchor="end"
-                                        transform={`rotate(-45, ${x + barWidth / 2}, ${topPadding + chartHeight + 12})`}
-                                        className="text-xs fill-gray-600"
-                                    >
-                                        {String(xLabels[idx] || idx)}
-                                    </text>
-                                </g>
-                            );
-                        })}
-
-                        {/* Threshold markers */}
-                        {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx) => {
-                            const markerValue = marker.value || 0;
-                            const y = topPadding + (chartHeight - (markerValue / maxTickValue) * chartHeight);
-                            return (
-                                <g key={`threshold-${idx}`}>
-                                    <line
-                                        x1={leftPadding}
-                                        y1={y}
-                                        x2={leftPadding + chartWidth}
-                                        y2={y}
-                                        stroke="#ef4444"
-                                        strokeWidth={2}
-                                        strokeDasharray="4 4"
-                                        aria-hidden="true"
-                                    />
-                                    <text
-                                        x={leftPadding + 5}
-                                        y={y - 5}
-                                        className="text-xs fill-red-600 font-medium"
-                                    >
-                                        {marker.label}
-                                    </text>
-                                </g>
-                            );
-                        })}
-                    </svg>
-                </div>
+                        <RechartsTooltip
+                            formatter={(value: any) => [formatNumber(Number(value)), spec.y_axis?.label || 'Value']}
+                            cursor={{ fill: 'rgba(59,130,246,0.05)' }}
+                            labelStyle={{ color: '#111827', fontWeight: 600, marginBottom: 2 }}
+                            contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontSize: '13px' }}
+                        />
+                        <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={64}>
+                            {data.map((entry: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                        </Bar>
+                        {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx: number) => (
+                            <ReferenceLine key={idx} y={marker.value} stroke="#ef4444" strokeDasharray="5 3"
+                                label={{ position: 'insideTopLeft', value: marker.label, fill: '#ef4444', fontSize: 11 }} />
+                        ))}
+                    </BarChart>
+                </ResponsiveContainer>
             </div>
         </div>
     );
 }
 
-// Line Chart Renderer (SVG implementation)
 function LineChartRenderer({ spec }: { spec: VisualSpec }) {
     const series = spec.series?.[0];
-    const xLabels = spec.x_axis?.values || [];  // Time/category labels
-    const yValues = series?.values || [];       // Actual data values
-    const yAxisTicks = spec.y_axis?.values || [];  // Y-axis tick positions
+    const xLabels = spec.x_axis?.values || [];
+    const yValues = series?.values || [];
 
     if (yValues.length === 0) return null;
-
-    const maxValue = Math.max(...yValues.map(v => typeof v === 'number' ? v : 0));
-    const minValue = Math.min(...yValues.map(v => typeof v === 'number' ? v : 0));
-    const chartHeight = 300;
-    const topPadding = 40;
-    const bottomPadding = 100;
-    const leftPadding = 60;
-    const rightPadding = 20;
-    const totalHeight = chartHeight + topPadding + bottomPadding;
-    const chartWidth = 600;
-    const totalWidth = chartWidth + leftPadding + rightPadding;
-    const pointSpacing = chartWidth / (yValues.length - 1 || 1);
-
-    // Use backend tick values if available, otherwise compute
-    const tickValues = yAxisTicks.length > 0
-        ? yAxisTicks
-        : [minValue, minValue + (maxValue - minValue) * 0.25, minValue + (maxValue - minValue) * 0.5,
-            minValue + (maxValue - minValue) * 0.75, maxValue];
-
-    const minTickValue = Math.min(...tickValues.map(v => typeof v === 'number' ? v : 0));
-    const maxTickValue = Math.max(...tickValues.map(v => typeof v === 'number' ? v : 0));
-    const range = maxTickValue - minTickValue || 1;
-
-    // Generate path
-    const pathData = yValues
-        .map((value, idx) => {
-            const x = leftPadding + idx * pointSpacing;
-            const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
-            return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
-        })
-        .join(' ');
 
     const lineColor = series?.color_hint === "positive" ? "#10b981" :
         series?.color_hint === "negative" ? "#ef4444" : "#3b82f6";
 
+    const data = yValues.map((value: any, idx: number) => ({
+        name: xLabels[idx] || String(idx),
+        value: typeof value === 'number' ? value : 0
+    }));
+
     return (
-        <div className="bg-white p-8 rounded-lg border border-gray-200">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 w-full">
             {spec.primary_value && (
-                <div className="mb-4 flex items-baseline gap-4">
+                <div className="mb-2 flex items-baseline gap-4">
                     <div>
                         <p className="text-xs text-gray-500">{spec.primary_label}</p>
                         <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
                     </div>
-                    {spec.trend_slope !== undefined && (
-                        <div className={`flex items-center gap-1 px-2 py-1 rounded text-sm font-medium ${spec.trend_slope > 0 ? "bg-green-100 text-green-700" :
-                            spec.trend_slope < 0 ? "bg-red-100 text-red-700" :
-                                "bg-gray-100 text-gray-700"
-                            }`}>
-                            {spec.trend_slope > 0 && <TrendingUp className="h-4 w-4" aria-hidden="true" />}
-                            {spec.trend_slope < 0 && <TrendingDown className="h-4 w-4" aria-hidden="true" />}
-                            {spec.trend_slope === 0 && <Minus className="h-4 w-4" aria-hidden="true" />}
-                            <span>{Math.abs(spec.trend_slope).toFixed(1)}%</span>
-                        </div>
-                    )}
                 </div>
             )}
-            <div className="space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">{spec.y_axis?.label || "Value"}</span>
-                </div>
-                <svg
-                    width={totalWidth}
-                    height={totalHeight}
-                    viewBox={`0 0 ${totalWidth} ${totalHeight}`}
-                    role="img"
-                    aria-label={`Line chart showing ${spec.y_axis?.label || "trend"}`}
-                >
-                    <title>{spec.title || `Line chart of ${spec.y_axis?.label}`}</title>
-
-                    {/* Y-axis ticks and labels */}
-                    {tickValues.map((tickValue, idx) => {
-                        const y = topPadding + chartHeight - ((tickValue as number - minTickValue) / range) * chartHeight;
-                        return (
-                            <g key={`y-tick-${idx}`}>
-                                {/* Grid line */}
-                                <line
-                                    x1={leftPadding}
-                                    y1={y}
-                                    x2={leftPadding + chartWidth}
-                                    y2={y}
-                                    stroke="#e5e7eb"
-                                    strokeWidth={1}
-                                    aria-hidden="true"
-                                />
-                                {/* Tick mark */}
-                                <line
-                                    x1={leftPadding - 5}
-                                    y1={y}
-                                    x2={leftPadding}
-                                    y2={y}
-                                    stroke="#9ca3af"
-                                    strokeWidth={1}
-                                    aria-hidden="true"
-                                />
-                                {/* Y-axis label */}
-                                <text
-                                    x={leftPadding - 10}
-                                    y={y}
-                                    textAnchor="end"
-                                    dominantBaseline="middle"
-                                    className="text-xs fill-gray-600"
-                                >
-                                    {formatNumber(tickValue as number)}
-                                </text>
-                            </g>
-                        );
-                    })}
-
-                    {/* Y-axis line */}
-                    <line
-                        x1={leftPadding}
-                        y1={topPadding}
-                        x2={leftPadding}
-                        y2={topPadding + chartHeight}
-                        stroke="#9ca3af"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                    />
-
-                    {/* X-axis line */}
-                    <line
-                        x1={leftPadding}
-                        y1={topPadding + chartHeight}
-                        x2={leftPadding + chartWidth}
-                        y2={topPadding + chartHeight}
-                        stroke="#9ca3af"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                    />
-
-                    {/* Line path */}
-                    <path
-                        d={pathData}
-                        fill="none"
-                        stroke={lineColor}
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                    />
-
-                    {/* Points */}
-                    {yValues.map((value, idx) => {
-                        const x = leftPadding + idx * pointSpacing;
-                        const y = topPadding + (chartHeight - ((value - minTickValue) / range) * chartHeight);
-
-                        return (
-                            <circle
-                                key={idx}
-                                cx={x}
-                                cy={y}
-                                r={4}
-                                fill={lineColor}
-                                className="hover:r-6 transition-all"
-                                aria-label={`${xLabels[idx]}: ${formatNumber(value)}`}
-                            >
-                                <title>{`${xLabels[idx]}: ${formatNumber(value)}`}</title>
-                            </circle>
-                        );
-                    })}
-
-                    {/* X-axis labels */}
-                    {xLabels.map((label, idx) => {
-                        const x = leftPadding + idx * pointSpacing;
-                        return (
-                            <text
-                                key={idx}
-                                x={x}
-                                y={topPadding + chartHeight + 12}
-                                textAnchor="end"
-                                transform={`rotate(-45, ${x}, ${topPadding + chartHeight + 12})`}
-                                className="text-xs fill-gray-600"
-                            >
-                                {String(label)}
-                            </text>
-                        );
-                    })}
-                </svg>
+            <div className="h-[380px] w-full mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data} margin={{ top: 32, right: 24, left: 0, bottom: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                        <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 11, fill: '#9ca3af' }}
+                            tickMargin={8}
+                            angle={-40}
+                            textAnchor="end"
+                            height={40}
+                            interval={0}
+                        />
+                        <YAxis
+                            tick={{ fontSize: 11, fill: '#9ca3af' }}
+                            tickFormatter={(val) => formatNumber(val as number)}
+                            width={80}
+                            axisLine={false}
+                            tickLine={false}
+                        />
+                        <RechartsTooltip
+                            formatter={(value: any) => [formatNumber(Number(value)), spec.y_axis?.label || 'Value']}
+                            labelStyle={{ color: '#111827', fontWeight: 600, marginBottom: 2 }}
+                            contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontSize: '13px' }}
+                        />
+                        <Line
+                            type="monotone"
+                            dataKey="value"
+                            stroke={lineColor}
+                            strokeWidth={2.5}
+                            dot={false}
+                            activeDot={{ r: 5, strokeWidth: 0, fill: lineColor }}
+                        />
+                        {spec.markers?.filter(m => m.marker_type === "threshold").map((marker, idx) => (
+                            <ReferenceLine key={idx} y={marker.value} stroke="#ef4444" strokeDasharray="5 3"
+                                label={{ position: 'insideTopLeft', value: marker.label, fill: '#ef4444', fontSize: 11 }} />
+                        ))}
+                    </LineChart>
+                </ResponsiveContainer>
             </div>
         </div>
     );
 }
 
-// Pie Chart Renderer (SVG implementation)
 function PieChartRenderer({ spec }: { spec: VisualSpec }) {
     const series = spec.series?.[0];
     const labels = spec.x_axis?.values || [];
@@ -1046,78 +792,49 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
 
     if (values.length === 0) return null;
 
-    const total = values.reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
-    const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+    const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 
-    let currentAngle = -90; // Start from top
-    const slices = values.map((value, idx) => {
-        const percentage = (value / total) * 100;
-        const angle = (value / total) * 360;
-        const startAngle = currentAngle;
-        const endAngle = currentAngle + angle;
-        currentAngle = endAngle;
-
-        return {
-            value,
-            percentage,
-            startAngle,
-            endAngle,
-            color: colors[idx % colors.length],
-            label: labels[idx],
-        };
-    });
+    const data = values.map((value: any, idx: number) => ({
+        name: labels[idx] || `Segment ${idx + 1}`,
+        value: typeof value === 'number' ? value : 0,
+        color: colors[idx % colors.length]
+    }));
 
     return (
-        <div className="bg-white p-8 rounded-lg border border-gray-200">
-            <div className="flex flex-col md:flex-row gap-6">
-                <div className="flex-1">
-                    <svg
-                        width="300"
-                        height="300"
-                        viewBox="-150 -150 300 300"
-                        role="img"
-                        aria-label={`Pie chart showing distribution of ${spec.y_axis?.label || "values"}`}
-                    >
-                        <title>{spec.title || `Pie chart of ${spec.y_axis?.label}`}</title>
-                        {slices.map((slice, idx) => {
-                            const radius = 120;
-                            const startRad = (slice.startAngle * Math.PI) / 180;
-                            const endRad = (slice.endAngle * Math.PI) / 180;
-                            const x1 = radius * Math.cos(startRad);
-                            const y1 = radius * Math.sin(startRad);
-                            const x2 = radius * Math.cos(endRad);
-                            const y2 = radius * Math.sin(endRad);
-                            const largeArc = slice.percentage > 50 ? 1 : 0;
-
-                            return (
-                                <path
-                                    key={idx}
-                                    d={`M 0 0 L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`}
-                                    fill={slice.color}
-                                    opacity={0.9}
-                                    className="hover:opacity-100 transition-opacity"
-                                    aria-label={`${slice.label}: ${slice.percentage.toFixed(1)}%`}
-                                >
-                                    <title>{`${slice.label}: ${slice.value.toLocaleString()} (${slice.percentage.toFixed(1)}%)`}</title>
-                                </path>
-                            );
-                        })}
-                    </svg>
-                </div>
-                <div className="flex-1 space-y-2">
-                    {slices.map((slice, idx) => (
-                        <div key={idx} className="flex items-center gap-3">
-                            <div
-                                className="w-4 h-4 rounded"
-                                style={{ backgroundColor: slice.color }}
-                                aria-hidden="true"
+        <div className="rounded-xl border border-gray-200 bg-white p-4 w-full">
+            <div className="flex flex-col md:flex-row gap-6 items-center">
+                <div className="h-[320px] w-full md:w-[320px] flex-shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                            <RechartsTooltip
+                                formatter={(value: any) => [formatNumber(Number(value)), '']}
+                                contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontSize: '13px' }}
                             />
-                            <div className="flex-1">
-                                <p className="text-sm font-medium text-gray-900">{slice.label}</p>
-                                <p className="text-xs text-gray-500">
-                                    {slice.value.toLocaleString()} ({slice.percentage.toFixed(1)}%)
-                                </p>
+                            <Pie
+                                data={data}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                outerRadius="80%"
+                                innerRadius="45%"
+                                dataKey="value"
+                                paddingAngle={2}
+                            >
+                                {data.map((entry: any, idx: number) => (
+                                    <Cell key={`cell-${idx}`} fill={entry.color} stroke="none" />
+                                ))}
+                            </Pie>
+                        </PieChart>
+                    </ResponsiveContainer>
+                </div>
+                <div className="flex-1 space-y-2.5 min-w-0">
+                    {data.map((slice: any, idx: number) => (
+                        <div key={idx} className="flex items-center gap-3">
+                            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: slice.color }} />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">{slice.name}</p>
                             </div>
+                            <p className="text-sm font-mono text-gray-500 flex-shrink-0">{formatNumber(slice.value as number)}</p>
                         </div>
                     ))}
                 </div>
@@ -1132,100 +849,105 @@ function RechartsRenderer({ spec }: { spec: VisualSpec }) {
 
     const data = spec.data;
     const xAxisKey = spec.x_axis_key || "label";
-
-    // Default palette for series/bars
     const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 
+    const commonMargin = { top: 32, right: 24, left: 0, bottom: 48 };
+    const commonXAxis = (
+        <XAxis
+            dataKey={xAxisKey}
+            tick={{ fontSize: 11, fill: '#9ca3af' }}
+            tickMargin={8}
+            angle={-40}
+            textAnchor="end"
+            height={48}
+            interval={0}
+        />
+    );
+    const commonYAxis = (
+        <YAxis
+            tick={{ fontSize: 11, fill: '#9ca3af' }}
+            tickFormatter={(val) => formatCellValue(val, false)}
+            width={80}
+            axisLine={false}
+            tickLine={false}
+        />
+    );
+    const commonTooltip = (
+        <RechartsTooltip
+            formatter={(value: any) => formatCellValue(Number(value), false)}
+            labelStyle={{ color: '#111827', fontWeight: 600, marginBottom: 2 }}
+            contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontSize: '13px' }}
+        />
+    );
+
     return (
-        <div className="bg-white p-8 rounded-lg border border-gray-200" style={{ height: 450 }}>
-            {/* Header / Titles */}
+        <div className="rounded-xl border border-gray-200 bg-white p-4 w-full">
             {spec.primary_value && (
-                <div className="mb-6 flex items-baseline gap-4">
+                <div className="mb-3 flex items-baseline gap-4">
                     <div>
-                        <p className="text-xs text-gray-500">{spec.primary_label || "Total"}</p>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide">{spec.primary_label || 'Total'}</p>
                         <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
                     </div>
                 </div>
             )}
-
-            <ResponsiveContainer width="100%" height={320}>
-                {spec.chart_type === "multi_line" ? (
-                    <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                        <XAxis
-                            dataKey={xAxisKey}
-                            tick={{ fontSize: 12, fill: '#6b7280' }}
-                            tickMargin={10}
-                            angle={-45}
-                            textAnchor="end"
-                        />
-                        <YAxis
-                            tick={{ fontSize: 12, fill: '#6b7280' }}
-                            tickFormatter={(val) => formatCellValue(val, false)}
-                        />
-                        <RechartsTooltip
-                            formatter={(value: number) => formatCellValue(value, false)}
-                            labelStyle={{ color: '#111827', fontWeight: 'bold', marginBottom: 4 }}
-                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        {spec.pivot_config?.stack_keys?.map((key, i) => (
-                            <Line
-                                key={key}
-                                type="monotone"
-                                dataKey={key}
-                                name={cleanColumnName(key)}
-                                stroke={colors[i % colors.length]}
-                                strokeWidth={2}
-                                dot={{ r: 3, fill: colors[i % colors.length], strokeWidth: 0 }}
-                                activeDot={{ r: 5, strokeWidth: 0 }}
-                            />
-                        ))}
-                    </LineChart>
-                ) : (
-                    <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 80 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                        <XAxis
-                            dataKey={xAxisKey}
-                            tick={{ fontSize: 12, fill: '#6b7280' }}
-                            tickMargin={10}
-                            angle={-45}
-                            textAnchor="end"
-                        />
-                        <YAxis
-                            tick={{ fontSize: 12, fill: '#6b7280' }}
-                            tickFormatter={(val) => formatCellValue(val, false)}
-                        />
-                        <RechartsTooltip
-                            formatter={(value: number) => formatCellValue(value, false)}
-                            labelStyle={{ color: '#111827', fontWeight: 'bold', marginBottom: 4 }}
-                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
-
-                        {spec.chart_type === "stacked_bar" && spec.pivot_config?.stack_keys?.map((key, i) => (
-                            <Bar
-                                key={key}
-                                dataKey={key}
-                                name={cleanColumnName(key)}
-                                stackId="a"
-                                fill={colors[i % colors.length]}
-                                radius={[i === spec.pivot_config!.stack_keys.length - 1 ? 4 : 0, i === spec.pivot_config!.stack_keys.length - 1 ? 4 : 0, 0, 0]}
-                            />
-                        ))}
-
-                        {spec.chart_type === "grouped_bar" && spec.series?.map((s, i) => (
-                            <Bar
-                                key={s.key}
-                                dataKey={s.key}
-                                name={s.label}
-                                fill={colors[i % colors.length]}
-                                radius={[4, 4, 0, 0]}
-                            />
-                        ))}
-                    </BarChart>
-                )}
-            </ResponsiveContainer>
+            <div className="h-[380px] w-full mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                    {spec.chart_type === "multi_line" ? (
+                        <LineChart data={data} margin={commonMargin}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                            {commonXAxis}
+                            {commonYAxis}
+                            {commonTooltip}
+                            <Legend iconType="circle" iconSize={8}
+                                wrapperStyle={{ paddingTop: '12px', fontSize: '12px', color: '#6b7280' }} />
+                            {spec.pivot_config?.stack_keys?.map((key, i) => (
+                                <Line
+                                    key={key}
+                                    type="monotone"
+                                    dataKey={key}
+                                    name={cleanColumnName(key)}
+                                    stroke={colors[i % colors.length]}
+                                    strokeWidth={2.5}
+                                    dot={false}
+                                    activeDot={{ r: 5, strokeWidth: 0 }}
+                                />
+                            ))}
+                        </LineChart>
+                    ) : (
+                        <BarChart data={data} margin={commonMargin}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                            {commonXAxis}
+                            {commonYAxis}
+                            {commonTooltip}
+                            <Legend iconType="square" iconSize={10}
+                                wrapperStyle={{ paddingTop: '12px', fontSize: '12px', color: '#6b7280' }} />
+                            {spec.chart_type === "stacked_bar" && spec.pivot_config?.stack_keys?.map((key, i) => (
+                                <Bar
+                                    key={key}
+                                    dataKey={key}
+                                    name={cleanColumnName(key)}
+                                    stackId="a"
+                                    fill={colors[i % colors.length]}
+                                    maxBarSize={56}
+                                    radius={[i === spec.pivot_config!.stack_keys.length - 1 ? 6 : 0,
+                                    i === spec.pivot_config!.stack_keys.length - 1 ? 6 : 0, 0, 0]}
+                                />
+                            ))}
+                            {spec.chart_type === "grouped_bar" && spec.series?.map((s, i) => (
+                                <Bar
+                                    key={s.key}
+                                    dataKey={s.key}
+                                    name={s.label}
+                                    fill={colors[i % colors.length]}
+                                    maxBarSize={40}
+                                    radius={[4, 4, 0, 0]}
+                                />
+                            ))}
+                        </BarChart>
+                    )}
+                </ResponsiveContainer>
+            </div>
         </div>
     );
 }
+

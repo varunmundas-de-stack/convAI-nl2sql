@@ -28,6 +28,13 @@ export default function MessageBubble({ message, responseData, onClarify, isActi
 
     const alignClasses = isUser ? "justify-end" : "justify-start";
 
+    const shouldRenderResponseData = !isUser && responseData && (
+        responseData.type === "table" ||
+        responseData.type === "chart" ||
+        (responseData.type === "clarification_required" && isActiveClarification) ||
+        responseData.type === "error"
+    );
+
     return (
         <div className={`flex ${alignClasses} mb-6`}>
             <div className={containerClasses}>
@@ -39,7 +46,7 @@ export default function MessageBubble({ message, responseData, onClarify, isActi
                 )}
 
                 {/* Response data rendering */}
-                {!isUser && responseData && (
+                {shouldRenderResponseData && (
                     <div className="mt-8 space-y-8"> {/* Ample vertical spacing */}
                         {responseData.type === "table" && <TableRenderer data={responseData} />}
                         {responseData.type === "chart" && (

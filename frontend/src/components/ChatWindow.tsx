@@ -186,76 +186,78 @@ export default function ChatWindow() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-                {messages.length === 0 && (
-                    <div className="flex items-center justify-center h-full">
-                        <div className="text-center text-gray-500">
-                            <p className="text-lg font-medium">Welcome to NL2SQL</p>
-                            <p className="text-sm mt-2">
-                                Ask questions about your data in natural language
-                            </p>
-                        </div>
-                    </div>
-                )}
-
-                {messages.map((msg) => (
-                    <MessageBubble
-                        key={msg.id}
-                        message={msg}
-                        responseData={msg.responseData}
-                        onClarify={submitClarification}
-                        isActiveClarification={pendingClarification === msg.responseData}
-                    />
-                ))}
-
-                {isLoading && (
-                    <div className="flex justify-start mb-4">
-                        <div className="bg-gray-100 rounded-lg px-4 py-3">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
+                <div className="w-full max-w-5xl flex flex-col h-full">
+                    {messages.length === 0 && (
+                        <div className="flex items-center justify-center h-full">
+                            <div className="text-center text-gray-500">
+                                <p className="text-lg font-medium">Welcome to NL2SQL</p>
+                                <p className="text-sm mt-2">
+                                    Ask questions about your data in natural language
+                                </p>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                <div ref={messagesEndRef} />
+                    {messages.map((msg) => (
+                        <MessageBubble
+                            key={msg.id}
+                            message={msg}
+                            responseData={msg.responseData}
+                            onClarify={submitClarification}
+                            isActiveClarification={pendingClarification === msg.responseData}
+                        />
+                    ))}
+
+                    {isLoading && (
+                        <div className="flex justify-start mb-4">
+                            <div className="bg-gray-100 rounded-lg px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div ref={messagesEndRef} />
+                </div>
             </div>
 
             {/* Input */}
-            <div className="bg-white border-t border-gray-200 px-6 py-4">
-                {!isBackendAvailable && (
-                    <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
-                        Backend is unavailable. Please check your connection.
+            <div className="bg-white border-t border-gray-200 px-4 md:px-8 py-4 flex flex-col items-center">
+                <div className="w-full max-w-5xl">
+                    {!isBackendAvailable && (
+                        <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
+                            Backend is unavailable. Please check your connection.
+                        </div>
+                    )}
+
+                    <div className="flex gap-3">
+                        <textarea
+                            className="flex-1 border border-gray-300 text-black rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            rows={2}
+                            placeholder={
+                                !isBackendAvailable
+                                    ? "Backend unavailable..."
+                                    : isClarificationWithButtons
+                                        ? "Please select an option above..."
+                                        : "Type your question... (Enter to send, Shift+Enter for new line)"
+                            }
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
+                        />
+                        <button
+                            onClick={onSend}
+                            disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
+                            className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Send
+                        </button>
                     </div>
-                )}
-
-
-
-                <div className="flex gap-3">
-                    <textarea
-                        className="flex-1 border border-gray-300 text-black rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        rows={2}
-                        placeholder={
-                            !isBackendAvailable
-                                ? "Backend unavailable..."
-                                : isClarificationWithButtons
-                                    ? "Please select an option above..."
-                                    : "Type your question... (Enter to send, Shift+Enter for new line)"
-                        }
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
-                    />
-                    <button
-                        onClick={onSend}
-                        disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
-                        className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                    >
-                        Send
-                    </button>
                 </div>
             </div>
         </div>

@@ -54,40 +54,38 @@ def merge_intent(
         logger.debug(f"Inherited sales_scope: {previous_qco.sales_scope}")
 
     # -------------------------------------------------------------------------
-    # RULE 2: metric — inherit if missing
+    # RULE 2: metrics — inherit from QCO if new intent has none
+    # Injects the full list of Metric objects: [{"name": "net_value", "aggregation": "sum"}]
+    # This matches the Intent model's expected format exactly.
     # -------------------------------------------------------------------------
-    if not merged.get("metric"):
-        merged["metric"] = previous_qco.metric
-        logger.debug(f"Inherited metric: {previous_qco.metric}")
+    if not merged.get("metrics") and previous_qco.metrics:
+        merged["metrics"] = [
+            {"name": m.name, "aggregation": m.aggregation}
+            for m in previous_qco.metrics
+        ]
+        logger.debug(f"Inherited metrics from QCO: {[m.name for m in previous_qco.metrics]}")
 
     # -------------------------------------------------------------------------
-    # RULE 3: time_range — inherit if missing
+    # RULE 3: time — inherit resolved dates if new intent has no time block
+    # Maps the QCO's concrete start/end dates back into the TimeSpec format
+    # so the normalizer can process it correctly.
     # -------------------------------------------------------------------------
-    if not merged.get("time_range") and previous_qco.time_range:
-        merged["time_range"] = {
+    if not merged.get("time") and previous_qco.time_range:
+        merged["time"] = {
+            "dimension": previous_qco.time_dimension or "invoice_date",
             "window": None,
             "start_date": previous_qco.time_range.start_date,
             "end_date": previous_qco.time_range.end_date,
+            "granularity": previous_qco.time_granularity,  # keep granularity if it was set
         }
-        logger.debug(f"Inherited time_range: {previous_qco.time_range.start_date} to {previous_qco.time_range.end_date}")
+        logger.debug(
+            f"Inherited time: {previous_qco.time_range.start_date} -> "
+            f"{previous_qco.time_range.end_date}, "
+            f"granularity={previous_qco.time_granularity}"
+        )
 
     # -------------------------------------------------------------------------
-    # RULE 4: time_dimension — inherit dimension and granularity if missing
-    # -------------------------------------------------------------------------
-    if not merged.get("time_dimension") and (previous_qco.time_dimension or previous_qco.time_granularity):
-        # Only inherit if the intent type benefits from it (trend, comparison)
-        intent_type = merged.get("intent_type", "")
-        if intent_type in ("trend", "comparison"):
-            # Use stored time dimension, fallback to invoice_date if not available
-            dimension = previous_qco.time_dimension or "invoice_date"
-            merged["time_dimension"] = {
-                "dimension": dimension,
-                "granularity": previous_qco.time_granularity or "day",
-            }
-            logger.debug(f"Inherited time_dimension: {dimension} @ {previous_qco.time_granularity}")
-
-    # -------------------------------------------------------------------------
-    # RULE 5: filters — additive merge
+    # RULE 4: filters — additive merge
     #   - New filters override previous filters on the same dimension
     #   - Previous filters on OTHER dimensions are inherited
     # -------------------------------------------------------------------------
@@ -112,24 +110,45 @@ def merge_intent(
             merged["filters"] = new_filters
 
     # -------------------------------------------------------------------------
-    # RULE 6: group_by — DO NOT inherit (explicit change is the whole point)
-    # If user says "show by brand" we want ONLY brand, not brand + previous dims
+    # RULE 5: group_by — hierarchy-aware
+    # Drill mutation is applied BEFORE this merger (Step 2.5 in orchestrator).
+    # If drill already set group_by → use it as-is.
+    #
+    # BUG-07 FIX: distinguish "key absent" (inherit) from "key explicitly null"
+    # (user wants no grouping, e.g. "just show me total sales").
     # -------------------------------------------------------------------------
-    # group_by is NOT inherited — this is intentional.
+    if "group_by" not in new_intent and previous_qco.group_by:
+        # Key was absent from the LLM output — inherit for continuation queries
+        merged["group_by"] = list(previous_qco.group_by)
+        logger.debug(f"Inherited group_by: {previous_qco.group_by}")
+    elif "group_by" in new_intent and not new_intent["group_by"]:
+        # Key is present but null/empty — user explicitly wants no grouping; respect it
+        logger.debug("group_by explicitly null in new intent — not inheriting from QCO")
 
     # -------------------------------------------------------------------------
-    # RULE 7: visualization_type — inherit if missing
+    # RULE 6: visualization_type — inherit if missing
     # -------------------------------------------------------------------------
     if not merged.get("visualization_type") and previous_qco.visualization_type:
         merged["visualization_type"] = previous_qco.visualization_type
         logger.debug(f"Inherited visualization_type: {previous_qco.visualization_type}")
 
     # -------------------------------------------------------------------------
-    # RULE 8: limit — inherit if missing
+    # RULE 7: ranking limit — inherit if new intent has no ranking configured
+    # Injects limit back into post_processing.ranking so the query builder
+    # applies the same top-N constraint for follow-up scoping queries.
     # -------------------------------------------------------------------------
-    if merged.get("limit") is None and previous_qco.limit is not None:
-        merged["limit"] = previous_qco.limit
-        logger.debug(f"Inherited limit: {previous_qco.limit}")
+    if previous_qco.limit is not None:
+        pp = merged.get("post_processing") or {}
+        ranking = pp.get("ranking") or {}
+        # Only inherit if the new intent did NOT set its own ranking
+        if not ranking.get("enabled"):
+            pp["ranking"] = {
+                "enabled": True,
+                "order": ranking.get("order", "desc"),
+                "limit": previous_qco.limit,
+            }
+            merged["post_processing"] = pp
+            logger.debug(f"Inherited ranking limit: {previous_qco.limit}")
 
     logger.info(f"Merge complete: {merged}")
     return merged

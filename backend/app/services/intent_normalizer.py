@@ -1,17 +1,28 @@
 # app/services/intent_normalizer.py
 import copy
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# TREND KEYWORD CONSTANTS
+# ---------------------------------------------------------------------------
+
+TREND_KEYWORDS: frozenset[str] = frozenset({
+    "trend", "trending", "trended", "trajectory", "progression",
+    "over time", "week by week", "month by month", "day by day",
+    "daily", "weekly", "monthly", "quarterly", "yearly",
+    "how has", "how have", "how did",                  # e.g. "how has X trended"
+})
+
 # =============================================================================
-# METRIC NORMALIZATION
+# METRIC MAP
+# semantic name → {scope: cube_id}
 # =============================================================================
 
 METRIC_MAP = {
-    # --------------------
-    # COUNT METRICS
-    # --------------------
+    # Count
     "transaction_count": {
         "PRIMARY": "fact_primary_sales.count",
         "SECONDARY": "fact_secondary_sales.count",
@@ -21,18 +32,8 @@ METRIC_MAP = {
         "SECONDARY": "fact_secondary_sales.count",
     },
 
-    # --------------------
-    # VOLUME METRICS
-    # --------------------
+    # Volume
     "billed_qty": {
-        "PRIMARY": "fact_primary_sales.billed_qty",
-        "SECONDARY": "fact_secondary_sales.billed_qty",
-    },
-    "volume_qty": {  # Legacy alias
-        "PRIMARY": "fact_primary_sales.billed_qty",
-        "SECONDARY": "fact_secondary_sales.billed_qty",
-    },
-    "quantity": {  # Natural language alias
         "PRIMARY": "fact_primary_sales.billed_qty",
         "SECONDARY": "fact_secondary_sales.billed_qty",
     },
@@ -45,14 +46,8 @@ METRIC_MAP = {
         "SECONDARY": "fact_secondary_sales.billed_weight",
     },
 
-    # --------------------
-    # VALUE METRICS
-    # --------------------
+    # Value
     "net_value": {
-        "PRIMARY": "fact_primary_sales.net_value",
-        "SECONDARY": "fact_secondary_sales.net_value",
-    },
-    "net_sales_value": {  # Legacy alias
         "PRIMARY": "fact_primary_sales.net_value",
         "SECONDARY": "fact_secondary_sales.net_value",
     },
@@ -60,30 +55,20 @@ METRIC_MAP = {
         "PRIMARY": "fact_primary_sales.gross_value",
         "SECONDARY": "fact_secondary_sales.gross_value",
     },
-    "gross_sales_value": {  # Legacy alias
-        "PRIMARY": "fact_primary_sales.gross_value",
-        "SECONDARY": "fact_secondary_sales.gross_value",
-    },
     "tax_value": {
-        "PRIMARY": "fact_primary_sales.tax_value",
-        "SECONDARY": "fact_secondary_sales.tax_value",
-    },
-    "tax_amount": {  # Legacy alias
         "PRIMARY": "fact_primary_sales.tax_value",
         "SECONDARY": "fact_secondary_sales.tax_value",
     },
 }
 
 
-
 # =============================================================================
-# DIMENSION NORMALIZATION
+# DIMENSION MAP
+# semantic name → cube_id (str) or {scope: cube_id}
 # =============================================================================
 
 DIMENSION_MAP = {
-    # --------------------
-    # GEOGRAPHY (embedded in fact tables)
-    # --------------------
+    # Geography
     "city": {
         "PRIMARY": "fact_primary_sales.city",
         "SECONDARY": "fact_secondary_sales.city",
@@ -96,18 +81,8 @@ DIMENSION_MAP = {
         "PRIMARY": "fact_primary_sales.zone",
         "SECONDARY": "fact_secondary_sales.zone",
     },
-    "territory": {  # Natural language alias for zone
-        "PRIMARY": "fact_primary_sales.zone",
-        "SECONDARY": "fact_secondary_sales.zone",
-    },
-    "region": {  # Natural language alias for zone
-        "PRIMARY": "fact_primary_sales.zone",
-        "SECONDARY": "fact_secondary_sales.zone",
-    },
 
-    # --------------------
-    # PARTNER / DISTRIBUTOR
-    # --------------------
+    # Distributor
     "distributor_code": {
         "PRIMARY": "fact_primary_sales.distributor_code",
         "SECONDARY": "fact_secondary_sales.distributor_code",
@@ -116,30 +91,22 @@ DIMENSION_MAP = {
         "PRIMARY": "fact_primary_sales.distributor_name",
         "SECONDARY": "fact_secondary_sales.distributor_name",
     },
-    "distributor": {  # Natural language alias
-        "PRIMARY": "fact_primary_sales.distributor_name",
-        "SECONDARY": "fact_secondary_sales.distributor_name",
-    },
+
+    # Retailer (secondary only)
     "retailer_code": "fact_secondary_sales.retailer_code",
     "retailer_name": "fact_secondary_sales.retailer_name",
-    "retailer": "fact_secondary_sales.retailer_name",  # Natural language alias
     "retailer_type": "fact_secondary_sales.retailer_type",
+
+    # Warehouse (primary only)
     "companywh_code": "fact_primary_sales.companywh_code",
     "companywh_name": "fact_primary_sales.companywh_name",
-    "warehouse": "fact_primary_sales.companywh_name",  # Natural language alias
 
-    # --------------------
-    # PRODUCT
-    # --------------------
+    # Product
     "sku_code": {
         "PRIMARY": "fact_primary_sales.sku_code",
         "SECONDARY": "fact_secondary_sales.sku_code",
     },
     "product_desc": {
-        "PRIMARY": "fact_primary_sales.product_desc",
-        "SECONDARY": "fact_secondary_sales.product_desc",
-    },
-    "product": {  # Natural language alias
         "PRIMARY": "fact_primary_sales.product_desc",
         "SECONDARY": "fact_secondary_sales.product_desc",
     },
@@ -160,17 +127,10 @@ DIMENSION_MAP = {
         "SECONDARY": "fact_secondary_sales.pack_size",
     },
 
-    # --------------------
-    # SALES HIERARCHY
-    # --------------------
+    # Sales hierarchy
     "salesrep_code": "fact_secondary_sales.salesrep_code",
     "salesrep_name": "fact_secondary_sales.salesrep_name",
-    "sales_rep": "fact_secondary_sales.salesrep_name",  # Natural language alias
     "so_name": {
-        "PRIMARY": "fact_primary_sales.so_name",
-        "SECONDARY": "fact_secondary_sales.so_name",
-    },
-    "sales_officer": {  # Natural language alias
         "PRIMARY": "fact_primary_sales.so_name",
         "SECONDARY": "fact_secondary_sales.so_name",
     },
@@ -178,48 +138,33 @@ DIMENSION_MAP = {
         "PRIMARY": "fact_primary_sales.asm_name",
         "SECONDARY": "fact_secondary_sales.asm_name",
     },
-    "area_manager": {  # Natural language alias
-        "PRIMARY": "fact_primary_sales.asm_name",
-        "SECONDARY": "fact_secondary_sales.asm_name",
-    },
     "zsm_name": {
         "PRIMARY": "fact_primary_sales.zsm_name",
         "SECONDARY": "fact_secondary_sales.zsm_name",
     },
-    "zonal_manager": {  # Natural language alias
-        "PRIMARY": "fact_primary_sales.zsm_name",
-        "SECONDARY": "fact_secondary_sales.zsm_name",
-    },
 
-    # --------------------
-    # ROUTE
-    # --------------------
+    # Route (secondary only)
     "route_code": "fact_secondary_sales.route_code",
     "route_name": "fact_secondary_sales.route_name",
-    "route": "fact_secondary_sales.route_name",  # Natural language alias
 
-    # --------------------
-    # INVOICE
-    # --------------------
+    # Invoice
     "invoice_id": {
-        "PRIMARY": "fact_primary_sales.invoice_id",
-        "SECONDARY": "fact_secondary_sales.invoice_id",
-    },
-    "invoice_number": {  # Legacy alias
         "PRIMARY": "fact_primary_sales.invoice_id",
         "SECONDARY": "fact_secondary_sales.invoice_id",
     },
 }
 
+
 # =============================================================================
-# TIME DIMENSION NORMALIZATION
+# TIME DIMENSION MAP
+# semantic name → {scope: cube_id}
 # =============================================================================
 
 TIME_DIMENSION_MAP = {
     "invoice_date": {
         "PRIMARY": "fact_primary_sales.invoice_date",
         "SECONDARY": "fact_secondary_sales.invoice_date",
-    }
+    },
 }
 
 
@@ -231,32 +176,49 @@ def normalize_intent(raw_intent: dict) -> dict:
     """
     Normalize semantic intent fields into Cube catalog IDs.
 
-    Input  : raw intent dict (LLM output)
+    Input  : raw intent dict (LLM output, semantic names)
     Output : normalized intent dict (cube.field everywhere)
 
-    This function MUST run before validation.
+    MUST run before validation.
     """
-
     logger.info("Normalizing intent")
 
     intent = copy.deepcopy(raw_intent)
+    scope = intent.get("sales_scope", "SECONDARY")
 
     # -------------------------------------------------------------------------
-    # Metric
+    # Metric — legacy single-string field
     # -------------------------------------------------------------------------
     metric = intent.get("metric")
     if metric in METRIC_MAP:
-        intent["metric"] = resolve_metric(metric, intent["sales_scope"])
+        intent["metric"] = resolve_metric(metric, scope)
+
+    # -------------------------------------------------------------------------
+    # Metrics — supports both string array ["net_value"] and object array [{"name": "net_value"}]
+    # -------------------------------------------------------------------------
+    metrics = intent.get("metrics")
+    if metrics and isinstance(metrics, list):
+        normalised = []
+        for m in metrics:
+            if isinstance(m, str):
+                # Plain string form: resolve directly, wrap in dict
+                resolved = resolve_metric(m, scope) if m in METRIC_MAP else m
+                normalised.append({"name": resolved})
+            elif isinstance(m, dict):
+                name = m.get("name")
+                if name in METRIC_MAP:
+                    m["name"] = resolve_metric(name, scope)
+                normalised.append(m)
+        intent["metrics"] = normalised
 
     # -------------------------------------------------------------------------
     # Group by
     # -------------------------------------------------------------------------
     if intent.get("group_by"):
         intent["group_by"] = [
-            resolve_dimension(dim, intent["sales_scope"])
+            resolve_dimension(dim, scope)
             for dim in intent["group_by"]
         ]
-        # validate_group_by(intent["group_by"], intent["sales_scope"])
 
     # -------------------------------------------------------------------------
     # Filters
@@ -266,44 +228,96 @@ def normalize_intent(raw_intent: dict) -> dict:
             if isinstance(f, dict):
                 dim = f.get("dimension")
                 if dim in DIMENSION_MAP:
-                    f["dimension"] = resolve_dimension(dim, intent["sales_scope"])
+                    f["dimension"] = resolve_dimension(dim, scope)
             else:
                 dim = getattr(f, "dimension", None)
-                if dim in DIMENSION_MAP:
-                    f.dimension = resolve_dimension(dim, intent["sales_scope"])
+                if dim and dim in DIMENSION_MAP:
+                    f.dimension = resolve_dimension(dim, scope)
 
     # -------------------------------------------------------------------------
-    # Time dimension
+    # Time — new unified TimeSpec field {dimension, granularity, window, ...}
     # -------------------------------------------------------------------------
-        
-    time_range = intent.get("time_range")
+    time_spec = intent.get("time")
+    if time_spec and isinstance(time_spec, dict):
+        dim = time_spec.get("dimension")
+        if dim in TIME_DIMENSION_MAP:
+            time_spec["dimension"] = resolve_time_dimension(dim, scope)
+        elif not dim:
+            # LLM omitted dimension — inject default
+            time_spec["dimension"] = resolve_time_dimension("invoice_date", scope)
+
+    # -------------------------------------------------------------------------
+    # Time dimension — legacy separate field
+    # -------------------------------------------------------------------------
     time_dimension = intent.get("time_dimension")
-
-    # Case 1: time_dimension explicitly provided → resolve it
     if time_dimension:
         if isinstance(time_dimension, dict):
             dim = time_dimension.get("dimension")
             if dim in TIME_DIMENSION_MAP:
-                time_dimension["dimension"] = resolve_time_dimension(
-                    dim, intent["sales_scope"]
-                )
+                time_dimension["dimension"] = resolve_time_dimension(dim, scope)
         else:
             dim = getattr(time_dimension, "dimension", None)
-            if dim in TIME_DIMENSION_MAP:
-                time_dimension.dimension = resolve_time_dimension(
-                    dim, intent["sales_scope"]
-                )
+            if dim and dim in TIME_DIMENSION_MAP:
+                time_dimension.dimension = resolve_time_dimension(dim, scope)
 
-    # Case 2: time_range exists but time_dimension missing → inject default (filter only)
-    elif time_range and not time_dimension:
-        # Default to invoice_date for filtering, but NO granularity (so no grouping)
-        default_dim = resolve_time_dimension("invoice_date", intent["sales_scope"])
+    # Legacy: time_range without time_dimension → inject default dimension
+    time_range = intent.get("time_range")
+    if time_range and not time_dimension and not time_spec:
         intent["time_dimension"] = {
-            "dimension": default_dim,
-            "granularity": None  # Explicitly None to prevent grouping
+            "dimension": resolve_time_dimension("invoice_date", scope),
+            "granularity": None,
         }
 
     return intent
+
+
+# =============================================================================
+# TREND INTENT PATCHER
+# =============================================================================
+
+def patch_trend_intent(intent: dict, original_query: Optional[str]) -> dict:
+    """
+    Safety net: if the user's query contains trend language but the LLM
+    did not set time.granularity, inject a sensible FMCG default ("week").
+
+    Called after normalize_intent() but before validate_intent() so the
+    validator sees a fully-formed TREND intent and routes it correctly.
+
+    Args:
+        intent:         The normalized intent dict (will be mutated in-place).
+        original_query: The raw NL query from the user.
+
+    Returns:
+        The (possibly patched) intent dict.
+    """
+    if not original_query:
+        return intent
+
+    query_lower = original_query.lower()
+    has_trend_keyword = any(kw in query_lower for kw in TREND_KEYWORDS)
+
+    if not has_trend_keyword:
+        return intent
+
+    time = intent.get("time")
+    if not isinstance(time, dict):
+        return intent
+
+    if not time.get("granularity"):
+        time["granularity"] = "week"   # sensible default for FMCG daily ops
+        intent["time"] = time
+        logger.info(
+            "[TrendPatcher] Injected granularity='week' — "
+            f"query has trend keyword but LLM omitted granularity. "
+            f"query='{original_query[:80]}'"
+        )
+
+    return intent
+
+
+# =============================================================================
+# RESOLVERS
+# =============================================================================
 
 def resolve_metric(semantic_metric: str, sales_scope: str) -> str:
     try:
@@ -340,7 +354,7 @@ def resolve_time_dimension(semantic_td: str, sales_scope: str) -> str:
 
 
 # =============================================================================
-# CUSTOM EXCEPTIONS
+# EXCEPTIONS
 # =============================================================================
 
 class UnknownMetricError(Exception):

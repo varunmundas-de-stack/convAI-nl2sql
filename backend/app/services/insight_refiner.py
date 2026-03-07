@@ -17,9 +17,16 @@ Data → InsightEngine → InsightResult → InsightRefiner → RefinedInsightRe
 
 import logging
 import json
+import re
 from typing import Any, Optional
 from pathlib import Path
 from pydantic import BaseModel, Field
+
+try:
+    from json_repair import repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:
+    _HAS_JSON_REPAIR = False
 
 from app.services.insight_engine import InsightResult, Insight, Severity, Direction
 from app.services.llm_service import call_claude, count_tokens
@@ -78,8 +85,11 @@ class RefinedInsightResult(BaseModel):
     insights: list[RefinedInsight] = Field(default_factory=list)
     primary_insight: Optional[RefinedInsight] = None
     
-    # New: LLM-added executive summary
+    # LLM-generated narrative (Layer 3)
     executive_summary: Optional[str] = None
+    key_risks: dict[str, str] = Field(default_factory=dict)
+    possible_drivers: dict[str, str] = Field(default_factory=dict)
+    recommendations: dict[str, str] = Field(default_factory=dict)
 
 
 class InsightRefinerError(Exception):
@@ -123,8 +133,11 @@ def refine_insights(
         # Call LLM
         logger.debug(f"Calling LLM for insight refinement (prompt length: {len(prompt)} chars)")
         response = call_claude(prompt)
-        token_count = count_tokens(prompt)
-        logger.debug(f"Token count for insight engine: {token_count}")
+        try:
+            token_count = count_tokens(prompt)
+            logger.info(f"Input token count: {token_count.input_tokens}")
+        except Exception as e:
+            logger.warning(f"Error counting tokens: {e}")
         # Parse response
         raw_text = response.content[0].text
         refinements = _parse_refinements(raw_text)
@@ -152,8 +165,9 @@ def _build_data_summary(insight_result: InsightResult, data: list[dict[str, Any]
     Build a compact summary of data + insights for LLM.
     
     We do NOT pass 1000 raw rows. We pass aggregated statistics.
+    Includes Layer 1 (MetricsFact) and Layer 2 (RuleInsights) for structured LLM input.
     """
-    summary = {
+    summary: dict[str, Any] = {
         "total_rows": insight_result.total_rows,
         "total_value": insight_result.total_value,
         "total_formatted": insight_result.total_formatted,
@@ -162,11 +176,52 @@ def _build_data_summary(insight_result: InsightResult, data: list[dict[str, Any]
         "intent_type": insight_result.intent_type,
         "has_previous_context": insight_result.has_previous_context,
     }
-    
-    # Add sample data points (max 5 rows)
+
+    # Layer 1: structured metrics facts (pure math)
+    if insight_result.metrics_facts:
+        mf = insight_result.metrics_facts
+        summary["metrics_facts"] = {
+            "trend_class": mf.trend_class,
+            "percent_change_latest": mf.percent_change_latest,
+            "percent_change_overall": mf.percent_change_overall,
+            "growth_acceleration": mf.growth_acceleration,
+            "is_accelerating": mf.is_accelerating,
+            "consecutive_growth_periods": mf.consecutive_growth_periods,
+            "consecutive_decline_periods": mf.consecutive_decline_periods,
+            "largest_drop_period": mf.largest_drop_period,
+            "largest_drop_pct": mf.largest_drop_pct,
+            "largest_gain_period": mf.largest_gain_period,
+            "largest_gain_pct": mf.largest_gain_pct,
+            "mean": mf.mean,
+            "std_dev": mf.std_dev,
+            "coefficient_of_variation": mf.coefficient_of_variation,
+            "volatility_flag": mf.volatility_flag,
+            "anomaly_flag": mf.anomaly_flag,
+            "anomaly_periods": mf.anomaly_periods,
+            "top_contributor": mf.top_contributor,
+            "top_contributor_pct": mf.top_contributor_pct,
+            "top3_contributor_pct": mf.top3_contributor_pct,
+            "concentration_flag": mf.concentration_flag,
+        }
+
+    # Layer 2: rule-triggered insights (business logic)
+    if insight_result.rule_insights:
+        summary["rule_insights"] = [
+            {
+                "type": ri.type,
+                "severity": ri.severity.value,
+                "message_key": ri.message_key,
+                "description": ri.description,
+                "context": ri.context,
+                "triggered_by": ri.triggered_by,
+            }
+            for ri in insight_result.rule_insights
+        ]
+
+    # Sample data points (max 5 rows — for grounding)
     if data:
         summary["sample_data"] = data[:5]
-    
+
     return summary
 
 
@@ -188,29 +243,11 @@ def _build_prompt(
     input_data = {
         "query": query,
         "data_summary": data_summary,
-        "insights": [
-            {
-                "label": i.label,
-                "insight_type": i.insight_type.value,
-                "headline": i.headline,
-                "severity": i.severity.value,
-                "confidence": i.confidence,
-                "metric_value": i.metric_value,
-                "metric_formatted": i.metric_formatted,
-                "comparison_value": i.comparison_value,
-                "comparison_formatted": i.comparison_formatted,
-                "change_pct": i.change_pct,
-                "direction": i.direction.value,
-                "dimension": i.dimension,
-                "dimension_value": i.dimension_value,
-            }
-            for i in insight_result.insights
-        ],
         "previous_context": (
             {
                 "metric": previous_qco.metric,
                 "sales_scope": previous_qco.sales_scope,
-                "time_range": previous_qco.time_range,
+                "time_range": previous_qco.time_range.model_dump() if previous_qco.time_range else None,
                 "previous_query": previous_qco.original_query,
             }
             if previous_qco
@@ -230,7 +267,11 @@ def _parse_refinements(raw_text: str) -> dict[str, Any]:
     
     Expected format:
     {
-      "insights": [
+      "executive_summary": "...",
+      "key_risks": ["risk 1", "risk 2"],
+      "possible_drivers": ["driver 1", "driver 2"],
+      "recommendations": ["action 1", "action 2"],
+      "refined_insights": [
         {
           "label": "...",
           "headline": "...",
@@ -238,8 +279,7 @@ def _parse_refinements(raw_text: str) -> dict[str, Any]:
           "confidence": 0.8,
           "context_note": "..."
         }
-      ],
-      "executive_summary": "..."
+      ]
     }
     """
     # Extract JSON from markdown code blocks if present
@@ -256,9 +296,38 @@ def _parse_refinements(raw_text: str) -> dict[str, Any]:
         return json.loads(raw_text)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM refinement response: {e}")
-        logger.debug(f"Raw response: {raw_text}")
+        logger.debug(f"Raw response (first 500 chars): {raw_text[:500]}")
+
+        # Attempt 1: use json-repair library if available
+        if _HAS_JSON_REPAIR:
+            try:
+                repaired = repair_json(raw_text, return_objects=True)
+                if isinstance(repaired, dict):
+                    logger.info("json-repair successfully recovered malformed JSON")
+                    return repaired
+            except Exception as repair_err:
+                logger.warning(f"json-repair also failed: {repair_err}")
+
+        # Attempt 2: manual cleanup of common LLM mistakes
+        try:
+            cleaned = raw_text
+            # Remove trailing commas before closing braces/brackets
+            cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+            # Replace smart quotes with straight quotes
+            cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
         raise InsightRefinerError(f"LLM returned invalid JSON: {e}")
 
+
+def _to_dict(val: Any) -> dict[str, str]:
+    if isinstance(val, dict):
+        return {str(k): str(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return {str(i+1): str(v) for i, v in enumerate(val)}
+    return {}
 
 def _apply_refinements(
     insight_result: InsightResult,
@@ -270,10 +339,10 @@ def _apply_refinements(
     CRITICAL: Only interpretation fields are modified.
     All numeric fields are preserved from the original.
     """
-    # Build refinement map by label
+    # Build refinement map by label — support both old "insights" key and new "refined_insights" key
     refinement_map = {
         r["label"]: r
-        for r in refinements.get("insights", [])
+        for r in (refinements.get("refined_insights") or refinements.get("insights") or [])
     }
     
     # Convert insights to refined format
@@ -317,8 +386,11 @@ def _apply_refinements(
         # Refined insights
         insights=refined_insights,
         
-        # Executive summary (new)
+        # LLM-generated narrative (Layer 3)
         executive_summary=refinements.get("executive_summary"),
+        key_risks=_to_dict(refinements.get("key_risks")),
+        possible_drivers=_to_dict(refinements.get("possible_drivers")),
+        recommendations=_to_dict(refinements.get("recommendations")),
     )
     
     # Set primary insight (highest severity + confidence)

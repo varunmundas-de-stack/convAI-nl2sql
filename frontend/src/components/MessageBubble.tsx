@@ -8,9 +8,11 @@ import ClarificationPrompt from "./ClarificationPrompt";
 interface MessageBubbleProps {
     message: ChatMessage;
     responseData?: ChatResponse;
+    onClarify?: (value: string) => void;
+    isActiveClarification?: boolean;
 }
 
-export default function MessageBubble({ message, responseData }: MessageBubbleProps) {
+export default function MessageBubble({ message, responseData, onClarify, isActiveClarification }: MessageBubbleProps) {
     const isUser = message.role === "user";
     const isSystem = message.role === "system";
 
@@ -26,6 +28,13 @@ export default function MessageBubble({ message, responseData }: MessageBubblePr
 
     const alignClasses = isUser ? "justify-end" : "justify-start";
 
+    const shouldRenderResponseData = !isUser && responseData && (
+        responseData.type === "table" ||
+        responseData.type === "chart" ||
+        (responseData.type === "clarification_required" && isActiveClarification) ||
+        responseData.type === "error"
+    );
+
     return (
         <div className={`flex ${alignClasses} mb-6`}>
             <div className={containerClasses}>
@@ -37,7 +46,7 @@ export default function MessageBubble({ message, responseData }: MessageBubblePr
                 )}
 
                 {/* Response data rendering */}
-                {!isUser && responseData && (
+                {shouldRenderResponseData && (
                     <div className="mt-8 space-y-8"> {/* Ample vertical spacing */}
                         {responseData.type === "table" && <TableRenderer data={responseData} />}
                         {responseData.type === "chart" && (
@@ -46,8 +55,13 @@ export default function MessageBubble({ message, responseData }: MessageBubblePr
                                 refined_insights={responseData.data?.refined_insights}
                             />
                         )}
-                        {responseData.type === "clarification_required" && (
-                            <ClarificationPrompt question={responseData.question} />
+                        {responseData.type === "clarification_required" && isActiveClarification && (
+                            <ClarificationPrompt
+                                question={responseData.question}
+                                allowed_values={responseData.allowed_values}
+                                missing_fields={responseData.missing_fields}
+                                onClarify={onClarify}
+                            />
                         )}
                         {responseData.type === "error" && (
                             <div className="bg-red-50 text-red-800 p-4 rounded-lg border border-red-200">

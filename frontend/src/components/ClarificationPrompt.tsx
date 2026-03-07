@@ -2,9 +2,12 @@
 
 interface ClarificationPromptProps {
     question: string;
+    allowed_values?: string[];
+    missing_fields?: string[];
+    onClarify?: (value: string) => void;
 }
 
-export default function ClarificationPrompt({ question }: ClarificationPromptProps) {
+export default function ClarificationPrompt({ question, allowed_values, missing_fields, onClarify }: ClarificationPromptProps) {
     return (
         <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
             <div className="flex items-start">
@@ -26,6 +29,26 @@ export default function ClarificationPrompt({ question }: ClarificationPromptPro
                         Clarification needed
                     </p>
                     {/* <p className="mt-1 text-sm text-amber-700">{question}</p> */}
+
+                    {allowed_values && allowed_values.length > 0 ? (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                            {allowed_values.map((val: string) => (
+                                <button
+                                    key={val}
+                                    onClick={() => onClarify && onClarify(val)}
+                                    className="bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 px-3 py-1.5 rounded-md text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+                                >
+                                    {val.replace(/_/g, " ")}
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-xs space-y-0.5 mt-2">
+                            <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
+                            <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
+                            <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

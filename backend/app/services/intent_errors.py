@@ -319,11 +319,13 @@ class IntentIncompleteError(IntentValidationError):
         self,
         missing_fields: List[str],
         clarification_message: str,
-        partial_intent: Optional[Dict[str, Any]] = None
+        partial_intent: Optional[Dict[str, Any]] = None,
+        allowed_values: Optional[List[str]] = None
     ):
         self.missing_fields = missing_fields
         self.clarification_message = clarification_message
         self.partial_intent = partial_intent or {}
+        self.allowed_values = allowed_values
         super().__init__(clarification_message)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -335,6 +337,7 @@ class IntentIncompleteError(IntentValidationError):
             "missing_fields": self.missing_fields,
             "clarification_message": self.clarification_message,
             "partial_intent": self.partial_intent,
+            "allowed_values": self.allowed_values,
         }
 
 # ============================================================================

@@ -44,10 +44,12 @@ class CubeQueryBuildError(Exception):
 # =============================================================================
 
 def _build_measures(intent: Intent) -> list[str]:
-    metric = intent.metric
-    if "." not in metric:
-        raise ValueError(f"CubeQueryBuilder received non-normalized metric: {metric}")
-    return [metric]
+    measures: list[str] = []
+    for m in intent.metrics:
+        if "." not in m.name:
+            raise ValueError(f"CubeQueryBuilder received non-normalized metric: {m.name}")
+        measures.append(m.name)
+    return measures
 
 
 def _build_dimensions(intent: Intent) -> list[str] | None:
@@ -90,45 +92,44 @@ def _build_filters(intent: Intent) -> list[dict[str, Any]] | None:
     return filters
 
 def _build_time_dimensions(intent: Intent) -> list[dict[str, Any]] | None:
-    if intent.time_dimension is None and intent.time_range is None:
+    if intent.time is None:
         return None
 
-    td: dict[str, Any] = {}
+    t = intent.time
+    td: dict[str, Any] = {"dimension": t.dimension}
 
-    if intent.time_dimension is not None:
-        td["dimension"] = intent.time_dimension.dimension
-        # Only add granularity if present (grouping)
-        if intent.time_dimension.granularity:
-            td["granularity"] = intent.time_dimension.granularity
-        
-    if intent.time_range is not None:
-        if intent.time_range.window:
-            td["dateRange"] = resolve_time_window(intent.time_range.window)
-        else:
-            td["dateRange"] = [
-                str(intent.time_range.start_date),
-                str(intent.time_range.end_date),
-            ]
+    # Granularity — only set for trend queries
+    if t.granularity:
+        td["granularity"] = t.granularity
 
-    # Ensure we have a dimension field if we have a dateRange
-    if "dateRange" in td and "dimension" not in td:
-        # This shouldn't happen if IntentNormalizer injects the default
-        # But as a failsafe, we could raise or infer
-        raise ValueError("CubeQueryBuilder: Time range specified but no time dimension provided for filtering.")
+    # Date range — named window takes priority over explicit dates
+    if t.window:
+        td["dateRange"] = resolve_time_window(t.window)
+    elif t.start_date and t.end_date:
+        td["dateRange"] = [str(t.start_date), str(t.end_date)]
 
     return [td]
 
 def _build_order(intent: Intent) -> dict[str, str]:
-    metric = intent.metric
-    if "." not in metric:
-        raise ValueError(f"CubeQueryBuilder received non-normalized order metric: {metric}")
-    return {metric: "desc"}
+    # BUG-06 FIX: For time-series queries (granularity set), order by the time
+    # dimension ascending so Cube returns rows in chronological order.
+    if intent.time and intent.time.granularity and intent.time.dimension:
+        return {intent.time.dimension: "asc"}
+
+    # For all other queries: order by the primary metric; direction from ranking spec
+    primary = intent.metrics[0].name
+    if "." not in primary:
+        raise ValueError(f"CubeQueryBuilder received non-normalized order metric: {primary}")
+    ranking = intent.post_processing.ranking if intent.post_processing else None
+    direction = (ranking.order or "desc") if (ranking and ranking.enabled) else "desc"
+    return {primary: direction}
 
 
 def _build_limit(intent: Intent) -> int:
-    """Return the limit from intent, or default if not specified."""
-    if intent.limit is not None:
-        return intent.limit
+    """Return the limit from ranking spec, or default if not specified."""
+    ranking = intent.post_processing.ranking if intent.post_processing else None
+    if ranking and ranking.enabled and ranking.limit is not None:
+        return ranking.limit
     return DEFAULT_LIMIT
 
 
@@ -139,9 +140,6 @@ def _build_limit(intent: Intent) -> int:
 def build_cube_query(intent: Intent) -> dict[str, Any]:
     """
     Build a Cube Query JSON from a validated Intent.
-    
-    This is the ONLY public function in this module.
-    It is a PURE FUNCTION: same input always produces same output.
     
     Args:
         intent: A validated Intent object (NOT a raw dict)
@@ -183,6 +181,66 @@ def build_cube_query(intent: Intent) -> dict[str, Any]:
     return query
 
 
+# =============================================================================
+# PERIOD QUERY BUILDERS
+# =============================================================================
+
+def build_comparison_query(intent: Intent) -> dict[str, Any]:
+    """
+    Build a Cube query for the COMPARISON period (Query B in dual-query strategy).
+
+    Clones the primary query but:
+    - Replaces the time dateRange with the comparison_window
+    - Removes granularity (aggregate over the whole comparison window, not buckets)
+
+    Args:
+        intent: Validated Intent with post_processing.comparison.comparison_window set
+
+    Returns:
+        Cube Query JSON for the comparison period
+    """
+    if (
+        not intent.post_processing
+        or not intent.post_processing.comparison
+        or not intent.post_processing.comparison.comparison_window
+    ):
+        raise CubeQueryBuildError(
+            "build_comparison_query requires post_processing.comparison.comparison_window"
+        )
+
+    comp_window = intent.post_processing.comparison.comparison_window
+    query = build_cube_query(intent)
+
+    # Replace timeDimensions with comparison window (no granularity — aggregate total)
+    if intent.time is not None:
+        query["timeDimensions"] = [{
+            "dimension": intent.time.dimension,
+            "dateRange": resolve_time_window(comp_window),
+        }]
+    else:
+        query.pop("timeDimensions", None)
+
+    return query
+
+
+def build_total_query(intent: Intent) -> dict[str, Any]:
+    """
+    Build an ungrouped total Cube query (for CONTRIBUTION strategy).
+
+    Clones the primary query but removes dimensions (group_by),
+    so Cube returns the grand total across all groups.
+
+    Args:
+        intent: Validated Intent
+
+    Returns:
+        Cube Query JSON without any dimensions
+    """
+    query = build_cube_query(intent)
+    query.pop("dimensions", None)
+    return query
+
+
 # Helper function
 
 def resolve_time_window(window: str) -> list[str]:
@@ -198,12 +256,32 @@ def resolve_time_window(window: str) -> list[str]:
         start = today - timedelta(days=7)
         end = today
 
+    elif window == "last_14_days":
+        start = today - timedelta(days=14)
+        end = today
+
+    elif window == "last_28_days":
+        start = today - timedelta(days=28)
+        end = today
+
     elif window == "last_30_days":
         start = today - timedelta(days=30)
         end = today
 
+    elif window == "last_60_days":
+        start = today - timedelta(days=60)
+        end = today
+
     elif window == "last_90_days":
         start = today - timedelta(days=90)
+        end = today
+
+    elif window == "last_120_days":
+        start = today - timedelta(days=120)
+        end = today
+
+    elif window == "last_180_days":
+        start = today - timedelta(days=180)
         end = today
 
     elif window == "month_to_date":
@@ -225,6 +303,13 @@ def resolve_time_window(window: str) -> list[str]:
         start = last_month_end.replace(day=1)
         end = last_month_end
 
+    elif window == "last_2_months":
+        first_this_month = today.replace(day=1)
+        m1_end = first_this_month - timedelta(days=1)
+        m2_end = m1_end.replace(day=1) - timedelta(days=1)
+        start = m2_end.replace(day=1)
+        end = m1_end
+
     elif window == "last_quarter":
         quarter = (today.month - 1) // 3
         if quarter == 0:
@@ -235,8 +320,25 @@ def resolve_time_window(window: str) -> list[str]:
             start = date(today.year, start_month, 1)
             end = date(today.year, start_month + 3, 1) - timedelta(days=1)
 
+    elif window == "last_2_quarters":
+        quarter = (today.month - 1) // 3
+        if quarter == 0:
+            start = date(today.year - 1, 7, 1)
+            end = date(today.year - 1, 12, 31)
+        elif quarter == 1:
+            start = date(today.year - 1, 10, 1)
+            end = date(today.year, 3, 31)
+        else:
+            start_month = (quarter - 2) * 3 + 1
+            start = date(today.year, start_month, 1)
+            end = date(today.year, start_month + 6, 1) - timedelta(days=1)
+
     elif window == "last_year":
         start = date(today.year - 1, 1, 1)
+        end = date(today.year - 1, 12, 31)
+
+    elif window == "last_2_years":
+        start = date(today.year - 2, 1, 1)
         end = date(today.year - 1, 12, 31)
 
     elif window == "all_time":
@@ -244,6 +346,6 @@ def resolve_time_window(window: str) -> list[str]:
         end = today
 
     else:
-        raise ValueError(f"Unsupported TREND time window: {window}")
+        raise ValueError(f"Unsupported time window: {window!r}")
 
     return [start.isoformat(), end.isoformat()]

@@ -184,10 +184,11 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
             response = call_claude(
                 prompt=prompt
             )
-
-            input_token_count = count_tokens(prompt)
-           
-            logger.info(f"Input token count: {input_token_count.input_tokens}")
+            try:
+                input_token_count = count_tokens(prompt)
+                logger.info(f"Input token count: {input_token_count.input_tokens}")
+            except Exception as e:
+                logger.warning(f"Error counting tokens: {e}")
             
             # Extract text content
             if not response.content:

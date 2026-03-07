@@ -8,7 +8,7 @@ It carries NO query results — only the resolved intent parameters.
 """
 
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -39,6 +39,12 @@ class QCOFilter(BaseModel):
     value: str | List[str]
 
 
+class QCOMetric(BaseModel):
+    """A single metric captured in the QCO (semantic names, not Cube IDs)."""
+    name: str = Field(..., description="Semantic metric name, e.g. 'net_value'")
+    aggregation: str = Field(default="sum", description="Aggregation function, e.g. 'sum', 'count', 'avg'")
+
+
 class QueryContextObject(BaseModel):
     """
     Lightweight structured object capturing the resolved state of the last
@@ -48,15 +54,31 @@ class QueryContextObject(BaseModel):
     by the intent merger to fill in missing fields.
     """
     # Schema version for migration support
-    schema_version: int = Field(default=2, description="QCO schema version for backward compatibility")
-    
+    schema_version: int = Field(default=3, description="QCO schema version for backward compatibility")
+
     # The original natural language query
     original_query: str = Field(..., description="The original NL query that produced this context")
 
     # Core analytical parameters (all using semantic names, not Cube IDs)
     intent_type: str = Field(..., description="e.g. snapshot, trend, ranking, distribution")
     sales_scope: str = Field(..., description="PRIMARY or SECONDARY")
-    metric: str = Field(..., description="Semantic metric name, e.g. 'net_value'")
+
+    # Full metrics list — mirrors the Intent.metrics format (semantic names)
+    metrics: List[QCOMetric] = Field(
+        ...,
+        description="One or more metrics from the previous query, e.g. [{'name': 'net_value', 'aggregation': 'sum'}]",
+        min_length=1,
+    )
+
+    @property
+    def metric(self) -> str:
+        """
+        Backward-compat shim: returns the primary (first) metric name as a string.
+
+        Used by drill_detector and any code that only needs to know the primary
+        metric without caring about aggregation or multi-metric queries.
+        """
+        return self.metrics[0].name if self.metrics else ""
 
     # Dimensions
     group_by: Optional[List[str]] = Field(default=None, description="Semantic dimension names")
@@ -75,6 +97,12 @@ class QueryContextObject(BaseModel):
     # Limit
     limit: Optional[int] = Field(default=None)
 
+    # Hierarchy state
+    active_hierarchies: Optional[Dict[str, str]] = Field(
+        default=None,
+        description='Axis → current active dimension, e.g. {"geography": "zone", "product": "brand"}'
+    )
+
     def to_prompt_context(self) -> str:
         """
         Format QCO as a human-readable context block for LLM prompt injection.
@@ -82,11 +110,16 @@ class QueryContextObject(BaseModel):
         This is deliberately concise — the LLM should understand the previous
         query state without being overwhelmed.
         """
+        # Render metrics as a comma-separated list of "name (aggregation)" entries
+        metrics_str = ", ".join(
+            f"{m.name} ({m.aggregation})" for m in self.metrics
+        )
+
         lines = [
             f"Previous Query: \"{self.original_query}\"",
             f"Previous Intent: {self.intent_type}",
             f"Previous Scope: {self.sales_scope}",
-            f"Previous Metric: {self.metric}",
+            f"Previous Metrics: {metrics_str}",
         ]
 
         if self.group_by:
@@ -113,5 +146,9 @@ class QueryContextObject(BaseModel):
 
         if self.limit:
             lines.append(f"Previous Limit: {self.limit}")
+
+        if self.active_hierarchies:
+            hier_strs = [f"{axis}={dim}" for axis, dim in self.active_hierarchies.items()]
+            lines.append(f"Previous Hierarchies: {', '.join(hier_strs)}")
 
         return "\n".join(lines)

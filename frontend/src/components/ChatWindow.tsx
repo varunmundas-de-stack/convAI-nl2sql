@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
+import { ArrowUp } from "lucide-react";
 import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
@@ -95,6 +96,35 @@ export default function ChatWindow() {
         }
     }
 
+    async function submitClarification(answerValue: string) {
+        if (isLoading || !isBackendAvailable || !pendingClarification || !backendResponse) return;
+
+        // Show friendly message to user
+        const displayValue = answerValue.replace(/_/g, " ");
+        addUserMessage(displayValue);
+
+        setIsLoading(true);
+
+        try {
+            const missingFields = backendResponse.missing_fields || [];
+            const answers = parseClarificationAnswers(answerValue, missingFields);
+
+            const result = await clarify({
+                request_id: backendResponse.request_id,
+                answers: answers,
+            });
+
+            handleResponse(result.response, result.raw);
+        } catch (error) {
+            handleResponse({
+                type: "error",
+                message: error instanceof Error ? error.message : "Unknown error occurred",
+            });
+        } finally {
+            setIsLoading(false);
+        }
+    }
+
     function handleNewConversation() {
         if (confirm("Start a new conversation? This will clear the current chat history.")) {
             resetSession();
@@ -108,11 +138,25 @@ export default function ChatWindow() {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             onSend();
+            // reset height on send
+            requestAnimationFrame(() => {
+                if (e.target instanceof HTMLTextAreaElement) {
+                    e.target.style.height = 'auto';
+                }
+            });
         }
     }
 
+    // console.log("backendResponse in render:", backendResponse);
+
+    const isClarificationWithButtons = Boolean(
+        pendingClarification &&
+        pendingClarification.allowed_values &&
+        pendingClarification.allowed_values.length > 0
+    );
+
     return (
-        <div className="flex flex-col h-screen bg-gray-50">
+        <div className="flex flex-col h-screen bg-white">
             {/* Header */}
             <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -149,80 +193,90 @@ export default function ChatWindow() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-                {messages.length === 0 && (
-                    <div className="flex items-center justify-center h-full">
-                        <div className="text-center text-gray-500">
-                            <p className="text-lg font-medium">Welcome to NL2SQL</p>
-                            <p className="text-sm mt-2">
-                                Ask questions about your data in natural language
-                            </p>
+            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
+                <div className="w-full max-w-5xl flex flex-col h-full">
+                    {messages.length === 0 && (
+                        <div className="flex flex-col items-center justify-center h-full">
+                            <h2 className="text-4xl font-semibold text-gray-800 mb-8 tracking-tight">What do you want to know?</h2>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {messages.map((msg) => (
-                    <MessageBubble key={msg.id} message={msg} responseData={msg.responseData} />
-                ))}
+                    {messages.map((msg) => (
+                        <MessageBubble
+                            key={msg.id}
+                            message={msg}
+                            responseData={msg.responseData}
+                            onClarify={submitClarification}
+                            isActiveClarification={pendingClarification === msg.responseData}
+                        />
+                    ))}
 
-                {isLoading && (
-                    <div className="flex justify-start mb-4">
-                        <div className="bg-gray-100 rounded-lg px-4 py-3">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                    {isLoading && (
+                        <div className="flex justify-start mb-4">
+                            <div className="bg-gray-100 rounded-lg px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                <div ref={messagesEndRef} />
+                    {/* Explicit spacer to ensure scroll clears the floating input box securely */}
+                    <div className="h-24 shrink-0 w-full" />
+                    <div ref={messagesEndRef} />
+                </div>
             </div>
 
-            {/* Input */}
-            <div className="bg-white border-t border-gray-200 px-6 py-4">
-                {!isBackendAvailable && (
-                    <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
-                        Backend is unavailable. Please check your connection.
-                    </div>
-                )}
-
-                {pendingClarification && backendResponse && (
-                    <div className="mb-3 bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-lg text-sm space-y-1">
-                        <div>
-                            <strong>Clarification needed:</strong> {backendResponse.missing_fields?.join(", ")}
-                        </div>
-                        <div className="text-xs space-y-0.5">
-                            <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
-                            <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
-                            <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
-                        </div>
-                    </div>
-                )}
-
-                <div className="flex gap-3">
-                    <textarea
-                        className="flex-1 border border-gray-300 text-black rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        rows={2}
-                        placeholder={
-                            isBackendAvailable
-                                ? "Type your question... (Enter to send, Shift+Enter for new line)"
-                                : "Backend unavailable..."
-                        }
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        disabled={!isBackendAvailable || isLoading}
-                    />
-                    <button
-                        onClick={onSend}
-                        disabled={!isBackendAvailable || isLoading || !input.trim()}
-                        className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                    >
-                        Send
-                    </button>
-                </div>
+            {/* Floating Input */}
+            <div
+                className={`
+                    fixed bottom-6 left-1/2 -translate-x-1/2
+                    flex items-end gap-2
+                    w-[calc(100%-2rem)] max-w-3xl
+                    bg-white border rounded-2xl px-4 py-2.5
+                    shadow-[0_2px_12px_rgba(0,0,0,0.08)]
+                    transition-all duration-150
+                    ${!isBackendAvailable
+                        ? 'border-red-200'
+                        : isClarificationWithButtons || isLoading
+                            ? 'border-gray-200'
+                            : 'border-gray-300 focus-within:border-gray-400 focus-within:shadow-[0_2px_16px_rgba(0,0,0,0.12)]'
+                    }
+                `}
+            >
+                <textarea
+                    className="flex-1 max-h-[160px] outline-none border-none resize-none bg-transparent text-gray-900 text-sm leading-relaxed placeholder:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed overflow-y-auto"
+                    rows={1}
+                    style={{ minHeight: '24px' }}
+                    placeholder={
+                        !isBackendAvailable
+                            ? "Backend unavailable..."
+                            : isClarificationWithButtons
+                                ? "Select an option above..."
+                                : "Ask anything..."
+                    }
+                    value={input}
+                    onChange={(e) => {
+                        setInput(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = e.target.scrollHeight + 'px';
+                    }}
+                    onKeyDown={handleKeyDown}
+                    disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
+                />
+                <button
+                    onClick={() => {
+                        onSend();
+                        const ta = document.querySelector('textarea');
+                        if (ta) ta.style.height = 'auto';
+                    }}
+                    disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
+                    className="shrink-0 p-1.5 rounded-full flex items-center justify-center text-white bg-black hover:bg-gray-800 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                    <ArrowUp size={15} strokeWidth={2.5} />
+                </button>
             </div>
         </div>
     );

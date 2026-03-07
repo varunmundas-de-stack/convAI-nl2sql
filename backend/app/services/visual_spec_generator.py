@@ -29,179 +29,35 @@ TABLE_THRESHOLD = 20
 AXIS_TICK_COUNT = 5  # Target number of ticks for numeric axes
 
 
-# =============================================================================
-# SPEC TYPES
-# =============================================================================
-
-class ChartType(str, Enum):
-    BAR = "bar"
-    LINE = "line"
-    PIE = "pie"
-    NUMBER_CARD = "number_card"
-    TABLE = "table"
-    STACKED_BAR = "stacked_bar"
-    HORIZONTAL_BAR = "horizontal_bar"
-
-
-class EmphasisLevel(str, Enum):
-    NONE = "none"
-    SUBTLE = "subtle"       # Slightly highlighted
-    STRONG = "strong"       # Clearly highlighted
-    CRITICAL = "critical"   # Demands attention
-
-
-class MarkerType(str, Enum):
-    OUTLIER = "outlier"
-    TREND_LINE = "trend_line"
-    THRESHOLD = "threshold"
-    ANNOTATION = "annotation"
-    PEAK = "peak"
-    TROUGH = "trough"
-
-
-class ColorPalette:
-    """Standard color palette for visuals."""
-    PRIMARY = "#3b82f6"     # Blue
-    POSITIVE = "#10b981"    # Green
-    NEGATIVE = "#ef4444"    # Red
-    WARNING = "#f59e0b"     # Amber
-    MUTED = "#94a3b8"       # Slate
-    NEUTRAL = "#64748b"     # Gray
-
-
-# =============================================================================
-# SPEC MODELS
-# =============================================================================
-
-
-class DataSeries(BaseModel):
-    """A single data series to be plotted."""
-    label: str
-    values: list[Any]
-    emphasis: EmphasisLevel = EmphasisLevel.NONE
-    color_hint: Optional[str] = None  # Semantic hint: "positive", "negative", "primary", "muted"
-    point_emphasis: Optional[list[EmphasisLevel]] = None
-    point_colors: Optional[list[Optional[str]]] = None  # Per-point color mapping (e.g., ["#ff0000", "#00ff00"])
-
-
-class Axis(BaseModel):
-    """
-    Axis specification.
-    
-    The 'values' field contains:
-    - For categorical/time axes: Explicit tick labels (e.g., ["Jan", "Feb", "Mar"])
-    - For numeric/linear axes: Computed tick positions (e.g., [0, 500, 1000, 1500, 2000])
-    
-    Note: For numeric axes, values are TICK POSITIONS, not the data itself.
-    The actual data points are in series.values.
-    
-    Example:
-        Data points: [2100, 2500, 2800]
-        axis.values: [0, 500, 1000, 1500, 2000, 2500, 3000] (nice round numbers)
-        series.values: [2100, 2500, 2800] (actual data)
-    """
-    label: str
-    values: Optional[list[Any]] = None  # Categorical labels OR numeric tick positions
-    format: Optional[str] = None  # "number", "currency", "percent", "date"
-    axis_type: Optional[str] = None  # "time", "categorical", "linear" - helps frontend choose scale
-
-
-class Marker(BaseModel):
-    """An annotation or marker on the chart."""
-    marker_type: MarkerType
-    label: str
-    position: Optional[Any] = None     # x-value, index, or category
-    value: Optional[float] = None      # y-value
-    emphasis: EmphasisLevel = EmphasisLevel.SUBTLE
-
-
-class InsightAnnotation(BaseModel):
-    """A machine-readable insight annotation for the visual."""
-    text: str
-    severity: Severity
-    direction: Optional[Direction] = None
-    position: Optional[str] = None  # "header", "footer", "inline", "tooltip"
-
-
-class VisualSpec(BaseModel):
-    """
-    Complete declarative visual specification.
-    
-    This is the contract between backend intelligence and frontend rendering.
-    The frontend receives this and decides HOW to render it.
-    """
-    # What to draw
-    chart_type: ChartType
-    
-    # Data
-    x_axis: Optional[Axis] = None
-    y_axis: Optional[Axis] = None
-    series: list[DataSeries] = Field(default_factory=list)
-    
-    # For number cards
-    primary_value: Optional[str] = None
-    primary_label: Optional[str] = None
-    secondary_value: Optional[str] = None
-    secondary_label: Optional[str] = None
-    direction: Optional[Direction] = None
-    
-    # For tables
-    columns: Optional[list[str]] = None
-    rows: Optional[list[dict[str, Any]]] = None
-    
-    # Annotations from insights
-    title: str = ""
-    subtitle: Optional[str] = None
-    annotations: list[InsightAnnotation] = Field(default_factory=list)
-    markers: list[Marker] = Field(default_factory=list)
-    
-    # Metadata
-    total_rows: int = 0
-    metric: Optional[str] = None
-    empty: bool = False
-    trend_slope: Optional[float] = None  # For trend visuals: normalized slope percentage
-
-
-
-
+from app.models.visual_spec import (
+    ChartType, EmphasisLevel, MarkerType, ColorPalette, 
+    DataSeries, SeriesConfig, PivotConfig, Axis, Marker, 
+    InsightAnnotation, VisualSpec
+)
 
 # =============================================================================
 # GENERATOR
 # =============================================================================
 
+from app.services.pivot_utils import pivot_rows, merge_dual_query, strip_cube_prefix
+
 def generate_visual_spec(
     data: list[dict[str, Any]],
-    insights: InsightResult,  # InsightResult or RefinedInsightResult (duck-typed for compatibility)
+    insights: InsightResult,
     chart_type_hint: Optional[str] = None,
     query: Optional[str] = None,
+    comparison_data: Optional[list[dict[str, Any]]] = None,
+    strategy: Optional[str] = None,
+    intent: Optional[Any] = None,
 ) -> VisualSpec:
     """
-    Generate a declarative visual specification.
-    
-    This is the ONLY public function.
-    
-    Args:
-        data: Raw query result rows
-        insights: InsightResult or RefinedInsightResult from insight engine/refiner
-        chart_type_hint: Suggested chart type from intent (e.g., "bar_chart", "line_chart", "pie_chart", 
-                        "number_card", "table", "horizontal_bar_chart", "stacked_bar_chart"). Can be overridden.
-        query: Original NL query for title generation. If None, title will be generated from metric/dimensions.
-        
-    Returns:
-        VisualSpec — declarative spec for the frontend to render
-        
-    Raises:
-        Exception: If spec generation fails critically (logged but not raised for non-fatal errors)
+    Generate a declarative visual specification based on query strategy.
     """
-    logger.info(f"Generating visual spec: {len(data)} rows, hint={chart_type_hint}")
+    logger.info(f"Generating visual spec: {len(data)} rows, strategy={strategy}")
     
-    # Resolve chart type
-    chart_type = _resolve_chart_type(chart_type_hint, insights, data)
-    
-    # Handle empty data
     if not data:
         return VisualSpec(
-            chart_type=chart_type,
+            chart_type=ChartType.NUMBER_CARD,
             title=_make_title(query, insights),
             empty=True,
             total_rows=0,
@@ -212,73 +68,192 @@ def generate_visual_spec(
                 position="header",
             )],
         )
+
+    group_by = insights.dimensions or []
+    metric = insights.metric or ""
+    metric_clean = strip_cube_prefix(metric)
     
-    # Dispatch to type-specific builder
+    # Resolve time_dim from intent — prefer explicit intent.time.dimension, then
+    # fall back to a full row-key scan for granularity-suffixed Cube keys such as
+    # "invoice_date.week".  This runs for ALL strategies so that the SINGLE_QUERY
+    # fallback can also promote a trend query to a LINE chart.
+    time_dim = None
+    sample_row = data[0] if data else {}
+
+    if intent and hasattr(intent, "time") and intent.time and intent.time.dimension:
+        time_dim_base = intent.time.dimension
+        # Prefer exact granularity-suffixed key (e.g. invoice_date.week)
+        for row_key in sample_row.keys():
+            if row_key.startswith(time_dim_base + ".") or row_key == time_dim_base:
+                time_dim = row_key
+                break
+    elif intent and isinstance(intent, dict) and intent.get("time"):
+        time_dim_base = intent["time"].get("dimension")
+        if time_dim_base:
+            for row_key in sample_row.keys():
+                if row_key.startswith(time_dim_base + ".") or row_key == time_dim_base:
+                    time_dim = row_key
+                    break
+
+    # If still not resolved, do a pass-2 scan for any granularity-suffixed key
+    # (covers cases where intent.time is missing but data clearly has a time column)
+    if not time_dim and sample_row:
+        _GRANULARITY_SUFFIXES_SET = {"day", "week", "month", "quarter", "year"}
+        for row_key in sample_row.keys():
+            parts = row_key.rsplit(".", 1)
+            if len(parts) == 2 and parts[1] in _GRANULARITY_SUFFIXES_SET:
+                time_dim = row_key
+                break
+
+    # Fallback to group_by[0] when strategy explicitly says single_time_series
+    if strategy == "single_time_series" and not time_dim and group_by:
+        time_dim = group_by[0]
+
+    chart_type = ChartType.TABLE
+    pivot_config = None
+    series = []
+    out_data = data
+    x_axis_key = None
+    
+    # NEW PRIORITY ROUTING LOGIC
+    if strategy == "contribution":
+        if len(group_by) == 1:
+            chart_type = ChartType.BAR
+            x_axis_key = group_by[0]
+        elif len(group_by) >= 2:
+            chart_type = ChartType.STACKED_BAR
+            x_axis_key = group_by[0]
+            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
+            pivot_config = PivotConfig(
+                index_dimension=strip_cube_prefix(group_by[0]),
+                stack_dimension=strip_cube_prefix(group_by[1]),
+                stack_keys=stack_keys
+            )
+            out_data = pivoted
+        else:
+            chart_type = ChartType.PIE
+            
+    elif strategy == "dual_query":
+        out_data = merge_dual_query(data, comparison_data or [], group_by, metric)
+        if not group_by:
+            chart_type = ChartType.NUMBER_CARD
+        else:
+            chart_type = ChartType.GROUPED_BAR
+            x_axis_key = group_by[0]
+            series = [
+                SeriesConfig(key=metric_clean, label="Current Period"),
+                SeriesConfig(key=f"{metric_clean}_comparison", label="Previous Period"),
+            ]
+            
+    elif strategy == "single_time_series":
+        if not group_by:
+            chart_type = ChartType.LINE
+            x_axis_key = time_dim
+        else:
+            chart_type = ChartType.MULTI_LINE
+            pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by[0], values=metric)
+            pivot_config = PivotConfig(
+                index_dimension=strip_cube_prefix(time_dim),
+                stack_dimension=strip_cube_prefix(group_by[0]),
+                stack_keys=stack_keys
+            )
+            out_data = pivoted
+            x_axis_key = pivot_config.index_dimension
+            
+    else:  # SINGLE_QUERY (and any unrecognised strategy)
+        if not group_by:
+            # ── Trend detection override ────────────────────────────────────
+            # If the data has a time dimension with ≥2 distinct points, render
+            # as a line chart rather than a flat number card.  This covers the
+            # case where the strategy was not identified as single_time_series
+            # (e.g. period_planner produced a plain SINGLE_QUERY despite the
+            # user asking for a sales trend over the last 30 days).
+            if time_dim and len(data) >= 2:
+                chart_type = ChartType.LINE
+                x_axis_key = time_dim
+                logger.info(
+                    f"SINGLE_QUERY with time_dim='{time_dim}' and {len(data)} rows → "
+                    "promoting chart type to LINE"
+                )
+            else:
+                chart_type = ChartType.NUMBER_CARD
+        elif len(group_by) == 1:
+            # Also detect time-series with a group breakdown
+            if time_dim and time_dim not in group_by and len(data) >= 2:
+                chart_type = ChartType.MULTI_LINE
+                pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by[0], values=metric)
+                pivot_config = PivotConfig(
+                    index_dimension=strip_cube_prefix(time_dim),
+                    stack_dimension=strip_cube_prefix(group_by[0]),
+                    stack_keys=stack_keys
+                )
+                out_data = pivoted
+                x_axis_key = pivot_config.index_dimension
+                logger.info(
+                    f"SINGLE_QUERY with time_dim='{time_dim}' + group_by='{group_by[0]}' → "
+                    "promoting chart type to MULTI_LINE"
+                )
+            else:
+                chart_type = ChartType.BAR
+                x_axis_key = group_by[0]
+        else:
+            chart_type = ChartType.STACKED_BAR
+            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
+            pivot_config = PivotConfig(
+                index_dimension=strip_cube_prefix(group_by[0]),
+                stack_dimension=strip_cube_prefix(group_by[1]),
+                stack_keys=stack_keys
+            )
+            out_data = pivoted
+            x_axis_key = pivot_config.index_dimension
+
+    # Ensure table view logic holds if > 2 raw keys without group_by pivots protecting them
+    if not pivot_config and chart_type not in (ChartType.GROUPED_BAR, ChartType.NUMBER_CARD) and data and len(data[0].keys()) > 2 and len(group_by) > 1:
+        chart_type = ChartType.TABLE
+
+    # Build base visual spec based on specific types
     if chart_type == ChartType.NUMBER_CARD:
-        spec = _build_number_card_spec(data, insights)
+        spec = _build_number_card_spec(out_data, insights)
     elif chart_type == ChartType.TABLE:
-        spec = _build_table_spec(data, insights)
-    elif chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR, ChartType.STACKED_BAR):
-        spec = _build_bar_spec(data, insights, chart_type)
+        spec = _build_table_spec(out_data, insights)
+    elif chart_type in (ChartType.STACKED_BAR, ChartType.GROUPED_BAR, ChartType.MULTI_LINE):
+        spec = VisualSpec(chart_type=chart_type)
+        spec.series = series
+        spec.pivot_config = pivot_config
+        spec.x_axis_key = strip_cube_prefix(x_axis_key) if x_axis_key else None
+        spec.data = out_data
     elif chart_type == ChartType.LINE:
-        spec = _build_line_spec(data, insights)
+        spec = _build_line_spec(out_data, insights)
     elif chart_type == ChartType.PIE:
-        spec = _build_pie_spec(data, insights)
+        spec = _build_pie_spec(out_data, insights)
+    elif chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR):
+        spec = _build_bar_spec(out_data, insights, chart_type)
     else:
-        spec = _build_table_spec(data, insights)
-    
-    # Enrich with insights
+        spec = _build_table_spec(out_data, insights)
+
+    # Always ensure data / x_axis_key are set if available
+    spec.data = out_data if chart_type in (
+        ChartType.STACKED_BAR,
+        ChartType.GROUPED_BAR,
+        ChartType.MULTI_LINE
+    ) else data
+    if x_axis_key and not spec.x_axis_key:
+        spec.x_axis_key = strip_cube_prefix(x_axis_key)
+        
+    if spec.columns is None and data:
+        spec.columns = list(data[0].keys())
+        spec.rows = data
+
+    # Common fields
     spec.title = _make_title(query, insights)
     spec.subtitle = _make_subtitle(insights)
     spec.annotations = _insights_to_annotations(insights)
     spec.markers = _insights_to_markers(insights)
     spec.total_rows = len(data)
-    spec.metric = insights.metric
-    
-    logger.info(f"Visual spec generated: chart_type={chart_type}, {len(spec.annotations)} annotations, {len(spec.markers)} markers")
+    spec.metric = metric_clean
+
+    logger.info(f"Visual spec generated: chart_type={chart_type}, annotations={len(spec.annotations)}")
     return spec
-
-
-# =============================================================================
-# CHART TYPE RESOLUTION
-# =============================================================================
-
-def _resolve_chart_type(hint: Optional[str], insights: InsightResult, data: list) -> ChartType:
-    """Resolve the chart type from hint, intent, and data shape."""
-    
-    # Direct mapping from hint
-    hint_map = {
-        "bar_chart": ChartType.BAR,
-        "line_chart": ChartType.LINE,
-        "pie_chart": ChartType.PIE,
-        "number_card": ChartType.NUMBER_CARD,
-        "table": ChartType.TABLE,
-        "horizontal_bar_chart": ChartType.HORIZONTAL_BAR,
-        "stacked_bar_chart": ChartType.STACKED_BAR,
-    }
-    
-    if hint and hint in hint_map:
-        return hint_map[hint]
-    
-    # Auto-detect from data shape
-    if len(data) == 1 and not insights.dimensions:
-        return ChartType.NUMBER_CARD
-    
-    # Check intent_type safely (may not exist on all insight types)
-    intent_type = getattr(insights, 'intent_type', None)
-    if intent_type == "trend":
-        return ChartType.LINE
-    
-    if intent_type == "distribution":
-        return ChartType.PIE
-    
-    if intent_type == "ranking":
-        return ChartType.HORIZONTAL_BAR
-    
-    if len(data) > TABLE_THRESHOLD:
-        return ChartType.TABLE
-    
-    return ChartType.BAR
 
 
 # =============================================================================
@@ -336,8 +311,10 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     
     # Determine axis type based on dimension
     axis_type = "categorical"
-    if dim_key and any(kw in dim_key.lower() for kw in ["date", "time", "month", "year", "quarter"]):
-        axis_type = "time"
+    if dim_key:
+        dim_key_lower = dim_key.lower()
+        if any(kw in dim_key_lower for kw in ["date", "time", "month", "year", "quarter"]):
+            axis_type = "time"
     
     spec.x_axis = Axis(
         label=_clean_label(dim_key) if dim_key else "Category",
@@ -382,32 +359,132 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     return spec
 
 
+# Granularity names Cube appends to time dimension keys (e.g. invoice_date.week)
+_GRANULARITY_SUFFIXES: dict[str, str] = {
+    "day":     "Day",
+    "week":    "Week",
+    "month":   "Month",
+    "quarter": "Quarter",
+    "year":    "Year",
+}
+
+
+def _resolve_time_dim_key(
+    dim_key: Optional[str],
+    sample_row: dict,
+) -> tuple[Optional[str], str]:
+    """
+    Detect the granularity-suffixed Cube key for a time dimension.
+
+    Cube stores time-bucketed rows under a key like::
+
+        fact_secondary_sales.invoice_date.week
+        fact_secondary_sales.invoice_date.month
+
+    rather than the bare ``invoice_date`` field.  This helper scans the
+    first data row for such a key and returns:
+
+    * the exact dict key to use when extracting x-values
+    * a human-readable axis label ("Week", "Month", …, or "Time" as fallback)
+
+    Two-pass strategy
+    -----------------
+    Pass 1 — expected pattern: look for ``{dim_key}.{granularity}`` in the row.
+    Pass 2 — full-row scan: if dim_key is a group_by dimension (e.g. pack_size)
+             rather than the time dimension, pass 1 finds nothing. Scan every
+             row key for any key ending with a known granularity suffix and use
+             the first match. This covers trend+group_by queries where
+             ``insights.dimensions[0]`` is the group_by field, not the time field.
+    """
+    if not sample_row:
+        return dim_key, "Time"
+
+    # Pass 1: expected pattern using dim_key prefix
+    if dim_key:
+        for suffix, label in _GRANULARITY_SUFFIXES.items():
+            candidate = f"{dim_key}.{suffix}"
+            if candidate in sample_row:
+                return candidate, label
+
+    # Pass 2: full-row scan — finds invoice_date.week regardless of dim_key
+    for key in sample_row:
+        for suffix, label in _GRANULARITY_SUFFIXES.items():
+            if key.endswith(f".{suffix}"):
+                return key, label
+
+    # No granularity suffix present — use the base key, generic label
+    return dim_key, "Time"
+
+def _format_time_label(iso_value: str, granularity_label: str) -> str:
+    """
+    Format a raw Cube ISO timestamp into a granularity-aware display label.
+
+    Cube returns time-bucket keys as full ISO strings regardless of granularity,
+    e.g. ``"2026-01-26T00:00:00.000"`` for a week bucket.  This converts them
+    to the most readable form for the chosen granularity:
+
+    ========= ======================== ==========
+    Granularity  Input                   Output
+    ========= ======================== ==========
+    day        2026-01-26T00:00:00.000  Jan 26
+    week       2026-01-26T00:00:00.000  Jan 26
+    month      2026-02-01T00:00:00.000  Feb '26
+    quarter    2026-01-01T00:00:00.000  Q1 2026
+    year       2026-01-01T00:00:00.000  2026
+    ========= ======================== ==========
+    """
+    from datetime import datetime
+
+    try:
+        # Cube timestamps: "2026-01-26T00:00:00.000" or "2026-01-26T00:00:00"
+        clean = iso_value.split(".")[0]          # strip milliseconds
+        dt = datetime.fromisoformat(clean)
+    except (ValueError, AttributeError):
+        return iso_value  # unknown format — return as-is
+
+    g = granularity_label.lower()
+    if g in ("day", "week"):
+        return dt.strftime("%b %d")              # "Jan 26"
+    elif g == "month":
+        return dt.strftime("%b '%y")             # "Feb '26"
+    elif g == "quarter":
+        q = (dt.month - 1) // 3 + 1
+        return f"Q{q} {dt.year}"                 # "Q1 2026"
+    elif g == "year":
+        return str(dt.year)                       # "2026"
+    else:
+        return dt.strftime("%b %d, %Y")          # fallback
+
+
 def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
     """Build a line chart spec."""
     spec = VisualSpec(chart_type=ChartType.LINE)
-    
+
     metric_key = insights.metric or ""
     dim_key = insights.dimensions[0] if insights.dimensions and len(insights.dimensions) > 0 else None
-    
+
+    # Resolve the exact Cube key (may include granularity suffix, e.g. invoice_date.week)
+    # and derive the human-readable x-axis label from it.
+    sample_row = data[0] if data else {}
+    time_key, x_label = _resolve_time_dim_key(dim_key, sample_row)
+
     x_values = []
     y_values = []
-    
+
     for row in data:
-        x_val = _get_dim_value(row, dim_key) if dim_key else str(len(x_values))
+        x_val = _get_dim_value(row, time_key) if time_key else str(len(x_values))
         y_val = _get_metric_value(row, metric_key)
         x_values.append(x_val)
         y_values.append(y_val)
-    
-    # Determine axis type
-    axis_type = "categorical"
-    if dim_key and any(kw in dim_key.lower() for kw in ["date", "time", "month", "year", "quarter"]):
-        axis_type = "time"
-    
+
+    # Format raw ISO timestamps into granularity-aware display labels
+    x_values = [_format_time_label(v, x_label) for v in x_values]
+
     spec.x_axis = Axis(
-        label=_clean_label(dim_key) if dim_key else "Time",
+        label=x_label,
         values=x_values,
-        format="date" if axis_type == "time" else None,
-        axis_type=axis_type,
+        format="date",
+        axis_type="time",
     )
     spec.y_axis = Axis(
         label=_clean_label(metric_key),
@@ -415,7 +492,7 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
         format="number",
         axis_type="linear",
     )
-    
+
     # Determine color hint and trend slope from trend insight
     color_hint = "primary"
     trend_slope = None
@@ -425,26 +502,23 @@ def _build_line_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
                 color_hint = "positive"
             elif insight.direction == Direction.DOWN:
                 color_hint = "negative"
-            # Extract slope from change_pct
             if insight.change_pct is not None:
                 trend_slope = insight.change_pct
             break
-    
+
     spec.series = [DataSeries(
         label=_clean_label(metric_key),
         values=y_values,
         color_hint=color_hint,
     )]
-    
-    # Add trend slope to spec
+
     if trend_slope is not None:
         spec.trend_slope = trend_slope
-    
-    # Populate primary/secondary values
+
     if insights.total_value is not None:
         spec.primary_value = insights.total_formatted
         spec.primary_label = f"Total {_clean_label(metric_key)}"
-    
+
     return spec
 
 

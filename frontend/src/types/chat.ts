@@ -28,6 +28,8 @@ export type TextResponse = {
 export type ClarificationResponse = {
     type: "clarification_required";
     question: string;
+    allowed_values?: string[];
+    missing_fields?: string[];
 };
 
 export type ErrorResponse = {

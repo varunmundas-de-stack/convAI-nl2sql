@@ -17,9 +17,16 @@ Data → InsightEngine → InsightResult → InsightRefiner → RefinedInsightRe
 
 import logging
 import json
+import re
 from typing import Any, Optional
 from pathlib import Path
 from pydantic import BaseModel, Field
+
+try:
+    from json_repair import repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:
+    _HAS_JSON_REPAIR = False
 
 from app.services.insight_engine import InsightResult, Insight, Severity, Direction
 from app.services.llm_service import call_claude, count_tokens
@@ -80,9 +87,9 @@ class RefinedInsightResult(BaseModel):
     
     # LLM-generated narrative (Layer 3)
     executive_summary: Optional[str] = None
-    key_risks: list[str] = Field(default_factory=list)
-    possible_drivers: list[str] = Field(default_factory=list)
-    recommendations: list[str] = Field(default_factory=list)
+    key_risks: dict[str, str] = Field(default_factory=dict)
+    possible_drivers: dict[str, str] = Field(default_factory=dict)
+    recommendations: dict[str, str] = Field(default_factory=dict)
 
 
 class InsightRefinerError(Exception):
@@ -289,9 +296,38 @@ def _parse_refinements(raw_text: str) -> dict[str, Any]:
         return json.loads(raw_text)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM refinement response: {e}")
-        logger.debug(f"Raw response: {raw_text}")
+        logger.debug(f"Raw response (first 500 chars): {raw_text[:500]}")
+
+        # Attempt 1: use json-repair library if available
+        if _HAS_JSON_REPAIR:
+            try:
+                repaired = repair_json(raw_text, return_objects=True)
+                if isinstance(repaired, dict):
+                    logger.info("json-repair successfully recovered malformed JSON")
+                    return repaired
+            except Exception as repair_err:
+                logger.warning(f"json-repair also failed: {repair_err}")
+
+        # Attempt 2: manual cleanup of common LLM mistakes
+        try:
+            cleaned = raw_text
+            # Remove trailing commas before closing braces/brackets
+            cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+            # Replace smart quotes with straight quotes
+            cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
         raise InsightRefinerError(f"LLM returned invalid JSON: {e}")
 
+
+def _to_dict(val: Any) -> dict[str, str]:
+    if isinstance(val, dict):
+        return {str(k): str(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return {str(i+1): str(v) for i, v in enumerate(val)}
+    return {}
 
 def _apply_refinements(
     insight_result: InsightResult,
@@ -352,9 +388,9 @@ def _apply_refinements(
         
         # LLM-generated narrative (Layer 3)
         executive_summary=refinements.get("executive_summary"),
-        key_risks=refinements.get("key_risks") or [],
-        possible_drivers=refinements.get("possible_drivers") or [],
-        recommendations=refinements.get("recommendations") or [],
+        key_risks=_to_dict(refinements.get("key_risks")),
+        possible_drivers=_to_dict(refinements.get("possible_drivers")),
+        recommendations=_to_dict(refinements.get("recommendations")),
     )
     
     # Set primary insight (highest severity + confidence)

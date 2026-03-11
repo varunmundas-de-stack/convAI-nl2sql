@@ -215,7 +215,6 @@ Changes include:
 * Fix for data insertion bugs
 * Synthetic data variance generation
 * Price reduction and formatting updates
-* Improvements in test datasets used for validation
 
 These updates help improve testing reliability and system evaluation.
 

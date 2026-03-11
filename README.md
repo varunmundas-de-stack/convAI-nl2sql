@@ -144,7 +144,7 @@ docker-compose up -d
 cat cube/data/02_populate_data.sql | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
 ```
 
-## Improvements Since Version 1.1
+## Improvements Since Version 1.1.0
 
 ### 1. Query Orchestration and Pipeline Refactoring
 Significant improvements were made to the internal orchestration pipeline to improve stability and maintainability.

@@ -197,7 +197,7 @@ Enhancements include:
 
 These changes improve the readability and usability of analytics results.
 
-### 5. Logging and Observability Improvements
+### 5. Logging and Observability Improvements (Arize Tracing)
 System observability was strengthened to improve debugging and monitoring.
 
 Updates include:

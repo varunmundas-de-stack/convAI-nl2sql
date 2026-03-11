@@ -308,6 +308,37 @@ class CubeClient:
         
         return CubeResponse.from_cube_response(response_json, request_id)
 
+    def get_sql(self, query: dict[str, Any]) -> str:
+        """
+        Retrieves the raw generated SQL from Cube.js without executing it.
+        """
+        request_id = self._generate_request_id()
+        query = self._enforce_guardrails(query)
+
+        # Point to the /sql endpoint instead of /load
+        url = f"{self.base_url}/sql"
+        headers = self._build_headers(request_id)
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(url, json={"query": query}, headers=headers)
+                response.raise_for_status()
+
+                sql_data = response.json().get("sql", {})
+                if isinstance(sql_data, dict):
+                    sql_string = sql_data.get("sql", "")
+                else: # It might come back differently structured sometimes depending on query format
+                    sql_string = str(sql_data)
+                
+                logger.info(f"[Cube SQL Compiled]\n{sql_string}")
+                return sql_string
+
+        except Exception as e:
+            logger.error(f"[Cube SQL Error] Could not retrieve SQL: {e}")
+            return ""
 
 # =============================================================================
 # CONVENIENCE FUNCTION

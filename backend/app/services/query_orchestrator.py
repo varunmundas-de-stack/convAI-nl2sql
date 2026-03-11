@@ -896,6 +896,9 @@ def _cube_load(
     Execute a single Cube load call. On HTTP error, sets response.error and returns None.
     """
     try:
+        # Fetch and log the compiled SQL query before executing
+        client.get_sql(query)
+        
         result = client.load(query)
         return result
     except CubeHTTPError as e:

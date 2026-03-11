@@ -1,6 +1,6 @@
 # NL2SQL System Documentation
 
-[Improvements Since Version 1.1](#improvements-since-version-11)
+[Improvements Since Version 1.1](#improvements-since-version-110)
 
 ## 1. System Overview
 

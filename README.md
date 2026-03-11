@@ -1,5 +1,7 @@
 # NL2SQL System Documentation
 
+[Improvements Since Version 1.1](#improvements-since-version-11)
+
 ## 1. System Overview
 
 The NL2SQL (Natural Language to SQL) system is a specialized analytics interface designed for the Fast-Moving Consumer Goods (FMCG) sector. It enables non-technical business users to query complex sales data using natural language, abstracting the underlying SQL complexity.
@@ -141,3 +143,101 @@ docker-compose up -d
 # Initialize Database (if not using automatic seeding)
 cat cube/data/02_populate_data.sql | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
 ```
+
+## Improvements Since Version 1.1
+
+### 1. Query Orchestration and Pipeline Refactoring
+Significant improvements were made to the internal orchestration pipeline to improve stability and maintainability.
+
+Key updates include:
+* Refactoring of the Query Coordination Orchestrator (QCO) flow
+* Improved intent modelling and intent validation layers
+* Updated intent JSON format
+* Improved query orchestration handling
+* Added retry logic for LLM calls
+* Updated Cube query builder
+* Improved period strategy layer for time-based queries
+
+These changes streamlined the pipeline and reduced errors in query interpretation and execution.
+
+### 2. Insight Generation Enhancements
+The insight generation module was expanded to produce more structured and user-friendly analytics insights.
+
+Enhancements include:
+* Implementation of three-layer insight generation
+* Addition of risks, drivers, and recommendations insights
+* Layman-friendly insight language formatting
+* Support for lakhs and crores numeric formatting
+* Latency reduction in insight generation pipeline
+
+These improvements make insights more interpretable and relevant for business users.
+
+### 3. Drill-Down and Analytical Capability Improvements
+New analytical capabilities were introduced to support deeper data exploration.
+
+Key additions:
+* Hierarchy-based drill-down functionality
+* Drill detector module for identifying drillable dimensions
+* Pivot configuration support
+* Pivot table constraints and value mapping
+
+These updates allow users to perform deeper analytical exploration of datasets.
+
+### 4. Visualization and UI Improvements
+The frontend visualization layer received multiple improvements to enhance usability and presentation.
+
+Enhancements include:
+* Improved pivot table rendering
+* Added stacked bar chart support
+* Chart-table toggle functionality
+* Chart window design improvements
+* Improved search bar layout
+* Better chart axis and label formatting
+* UI layout refinements (bubble width, padding, column tables)
+
+These changes improve the readability and usability of analytics results.
+
+### 5. Logging and Observability Improvements
+System observability was strengthened to improve debugging and monitoring.
+
+Updates include:
+* Component-level logging
+* Cube client error logging
+* Integration with LLM tracing tools
+* Improved exception handling (token counting and execution errors)
+
+This helps diagnose issues in the NL-to-SQL pipeline more effectively.
+
+### 6. Data Handling and Test Data Quality
+Multiple fixes and improvements were implemented for dataset consistency and test data generation.
+
+Changes include:
+* Fix for data insertion bugs
+* Synthetic data variance generation
+* Price reduction and formatting updates
+* Improvements in test datasets used for validation
+
+These updates help improve testing reliability and system evaluation.
+
+### 7. Bug Fixes and Stability Improvements
+Several bugs affecting query interpretation and visualization were fixed.
+
+Notable fixes:
+* Time dimension handling issues
+* Chart selection bugs
+* Intent upstream issues
+* Clarification query handling issues
+* Granularity and trend patching issues
+* Various QCO pipeline bugs
+
+These fixes improved overall system stability.
+
+### 8. Performance Improvements
+Performance optimizations were introduced across the pipeline.
+
+Key improvements:
+* Insight latency reduction
+* CubeJS caching fixes
+* Pipeline execution optimizations
+
+These changes improved response times for analytical queries.

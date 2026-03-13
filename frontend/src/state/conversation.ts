@@ -3,6 +3,7 @@ import { ChatMessage, ChatResponse } from "@/types/chat";
 
 export interface ConversationMessage extends ChatMessage {
     responseData?: ChatResponse;
+    rawBackendData?: any;  // Raw backend response for RLHF feedback (request_id, prompt_version, etc.)
 }
 
 export function useConversation() {
@@ -17,10 +18,10 @@ export function useConversation() {
         ]);
     }
 
-    function addAssistantMessage(content: string, responseData?: ChatResponse) {
+    function addAssistantMessage(content: string, responseData?: ChatResponse, rawBackendData?: any) {
         setMessages((m) => [
             ...m,
-            { id: crypto.randomUUID(), role: "assistant", content, responseData },
+            { id: crypto.randomUUID(), role: "assistant", content, responseData, rawBackendData },
         ]);
     }
 
@@ -32,7 +33,7 @@ export function useConversation() {
 
         if (response.type === "clarification_required") {
             setPendingClarification(response);
-            addAssistantMessage(response.question, response);
+            addAssistantMessage(response.question, response, rawBackendResponse);
             return;
         }
 
@@ -41,15 +42,15 @@ export function useConversation() {
         setBackendResponse(null);
 
         if (response.type === "text") {
-            addAssistantMessage(response.content, response);
+            addAssistantMessage(response.content, response, rawBackendResponse);
         } else if (response.type === "table") {
             const content = response.explanation || "";
-            addAssistantMessage(content, response);
+            addAssistantMessage(content, response, rawBackendResponse);
         } else if (response.type === "chart") {
             const content = response.explanation || "";
-            addAssistantMessage(content, response);
+            addAssistantMessage(content, response, rawBackendResponse);
         } else if (response.type === "error") {
-            addAssistantMessage(`Error: ${response.message}`, response);
+            addAssistantMessage(`Error: ${response.message}`, response, rawBackendResponse);
         }
     }
 
@@ -68,3 +69,4 @@ export function useConversation() {
         clearMessages,
     };
 }
+

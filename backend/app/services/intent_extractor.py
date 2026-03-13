@@ -308,7 +308,7 @@ def _init_log_db() -> None:
 # PUBLIC INTERFACE
 # =============================================================================
 
-def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None) -> dict[str, Any]:
+def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None) -> dict[str, Any]:
     """
     Extract intent from natural language query.
     
@@ -341,7 +341,16 @@ def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None
     
     try:
         # Load external resources
-        template = _load_prompt_template()
+        if prompt_version:
+            try:
+                from app.rlhf.prompt_manager import get_active_prompt
+                template = get_active_prompt(prompt_version)
+                logger.info(f"Using versioned prompt: {prompt_version}")
+            except Exception as e:
+                logger.warning(f"Failed to load versioned prompt {prompt_version}, falling back to default: {e}")
+                template = _load_prompt_template()
+        else:
+            template = _load_prompt_template()
         # catalog = _load_catalog()
         
         # Build prompt (pure substitution, no logic)

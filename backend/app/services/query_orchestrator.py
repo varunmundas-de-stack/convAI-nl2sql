@@ -153,6 +153,10 @@ class OrchestratorResponse:
     refined_insights: Optional[Any] = None  # RefinedInsightResult from insight refiner
     visual_spec: Optional[Any] = None     # VisualSpec from visual spec generator
     
+    # RLHF tracking
+    prompt_version: Optional[str] = None   # Prompt version used for intent extraction
+    ab_group: Optional[str] = None         # A/B test group ("A" or "B", None if no test)
+    
     
     # Error (None if success)
     error: Optional[OrchestratorError] = None
@@ -205,6 +209,8 @@ class OrchestratorResponse:
             ),
             "error": self.error.to_dict() if self.error else None,
             "request_id": self.request_id,
+            "prompt_version": self.prompt_version,
+            "ab_group": self.ab_group,
         }
         return result
 
@@ -301,6 +307,19 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
                     qco_span.set_status(Status(StatusCode.ERROR, str(e)))
                     qco_span.record_exception(e)
                     logger.warning(f"Failed to load QCO for session {session_id}: {e}")
+        
+        # -------------------------------------------------------------------------
+        # STEP 1.5: Resolve RLHF prompt version via A/B routing
+        # -------------------------------------------------------------------------
+        try:
+            from app.rlhf.prompt_manager import get_ab_version
+            prompt_version, ab_group = get_ab_version(session_id or response.request_id)
+            response.prompt_version = prompt_version
+            response.ab_group = ab_group
+            logger.info(f"RLHF: prompt_version={prompt_version}, ab_group={ab_group}")
+        except Exception as e:
+            logger.warning(f"RLHF version resolution failed (non-fatal): {e}")
+            response.prompt_version = "v1"
         
         # -------------------------------------------------------------------------
         # STEP 2: Extract intent (LLM call, with QCO context)

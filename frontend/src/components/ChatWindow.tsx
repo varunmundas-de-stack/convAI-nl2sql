@@ -206,6 +206,7 @@ export default function ChatWindow() {
                             key={msg.id}
                             message={msg}
                             responseData={msg.responseData}
+                            rawBackendData={msg.rawBackendData}
                             onClarify={submitClarification}
                             isActiveClarification={pendingClarification === msg.responseData}
                         />

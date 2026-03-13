@@ -215,3 +215,24 @@ export async function getCatalogDimensions() {
 export async function getCatalogTimeWindows() {
     return fetch(`${API_BASE}/catalog/time-windows`).then((r) => r.json());
 }
+
+export async function submitFeedback(payload: {
+    request_id: string;
+    query: string;
+    response_summary: string;
+    prompt_version: string;
+    rating: number;
+    ab_group?: string | null;
+    correction?: string | null;
+    full_response?: string | null;
+    sql_query?: string | null;
+}): Promise<void> {
+    const res = await fetch(`${API_BASE}/rlhf/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        throw new Error(`Feedback submission failed: ${res.status}`);
+    }
+}

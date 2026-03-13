@@ -97,6 +97,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Loading catalog from: {CATALOG_PATH}")
     app_state.catalog = CatalogManager(str(CATALOG_PATH))
     
+    # Initialize RLHF database and register v1
+    try:
+        from app.rlhf.db import init_db
+        from app.rlhf.prompt_manager import ensure_v1_registered
+        init_db()
+        ensure_v1_registered()
+        logger.info("RLHF subsystem initialized")
+    except Exception as e:
+        logger.warning(f"RLHF initialization failed (non-fatal): {e}")
+    
     logger.info("NL2SQL API started successfully")
     
     yield
@@ -115,6 +125,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Mount RLHF router
+try:
+    from app.rlhf.router import router as rlhf_router
+    app.include_router(rlhf_router, prefix="/rlhf")
+except Exception as e:
+    logger.warning(f"RLHF router mount failed (non-fatal): {e}")
 
 # CORS middleware
 app.add_middleware(

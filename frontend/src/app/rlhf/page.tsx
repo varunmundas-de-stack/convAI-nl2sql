@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
     ArrowLeft,
@@ -208,7 +208,7 @@ export default function RLHFDashboard() {
 
     // Toasts
     const [toasts, setToasts] = useState<Toast[]>([]);
-    const toastId = { current: 0 };
+    const toastId = useRef(0);
 
     function toast(type: Toast["type"], message: string) {
         const id = ++toastId.current;

@@ -27,9 +27,20 @@ def build_meta_prompt(
     """
     Construct a meta-prompt asking Claude to improve the system prompt
     based on chosen/rejected preference pairs.
-
-    Uses full_response + sql_query for richer context.
     """
+    # Escape all braces in the prompt EXCEPT the live placeholders,
+    # so Python's f-string doesn't try to evaluate {sales_scope} etc.
+    known_placeholders = ["{current_date}", "{query}", "{previous_context}"]
+    sentinels = {}
+    escaped_prompt = current_prompt
+    for i, ph in enumerate(known_placeholders):
+        sentinel = f"__PH_{i}__"
+        sentinels[sentinel] = ph
+        escaped_prompt = escaped_prompt.replace(ph, sentinel)
+    escaped_prompt = escaped_prompt.replace("{", "{{").replace("}", "}}")
+    for sentinel, ph in sentinels.items():
+        escaped_prompt = escaped_prompt.replace(sentinel, ph)
+
     pairs_text = ""
     for i, pair in enumerate(preference_pairs, 1):
         chosen = pair["chosen"]
@@ -39,17 +50,17 @@ def build_meta_prompt(
         pairs_text += f"CHOSEN (rating {chosen['rating']}):\n"
         pairs_text += f"  Summary: {chosen['response_summary']}\n"
         if chosen.get("full_response"):
-            pairs_text += f"  Full Response: {chosen['full_response'][:1000]}\n"
+            pairs_text += f"  Full Response: {chosen['full_response']}\n"
         if chosen.get("sql_query"):
-            pairs_text += f"  SQL Query: {chosen['sql_query'][:500]}\n"
+            pairs_text += f"  SQL Query: {chosen['sql_query']}\n"
         if chosen.get("correction"):
             pairs_text += f"  Human Correction: {chosen['correction']}\n"
         pairs_text += f"\nREJECTED (rating {rejected['rating']}):\n"
         pairs_text += f"  Summary: {rejected['response_summary']}\n"
         if rejected.get("full_response"):
-            pairs_text += f"  Full Response: {rejected['full_response'][:1000]}\n"
+            pairs_text += f"  Full Response: {rejected['full_response']}\n"
         if rejected.get("sql_query"):
-            pairs_text += f"  SQL Query: {rejected['sql_query'][:500]}\n"
+            pairs_text += f"  SQL Query: {rejected['sql_query']}\n"
         if rejected.get("correction"):
             pairs_text += f"  Human Correction: {rejected['correction']}\n"
 
@@ -57,7 +68,7 @@ def build_meta_prompt(
 
 ## Current System Prompt
 ```
-{current_prompt}
+{escaped_prompt}
 ```
 
 ## Human Feedback (Preference Pairs)
@@ -66,12 +77,12 @@ The following pairs show responses that humans preferred (CHOSEN) vs. responses 
 
 ## Your Task
 1. Analyze the patterns in what makes CHOSEN responses better than REJECTED ones
-2. Identify specific weaknesses in the current system prompt that led to rejected responses
+2. Identify specific weaknesses in the current prompt that led to rejected responses
 3. Suggest concrete, minimal edits to the system prompt to improve quality
 4. Pay special attention to any human corrections — these are gold-standard preferences
 
 ## Output Format
-Return a JSON object with:
+First, return a JSON object with your analysis:
 ```json
 {{
     "analysis": "Brief analysis of patterns found",
@@ -82,15 +93,14 @@ Return a JSON object with:
             "replacement": "The improved text",
             "rationale": "Why this change helps"
         }}
-    ],
-    "new_prompt": "The complete improved prompt text"
+    ]
 }}
 ```
 
-Return ONLY the JSON, no other text.
+Then output the complete improved system prompt under the header:
+### NEW PROMPT
 """
     return meta_prompt
-
 
 def run_refinement(version: str) -> dict:
     """
@@ -114,25 +124,52 @@ def run_refinement(version: str) -> dict:
 
     # Call Claude
     logger.info(f"Calling Claude for prompt refinement (version={version}, {len(pairs)} pairs)")
-    response = call_claude(meta_prompt)
+    response = call_claude(meta_prompt, max_tokens=8192)
     raw_text = response.content[0].text
 
-    # Parse JSON from response
+    json_text = ""
+    new_prompt_text = ""
+
+    # 1. Extract JSON block
     if "```json" in raw_text:
         start = raw_text.find("```json") + 7
         end = raw_text.find("```", start)
-        raw_text = raw_text[start:end].strip()
-    elif "```" in raw_text:
-        start = raw_text.find("```") + 3
-        end = raw_text.find("```", start)
-        raw_text = raw_text[start:end].strip()
+        if end == -1:
+            json_text = raw_text[start:] # Try best effort if truncated
+        else:
+            json_text = raw_text[start:end].strip()
+    else:
+        # Fallback if no json tags
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        if start != -1 and end != -1:
+            json_text = raw_text[start:end+1]
+
+    # 2. Extract NEW PROMPT block
+    if "### NEW PROMPT" in raw_text:
+        prompt_start = raw_text.find("### NEW PROMPT") + 14
+        new_prompt_text = raw_text[prompt_start:].strip()
+        # Clean off trailing markdown backticks if Claude accidentally wrapped it
+        if new_prompt_text.startswith("```"):
+            new_prompt_text = new_prompt_text.split("\n", 1)[-1]
+        if new_prompt_text.endswith("```"):
+            new_prompt_text = new_prompt_text.rsplit("\n", 1)[0]
+    else:
+        # If Claude fails to use the exact header, fallback to taking whatever is after the JSON block
+        end_of_json = raw_text.rfind("}") + 1
+        new_prompt_text = raw_text[end_of_json:].strip()
+        new_prompt_text = new_prompt_text.strip("` \n")
 
     try:
-        result = json.loads(raw_text)
+        result = json.loads(json_text)
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse refinement response: {e}")
+        logger.error(f"Failed to parse refinement JSON: {e}\nRaw output: {raw_text[:500]}...")
         return {"status": "error", "reason": f"Invalid JSON from Claude: {e}"}
 
+    if not new_prompt_text:
+        return {"status": "error", "reason": "Failed to extract the new prompt text from Claude's response."}
+
+    result["new_prompt"] = new_prompt_text
     result["status"] = "success"
     return result
 

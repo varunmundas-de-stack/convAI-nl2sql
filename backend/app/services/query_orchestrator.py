@@ -561,6 +561,15 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
     merged_intent = merge_intent(patched_intent, previous_qco) if previous_qco else patched_intent
     logger.info(f"Resume merged intent: {merged_intent}")
 
+    # Resolve RLHF prompt version for consistency
+    try:
+        from app.rlhf.prompt_manager import get_ab_version
+        prompt_version, ab_group = get_ab_version(resolved_session_id or request_id)
+    except Exception as e:
+        logger.warning(f"RLHF version resolution failed (non-fatal): {e}")
+        prompt_version = "v1"
+        ab_group = None
+
     # BUG-01 FIX: do NOT delete state here — delete only after full pipeline success
     response = OrchestratorResponse(
         query=state.original_query,
@@ -570,6 +579,8 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
         merged_intent=merged_intent,
         request_id=request_id,
         session_id=resolved_session_id,
+        prompt_version=prompt_version,
+        ab_group=ab_group,
     )
 
     try:
@@ -653,7 +664,11 @@ def _extract_intent(response: OrchestratorResponse, start_time: float, previous_
             span.set_attribute("input.previous_qco_scope", previous_qco.sales_scope or "")
         try:
             logger.info("Step 2: Extracting intent...")
-            raw_intent = extract_intent(response.query, previous_qco=previous_qco)
+            raw_intent = extract_intent(
+                response.query, 
+                previous_qco=previous_qco, 
+                prompt_version=response.prompt_version
+            )
             response.raw_intent = raw_intent
             response.stage = PipelineStage.INTENT_EXTRACTED
             span.set_attribute("output.intent_type", str(raw_intent.get("intent_type", "")))

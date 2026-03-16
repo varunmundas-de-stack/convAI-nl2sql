@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 try:
     MODEL_ID = os.getenv("ANTHROPIC_MODEL_ID")
-    TEMPERATURE = os.getenv("MODEL_TEMPERATURE", 0.0) # Deterministic: extraction is parsing, not generation
-    MAX_TOKENS = os.getenv("MODEL_MAX_TOKENS", 2048) # Sufficient for intent JSON output
-    TIMEOUT_SECONDS = os.getenv("MODEL_TIMEOUT_SECONDS", 30.0)
+    TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", 0.0)) # Deterministic: extraction is parsing, not generation
+    MAX_TOKENS = int(os.getenv("MODEL_MAX_TOKENS", 4096)) # Sufficient for intent JSON output
+    TIMEOUT_SECONDS = float(os.getenv("MODEL_TIMEOUT_SECONDS", 120.0)) # Give Claude enough time for long generations
     FALLBACK_MODEL_ID = os.getenv("FALLBACK_MODEL_ID", "claude-sonnet-4-5")
 except Exception as e:
     logger.error(f"Error loading configuration: {e}")
@@ -42,21 +42,21 @@ tracer_provider = register(
 AnthropicInstrumentor().instrument(tracer_provider=tracer_provider)
 
 
-def _call_model(model_id: str, prompt: str):
+def _call_model(model_id: str, prompt: str, max_tokens: int = None):
     return client.messages.create(
         model=model_id,
-        max_tokens=MAX_TOKENS,
+        max_tokens=max_tokens or MAX_TOKENS,
         temperature=TEMPERATURE,
         messages=[{"role": "user", "content": prompt}]
     )
 
-def call_claude(prompt: str):
+def call_claude(prompt: str, max_tokens: int = None):
     last_exception = None
 
     for attempt in range(MAX_RETRIES):
         try:
             logger.info(f"Calling LLM (attempt {attempt+1}) with model: {MODEL_ID}")
-            return _call_model(MODEL_ID, prompt)
+            return _call_model(MODEL_ID, prompt, max_tokens)
 
         except APIError as e:
             last_exception = e
@@ -85,7 +85,7 @@ def call_claude(prompt: str):
     if FALLBACK_MODEL_ID:
         logger.warning("Primary model failed. Trying fallback model.")
         try:
-            return _call_model(FALLBACK_MODEL_ID, prompt)
+            return _call_model(FALLBACK_MODEL_ID, prompt, max_tokens)
         except Exception as e:
             logger.error(f"Fallback model failed: {e}")
             raise

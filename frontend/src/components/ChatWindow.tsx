@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Plus } from "lucide-react";
 import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
@@ -162,6 +162,15 @@ export default function ChatWindow() {
                 <div className="flex items-center justify-between">
                     <h1 className="text-xl font-semibold text-gray-900">NL2SQL Chat</h1>
                     <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleNewConversation}
+                            className="flex items-center gap-1.5 text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+                            title="Start a new conversation"
+                        >
+                            <Plus size={14} />
+                            New Chat
+                        </button>
+
                         {/* Session Indicator */}
                         {sessionId && (
                             <div className="flex items-center gap-2 text-xs">
@@ -169,17 +178,10 @@ export default function ChatWindow() {
                                 <code className="bg-gray-100 px-2 py-1 rounded text-gray-700 font-mono">
                                     {sessionId}
                                 </code>
-                                <button
-                                    onClick={handleNewConversation}
-                                    className="text-blue-600 hover:text-blue-700 underline"
-                                    title="Start a new conversation"
-                                >
-                                    New
-                                </button>
                             </div>
                         )}
                         {/* Backend Status */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 ml-2">
                             <div
                                 className={`w-2 h-2 rounded-full ${isBackendAvailable ? "bg-green-500" : "bg-red-500"
                                     }`}

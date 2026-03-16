@@ -216,6 +216,90 @@ export async function getCatalogTimeWindows() {
     return fetch(`${API_BASE}/catalog/time-windows`).then((r) => r.json());
 }
 
+// =============================================================================
+// RLHF ADMIN API
+// =============================================================================
+
+export async function getPromptVersions(): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/prompt-versions`);
+    if (!res.ok) throw new Error(`Failed to fetch prompt versions: ${res.status}`);
+    return res.json();
+}
+
+export async function getAbStatus(): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/ab-status`);
+    if (!res.ok) throw new Error(`Failed to fetch A/B status: ${res.status}`);
+    return res.json();
+}
+
+export async function createAbTest(payload: {
+    version_a: string;
+    version_b: string;
+    traffic_split: number;
+}): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/ab-test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Failed to create A/B test: ${res.status}`);
+    return res.json();
+}
+
+export async function stopAbTest(): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/ab-stop`, { method: "POST" });
+    if (!res.ok) throw new Error(`Failed to stop A/B test: ${res.status}`);
+    return res.json();
+}
+
+export async function triggerRefinement(version: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/refine?version=${version}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Refinement failed: ${res.status}`);
+    return res.json();
+}
+
+export async function runRefinementCycle(
+    version: string,
+    minRatings: number = 50,
+    minImprovement: number = 0.3
+): Promise<any> {
+    const params = new URLSearchParams({
+        version,
+        min_ratings: String(minRatings),
+        min_improvement: String(minImprovement),
+    });
+    const res = await fetch(`${API_BASE}/rlhf/run-cycle?${params}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Run cycle failed: ${res.status}`);
+    return res.json();
+}
+
+export async function promoteVersion(version: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/promote?version=${version}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
+    return res.json();
+}
+
+export async function rollbackVersion(version: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/rollback?version=${version}`, { method: "POST" });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Rollback failed: ${res.status}`);
+    }
+    return res.json();
+}
+
+export async function compareVersions(versionA: string, versionB: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/compare?version_a=${versionA}&version_b=${versionB}`);
+    if (!res.ok) throw new Error(`Compare failed: ${res.status}`);
+    return res.json();
+}
+
+export async function getPreferencePairs(version: string, minGap: number = 2): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/preference-pairs?version=${version}&min_gap=${minGap}`);
+    if (!res.ok) throw new Error(`Failed to fetch preference pairs: ${res.status}`);
+    return res.json();
+}
+
 export async function submitFeedback(payload: {
     request_id: string;
     query: string;

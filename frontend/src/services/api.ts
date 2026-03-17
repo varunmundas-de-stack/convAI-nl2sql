@@ -169,6 +169,44 @@ export async function sendQuery(query: string): Promise<{
     };
 }
 
+export async function retryQuery(
+    originalRequestId: string,
+    modifiedQuery: string,
+    sessionId: string,
+    originalQuery: string
+): Promise<{
+    response: ChatResponse;
+    raw: any;
+    sessionId: string;
+}> {
+    console.log(`[Session] Sending retry for request_id: ${originalRequestId} with session_id: ${sessionId}`);
+
+    const res = await fetch(`${API_BASE}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            original_request_id: originalRequestId,
+            modified_query: modifiedQuery,
+            session_id: sessionId,
+            original_query: originalQuery,
+        }),
+    });
+
+    const backendResponse = await res.json();
+
+    // Extract and store session_id from backend response if present
+    if (backendResponse.session_id) {
+        setSessionId(backendResponse.session_id);
+    }
+
+    // Transform the backend response to frontend format
+    return {
+        response: transformBackendResponse(backendResponse),
+        raw: backendResponse,
+        sessionId: backendResponse.session_id || sessionId,
+    };
+}
+
 export async function clarify(payload: {
     request_id: string;
     answers: Record<string, any>;

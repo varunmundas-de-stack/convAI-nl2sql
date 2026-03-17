@@ -36,7 +36,6 @@ export default function FeedbackBar({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [sentiment, setSentiment] = useState<"up" | "down" | null>(null);
     const [showRetryModal, setShowRetryModal] = useState(false);
-    const [isRetryLoading, setIsRetryLoading] = useState(false);
 
     async function handleSubmit() {
         if (rating === 0 || isSubmitting) return;
@@ -75,21 +74,24 @@ export default function FeedbackBar({
     async function handleRetrySubmit(modifiedQuery: string) {
         if (!onRetry) return;
 
-        setIsRetryLoading(true);
+        // Close the modal immediately
+        setShowRetryModal(false);
+
+        // Set the phase to retrying to show the loading state
+        setPhase("retrying");
+
         try {
             await onRetry(modifiedQuery);
-            setShowRetryModal(false);
-            setPhase("retrying");
+            // Reset to idle state after successful retry
+            setPhase("idle");
         } catch (error) {
             console.error("Retry failed:", error);
-            // Keep modal open to allow user to try again
-        } finally {
-            setIsRetryLoading(false);
+            // Reset to idle state even on error
+            setPhase("idle");
         }
     }
 
     function handleRetryCancel() {
-        if (isRetryLoading) return;
         setShowRetryModal(false);
     }
 
@@ -146,7 +148,6 @@ export default function FeedbackBar({
                     originalQuery={originalQuery || query}
                     onSubmit={handleRetrySubmit}
                     onCancel={handleRetryCancel}
-                    isLoading={isRetryLoading}
                 />
             </>
         );

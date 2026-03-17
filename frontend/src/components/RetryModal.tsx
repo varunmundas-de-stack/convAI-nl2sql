@@ -8,7 +8,6 @@ interface RetryModalProps {
     originalQuery: string;
     onSubmit: (modifiedQuery: string) => void;
     onCancel: () => void;
-    isLoading?: boolean;
 }
 
 export default function RetryModal({
@@ -16,7 +15,6 @@ export default function RetryModal({
     originalQuery,
     onSubmit,
     onCancel,
-    isLoading = false,
 }: RetryModalProps) {
     const [modifiedQuery, setModifiedQuery] = useState(originalQuery);
     const maxLength = 1000;
@@ -25,13 +23,13 @@ export default function RetryModal({
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (modifiedQuery.trim() && !isLoading) {
+        if (modifiedQuery.trim()) {
             onSubmit(modifiedQuery.trim());
         }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Escape" && !isLoading) {
+        if (e.key === "Escape") {
             onCancel();
         }
     };
@@ -41,7 +39,7 @@ export default function RetryModal({
 
     return (
         <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 flex items-center justify-center z-50 p-4"
             onKeyDown={handleKeyDown}
             tabIndex={-1}
         >
@@ -54,8 +52,7 @@ export default function RetryModal({
                     </div>
                     <button
                         onClick={onCancel}
-                        disabled={isLoading}
-                        className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
                         title="Close"
                     >
                         <X size={18} />
@@ -87,8 +84,7 @@ export default function RetryModal({
                                 id="modified-query"
                                 value={modifiedQuery}
                                 onChange={(e) => setModifiedQuery(e.target.value)}
-                                disabled={isLoading}
-                                className="w-full border border-gray-300 rounded-md p-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:cursor-not-allowed resize-none"
+                                className="w-full border border-gray-300 rounded-md p-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
                                 rows={4}
                                 maxLength={maxLength}
                                 placeholder="Enter your modified query here..."
@@ -119,17 +115,16 @@ export default function RetryModal({
                         <button
                             type="button"
                             onClick={onCancel}
-                            disabled={isLoading}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            disabled={!isValid || isLoading}
+                            disabled={!isValid}
                             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                         >
-                            {isLoading ? "Processing..." : "Retry Query"}
+                            Retry Query
                         </button>
                     </div>
                 </form>

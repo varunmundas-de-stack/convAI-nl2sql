@@ -60,3 +60,15 @@ class ABTestConfig(Base):
     traffic_split = Column(Float, default=0.5)  # Fraction of traffic to version A
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class RetryLog(Base):
+    __tablename__ = "retry_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    original_request_id = Column(String(64), nullable=False, index=True)
+    retry_request_id = Column(String(64), nullable=False, index=True)
+    original_query = Column(Text, nullable=False)
+    modified_query = Column(Text, nullable=False)
+    session_id = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

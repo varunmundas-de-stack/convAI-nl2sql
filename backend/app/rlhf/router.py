@@ -206,3 +206,20 @@ async def compare_versions(
 ):
     """Compare stats between two prompt versions."""
     return feedback_service.compare_versions(version_a, version_b)
+
+
+# =============================================================================
+# RETRY ANALYTICS
+# =============================================================================
+
+@router.get("/retry-statistics")
+async def get_retry_statistics(
+    version: Optional[str] = Query(None, description="Optional prompt version to filter by"),
+):
+    """Get statistics about retry patterns for analysis."""
+    stats = feedback_service.get_retry_statistics(version)
+    return {
+        "status": "ok",
+        "version": version or "all",
+        "statistics": stats,
+    }

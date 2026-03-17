@@ -13,7 +13,7 @@ from collections import defaultdict
 from sqlalchemy import func
 
 from app.rlhf.db import get_session
-from app.rlhf.models import FeedbackLog
+from app.rlhf.models import FeedbackLog, RetryLog
 
 logger = logging.getLogger(__name__)
 
@@ -172,3 +172,80 @@ def compare_versions(version_a: str, version_b: str) -> dict:
         "improvement": round(improvement, 3),
         "winner": version_b if improvement > 0 else version_a if improvement < 0 else "tie",
     }
+
+
+def log_retry(
+    original_request_id: str,
+    retry_request_id: str,
+    original_query: str,
+    modified_query: str,
+    session_id: str,
+) -> int:
+    """
+    Log a retry attempt linking the original request to the new retry request.
+
+    Returns the ID of the inserted retry log entry.
+    """
+    with get_session() as session:
+        entry = RetryLog(
+            original_request_id=original_request_id,
+            retry_request_id=retry_request_id,
+            original_query=original_query,
+            modified_query=modified_query,
+            session_id=session_id,
+        )
+        session.add(entry)
+        session.flush()
+        entry_id = entry.id
+        logger.info(f"Retry logged: original_id={original_request_id}, retry_id={retry_request_id}")
+        return entry_id
+
+
+def get_retry_statistics(version: Optional[str] = None) -> dict:
+    """
+    Get statistics about retry patterns for analysis.
+
+    Args:
+        version: Optional prompt version to filter by (looks up via FeedbackLog)
+
+    Returns:
+        Dictionary with retry statistics
+    """
+    with get_session() as session:
+        query = session.query(RetryLog)
+
+        if version:
+            # Filter by prompt version via FeedbackLog
+            query = query.join(
+                FeedbackLog,
+                RetryLog.original_request_id == FeedbackLog.request_id
+            ).filter(FeedbackLog.prompt_version == version)
+
+        retry_logs = query.all()
+
+        if not retry_logs:
+            return {
+                "total_retries": 0,
+                "unique_sessions": 0,
+                "avg_query_length_change": 0.0,
+                "common_modifications": [],
+            }
+
+        total_retries = len(retry_logs)
+        unique_sessions = len(set(log.session_id for log in retry_logs))
+
+        # Calculate average query length change
+        length_changes = []
+        for log in retry_logs:
+            original_len = len(log.original_query.strip())
+            modified_len = len(log.modified_query.strip())
+            length_changes.append(modified_len - original_len)
+
+        avg_length_change = sum(length_changes) / len(length_changes) if length_changes else 0
+
+        return {
+            "total_retries": total_retries,
+            "unique_sessions": unique_sessions,
+            "avg_query_length_change": round(avg_length_change, 2),
+            "retry_rate": round(unique_sessions / total_retries if total_retries > 0 else 0, 3),
+        }

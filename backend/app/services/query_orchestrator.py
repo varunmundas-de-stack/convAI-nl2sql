@@ -156,6 +156,8 @@ class OrchestratorResponse:
     # RLHF tracking
     prompt_version: Optional[str] = None   # Prompt version used for intent extraction
     ab_group: Optional[str] = None         # A/B test group ("A" or "B", None if no test)
+    original_query: Optional[str] = None   # Original user query (before clarifications)
+    clarification_answers: Optional[Dict[str, Any]] = None  # Clarification answers provided
     
     
     # Error (None if success)
@@ -166,11 +168,33 @@ class OrchestratorResponse:
     missing_fields: Optional[List[str]] = None
     clarification_message: Optional[str] = None
     allowed_values: Optional[List[str]] = None
+
+    def _get_effective_query(self) -> str:
+        """Generate a human-readable effective query combining original query with clarifications."""
+        if not self.clarification_answers or not self.original_query:
+            return self.query or self.original_query or ""
+
+        # Start with original query
+        effective = self.original_query
+
+        # Add clarification context
+        clarifications = []
+        for field, value in self.clarification_answers.items():
+            if isinstance(value, str) and value.strip():
+                clarifications.append(f"{field}: {value}")
+
+        if clarifications:
+            effective += f" ({', '.join(clarifications)})"
+
+        return effective
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dict."""
         result = {
             "query": self.query,
+            "original_query": self.original_query,
+            "clarification_answers": self.clarification_answers,
+            "effective_query": self._get_effective_query(),
             "session_id": self.session_id,
             "success": self.success,
             "stage": self.stage,
@@ -278,6 +302,7 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
             success=False,
             stage=PipelineStage.RECEIVED,
         )
+        response.original_query = query  # Store the original query
         
         logger.info(f"Pipeline started: '{query[:100]}...' (session={session_id})")
         
@@ -572,7 +597,7 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
 
     # BUG-01 FIX: do NOT delete state here — delete only after full pipeline success
     response = OrchestratorResponse(
-        query=state.original_query,
+        query=state.original_query,  # Keep as original query for now
         success=False,
         stage=PipelineStage.INTENT_EXTRACTED,
         raw_intent=patched_intent,
@@ -582,6 +607,8 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
         prompt_version=prompt_version,
         ab_group=ab_group,
     )
+    response.original_query = state.original_query  # Preserve original query through clarification
+    response.clarification_answers = clarification_answers  # Store clarification answers
 
     try:
         # Re-enter pipeline at validation (same as fresh run)
@@ -1090,5 +1117,179 @@ def _complete_pipeline(response: OrchestratorResponse, start_time: float) -> Orc
         )
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
         return response
-    
+
     return response
+
+
+def execute_retry_query(
+    original_request_id: str,
+    modified_query: str,
+    session_id: str,
+    original_query: str
+) -> OrchestratorResponse:
+    """
+    Execute a retry query with full pipeline processing while maintaining session context.
+
+    This function:
+    1. Logs the retry attempt for RLHF analysis
+    2. Loads existing session context (QCO) for conversational continuity
+    3. Executes the modified query through the complete pipeline
+    4. Maintains session state for future follow-ups
+
+    Args:
+        original_request_id: The request ID of the original query being retried
+        modified_query: The user's modified query text
+        session_id: Session ID for context continuity
+        original_query: Original query for comparison and logging
+
+    Returns:
+        OrchestratorResponse with complete pipeline results
+    """
+    start_time = time.monotonic()
+    request_id = f"retry_{uuid.uuid4().hex[:12]}"
+
+    logger.info(f"Starting retry pipeline: retry_id={request_id}, original_id={original_request_id}, session={session_id}")
+
+    with tracer.start_as_current_span("pipeline.retry") as span:
+        span.set_attribute("pipeline.type", "retry")
+        span.set_attribute("input.original_request_id", original_request_id)
+        span.set_attribute("input.retry_request_id", request_id)
+        span.set_attribute("input.modified_query", modified_query[:500])
+        span.set_attribute("input.session_id", session_id)
+        span.set_attribute("input.original_query", original_query[:500])
+
+        # Initialize response
+        response = OrchestratorResponse(
+            query=modified_query,
+            session_id=session_id,
+            success=False,
+            stage=PipelineStage.RECEIVED
+        )
+        response.request_id = request_id
+        response.original_query = original_query  # Store the original query for frontend
+
+        try:
+            # Log the retry attempt for RLHF analysis
+            from app.rlhf.feedback_service import log_retry
+            retry_log_id = log_retry(
+                original_request_id=original_request_id,
+                retry_request_id=request_id,
+                original_query=original_query,
+                modified_query=modified_query,
+                session_id=session_id
+            )
+            span.set_attribute("retry.log_id", retry_log_id)
+            logger.info(f"Retry logged with ID: {retry_log_id}")
+
+            # Load existing QCO for context continuity
+            previous_qco = None
+            try:
+                previous_qco = load_qco(session_id)
+                response.stage = PipelineStage.QCO_LOADED
+                span.set_attribute("context.has_previous_qco", True)
+                if previous_qco:
+                    span.set_attribute("context.previous_metric", previous_qco.metric or "")
+                    span.set_attribute("context.previous_scope", previous_qco.sales_scope or "")
+                logger.info(f"Loaded previous QCO for session: {session_id}")
+            except Exception as e:
+                logger.info(f"No previous QCO found for session {session_id}: {e}")
+                span.set_attribute("context.has_previous_qco", False)
+
+            # Extract intent with context
+            response = _extract_intent(response, start_time, previous_qco=previous_qco)
+            if response.error:
+                response.duration_ms = int((time.monotonic() - start_time) * 1000)
+                return response
+
+            # Merge intent with previous context if available
+            if previous_qco and response.raw_intent:
+                with tracer.start_as_current_span("intent.merge") as merge_span:
+                    merge_span.set_attribute("input.raw_intent", str(response.raw_intent)[:1000])
+                    merge_span.set_attribute("input.qco_metric", previous_qco.metric or "")
+                    merge_span.set_attribute("input.value", json.dumps({"raw_intent": response.raw_intent, "previous_qco": str(previous_qco)}, default=str))
+                    response.merged_intent = merge_intent(response.raw_intent, previous_qco)
+                    response.stage = PipelineStage.INTENT_MERGED
+                    merge_span.set_attribute("output.merged_with_qco", True)
+                    merge_span.set_attribute("output.merged_intent", str(response.merged_intent)[:1000])
+                    merge_span.set_attribute("output.value", json.dumps(response.merged_intent, default=str))
+                    logger.info(f"Intent merged with previous QCO for retry")
+            else:
+                response.merged_intent = response.raw_intent
+                if response.raw_intent:
+                    response.stage = PipelineStage.INTENT_MERGED
+
+            # Validate intent
+            response = _validate_intent(response, start_time)
+            if response.error:
+                response.duration_ms = int((time.monotonic() - start_time) * 1000)
+                return response
+
+            # Build Cube query
+            response = _build_cube_query(response, start_time)
+            if response.error:
+                response.duration_ms = int((time.monotonic() - start_time) * 1000)
+                return response
+
+            # Execute Cube query
+            response = _execute_cube_query(response, start_time)
+            if response.error:
+                response.duration_ms = int((time.monotonic() - start_time) * 1000)
+                return response
+
+            # Generate insights and visual spec
+            response = _generate_insights_and_spec(response, start_time, previous_qco=previous_qco)
+            if response.error:
+                response.duration_ms = int((time.monotonic() - start_time) * 1000)
+                return response
+
+            # Save updated QCO for future queries in this session
+            if response.validated_intent:
+                try:
+                    qco = resolve_qco(response.validated_intent, modified_query)
+                    save_qco(session_id, qco)
+                    response.stage = PipelineStage.QCO_RESOLVED
+                    span.set_attribute("context.qco_saved", True)
+                    logger.info(f"Updated QCO saved for session: {session_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to save updated QCO: {e}")
+                    span.set_attribute("context.qco_saved", False)
+
+            # Complete pipeline
+            response = _complete_pipeline(response, start_time)
+
+            span.set_attribute("output.success", True)
+            span.set_attribute("output.duration_ms", response.duration_ms)
+            span.set_attribute("output.row_count", len(response.data or []))
+            if response.visual_spec:
+                span.set_attribute("output.chart_type", response.visual_spec.chart_type or "")
+
+            logger.info(f"Retry pipeline completed successfully in {response.duration_ms}ms")
+            return response
+
+        except IntentValidationError as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            span.set_attribute("error.type", "IntentValidationError")
+            span.set_attribute("error.message", str(e))
+            response.error = OrchestratorError(
+                stage=response.stage,
+                error_type=e.__class__.__name__,
+                message=str(e),
+                details=e.to_dict() if hasattr(e, "to_dict") else None
+            )
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
+            return response
+
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            span.record_exception(e)
+            span.set_attribute("error.type", e.__class__.__name__)
+            span.set_attribute("error.message", str(e))
+            logger.error(f"Retry pipeline error: {e}")
+            response.error = OrchestratorError(
+                stage=response.stage,
+                error_type=e.__class__.__name__,
+                message=str(e),
+            )
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
+            return response

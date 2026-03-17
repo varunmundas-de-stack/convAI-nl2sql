@@ -12,7 +12,7 @@ interface VisualSpec {
     subtitle?: string;
     x_axis?: Axis;
     y_axis?: Axis;
-    series?: any[];
+    series?: (DataSeries | SeriesConfig)[];
     annotations?: InsightAnnotation[];
     markers?: Marker[];
     primary_value?: string;
@@ -47,6 +47,11 @@ interface DataSeries {
     color_hint?: string;
     point_emphasis?: string[];
     point_colors?: (string | null)[];
+}
+
+interface SeriesConfig {
+    key: string;
+    label: string;
 }
 
 interface InsightAnnotation {
@@ -114,7 +119,7 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
         const rows = xLabels.map((label, i) => {
             const row: Record<string, any> = { [columns[0]]: label };
             series.forEach((s, si) => {
-                row[columns[si + 1]] = s.values?.[i] ?? null;
+                row[columns[si + 1]] = !isSeriesConfig(s) ? (s.values?.[i] ?? null) : null;
             });
             return row;
         });
@@ -122,7 +127,9 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
         // For number_card / specs with no x labels, collapse series into single rows
         if (xLabels.length === 0 && series.length > 0) {
             const row: Record<string, any> = {};
-            series.forEach(s => { row[s.label || "Value"] = s.values?.[0] ?? null; });
+            series.forEach(s => { 
+                row[s.label || "Value"] = !isSeriesConfig(s) ? (s.values?.[0] ?? null) : null; 
+            });
             return { columns: series.map(s => s.label || "Value"), rows: [row] };
         }
 
@@ -329,6 +336,21 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                     )}
 
                     {/* Chart Rendering */}
+                    {(() => {
+                        // Debug logging for chart routing decisions
+                        if (chart_type === "grouped_bar") {
+                            console.log("CHART ROUTING - GROUPED_BAR:", {
+                                chart_type,
+                                hasData: !!visual_spec.data,
+                                dataLength: visual_spec.data?.length || 0,
+                                hasSeries: !!visual_spec.series,
+                                seriesLength: visual_spec.series?.length || 0,
+                                viewMode,
+                                isChartType
+                            });
+                        }
+                        return null;
+                    })()}
                     {chart_type === "table" && visual_spec.columns && visual_spec.rows ? (
                         <TableRenderer data={{ type: "table", columns: visual_spec.columns, rows: visual_spec.rows }} />
                     ) : chart_type === "grouped_bar" || chart_type === "stacked_bar" || chart_type === "multi_line" ? (
@@ -556,6 +578,11 @@ function formatNumber(value: number): string {
     }
 }
 
+// Type guard to check if a series item is a SeriesConfig
+function isSeriesConfig(series: DataSeries | SeriesConfig): series is SeriesConfig {
+    return 'key' in series && typeof series.key === 'string';
+}
+
 // Clean column name for display (remove table prefixes, format nicely)
 function cleanColumnName(col: string): string {
     if (!col) return "Value";
@@ -599,18 +626,35 @@ function formatCellValue(value: any, isPrice: boolean = false): string {
         return "-";
     }
 
-    // Handle date strings (ISO 8601 format)
-    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
-        try {
-            const date = new Date(value);
-            // Format as: DD MMM YYYY (e.g., "01 Oct 2025")
-            return date.toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric'
-            });
-        } catch {
-            return String(value);
+    // Handle date strings (multiple formats)
+    if (typeof value === "string") {
+        // ISO 8601 format: YYYY-MM-DDTHH:mm:ss
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+            try {
+                const date = new Date(value);
+                // Format as: DD MMM YYYY (e.g., "01 Oct 2025")
+                return date.toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                });
+            } catch {
+                return String(value);
+            }
+        }
+
+        // Date-only format: YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            try {
+                const date = new Date(value + "T00:00:00");
+                return date.toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                });
+            } catch {
+                return String(value);
+            }
         }
     }
 
@@ -644,7 +688,8 @@ function isNumericColumn(rows: any[], columnName: string): boolean {
 }
 
 function BarChartRenderer({ spec }: { spec: VisualSpec }) {
-    const series = spec.series?.[0];
+    const rawSeries = spec.series?.[0];
+    const series = rawSeries && !isSeriesConfig(rawSeries) ? rawSeries : null;
     const xLabels = spec.x_axis?.values || [];
     const yValues = series?.values || [];
     const pointColors = series?.point_colors || [];
@@ -681,11 +726,26 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
                         <XAxis
                             dataKey="name"
                             tick={{ fontSize: 11, fill: '#9ca3af' }}
-                            tickMargin={8}
+                            tickMargin={20}
                             angle={-40}
                             textAnchor="end"
                             height={40}
                             interval={0}
+                            tickFormatter={(value) => {
+                                // Format dates in axis labels
+                                if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+                                    try {
+                                        const date = new Date(value.includes("T") ? value : value + "T00:00:00");
+                                        return date.toLocaleDateString('en-GB', {
+                                            day: '2-digit',
+                                            month: 'short'
+                                        });
+                                    } catch {
+                                        return value;
+                                    }
+                                }
+                                return value;
+                            }}
                         />
                         <YAxis
                             tick={{ fontSize: 11, fill: '#9ca3af' }}
@@ -717,7 +777,8 @@ function BarChartRenderer({ spec }: { spec: VisualSpec }) {
 }
 
 function LineChartRenderer({ spec }: { spec: VisualSpec }) {
-    const series = spec.series?.[0];
+    const rawSeries = spec.series?.[0];
+    const series = rawSeries && !isSeriesConfig(rawSeries) ? rawSeries : null;
     const xLabels = spec.x_axis?.values || [];
     const yValues = series?.values || [];
 
@@ -748,11 +809,26 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
                         <XAxis
                             dataKey="name"
                             tick={{ fontSize: 11, fill: '#9ca3af' }}
-                            tickMargin={8}
+                            tickMargin={20}
                             angle={-40}
                             textAnchor="end"
                             height={40}
                             interval={0}
+                            tickFormatter={(value) => {
+                                // Format dates in axis labels
+                                if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+                                    try {
+                                        const date = new Date(value.includes("T") ? value : value + "T00:00:00");
+                                        return date.toLocaleDateString('en-GB', {
+                                            day: '2-digit',
+                                            month: 'short'
+                                        });
+                                    } catch {
+                                        return value;
+                                    }
+                                }
+                                return value;
+                            }}
                         />
                         <YAxis
                             tick={{ fontSize: 11, fill: '#9ca3af' }}
@@ -786,7 +862,8 @@ function LineChartRenderer({ spec }: { spec: VisualSpec }) {
 }
 
 function PieChartRenderer({ spec }: { spec: VisualSpec }) {
-    const series = spec.series?.[0];
+    const rawSeries = spec.series?.[0];
+    const series = rawSeries && !isSeriesConfig(rawSeries) ? rawSeries : null;
     const labels = spec.x_axis?.values || [];
     const values = series?.values || [];
 
@@ -845,109 +922,206 @@ function PieChartRenderer({ spec }: { spec: VisualSpec }) {
 
 // Recharts implementation for advanced multi-dimensional charts
 function RechartsRenderer({ spec }: { spec: VisualSpec }) {
-    if (!spec.data || spec.data.length === 0) return null;
+    // Add logging for grouped_bar charts specifically
+    if (spec.chart_type === "grouped_bar") {
+        console.log("RechartsRenderer GROUPED_BAR:", {
+            chart_type: spec.chart_type,
+            data_length: spec.data?.length || 0,
+            data_sample: spec.data?.[0],
+            data_keys: spec.data?.[0] ? Object.keys(spec.data[0]) : [],
+            series: spec.series,
+            x_axis_key: spec.x_axis_key
+        });
+    }
 
-    const data = spec.data;
-    const xAxisKey = spec.x_axis_key || "label";
-    const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
+    if (!spec.data || spec.data.length === 0) {
+        console.log("RechartsRenderer: No data available", { chart_type: spec.chart_type, data: spec.data });
+        return null;
+    }
 
-    const commonMargin = { top: 32, right: 24, left: 0, bottom: 48 };
-    const commonXAxis = (
-        <XAxis
-            dataKey={xAxisKey}
-            tick={{ fontSize: 11, fill: '#9ca3af' }}
-            tickMargin={8}
-            angle={-40}
-            textAnchor="end"
-            height={48}
-            interval={0}
-        />
-    );
-    const commonYAxis = (
-        <YAxis
-            tick={{ fontSize: 11, fill: '#9ca3af' }}
-            tickFormatter={(val) => formatCellValue(val, false)}
-            width={80}
-            axisLine={false}
-            tickLine={false}
-        />
-    );
-    const commonTooltip = (
-        <RechartsTooltip
-            formatter={(value: any) => formatCellValue(Number(value), false)}
-            labelStyle={{ color: '#111827', fontWeight: 600, marginBottom: 2 }}
-            contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontSize: '13px' }}
-        />
-    );
+    try {
 
-    return (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 w-full">
-            {spec.primary_value && (
-                <div className="mb-3 flex items-baseline gap-4">
-                    <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wide">{spec.primary_label || 'Total'}</p>
-                        <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
+        const data = spec.data;
+        const xAxisKey = spec.x_axis_key || "label";
+        const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
+
+        // Find the actual column name that matches x_axis_key
+        // This handles cases where x_axis_key is "state" but data has "fact_secondary_sales.state"
+        const actualXAxisKey = (() => {
+            if (data.length === 0) return xAxisKey;
+            const firstRow = data[0];
+            const keys = Object.keys(firstRow);
+
+            // First try exact match
+            if (keys.includes(xAxisKey)) return xAxisKey;
+
+            // Then try to find a key that ends with the x_axis_key
+            const matchingKey = keys.find(key =>
+                key.endsWith(`.${xAxisKey}`) || key === xAxisKey
+            );
+
+            if (matchingKey) {
+                console.log(`Mapped x_axis_key "${xAxisKey}" to actual column "${matchingKey}"`);
+                return matchingKey;
+            }
+
+            console.warn(`Could not find column for x_axis_key "${xAxisKey}" in keys:`, keys);
+            return xAxisKey;
+        })();
+
+        const commonMargin = { top: 32, right: 24, left: 0, bottom: 48 };
+        const commonXAxis = (
+            <XAxis
+                dataKey={actualXAxisKey}
+                tick={{ fontSize: 11, fill: '#9ca3af' }}
+                tickMargin={24}
+                angle={-40}
+                textAnchor="end"
+                height={48}
+                interval={0}
+                tickFormatter={(value) => {
+                    // If value looks like a date but isn't formatted, format it
+                    if (typeof value === "string") {
+                        // Check if it looks like an ISO date
+                        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+                            try {
+                                const date = new Date(value);
+                                return date.toLocaleDateString('en-GB', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric'
+                                });
+                            } catch {
+                                return value;
+                            }
+                        }
+                        // Check if it looks like a date-only string
+                        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                            try {
+                                const date = new Date(value + "T00:00:00");
+                                return date.toLocaleDateString('en-GB', {
+                                    day: '2-digit',
+                                    month: 'short'
+                                });
+                            } catch {
+                                return value;
+                            }
+                        }
+                    }
+                    return value;
+                }}
+            />
+        );
+        const commonYAxis = (
+            <YAxis
+                tick={{ fontSize: 11, fill: '#9ca3af' }}
+                tickFormatter={(val) => formatCellValue(val, false)}
+                width={80}
+                axisLine={false}
+                tickLine={false}
+            />
+        );
+        const commonTooltip = (
+            <RechartsTooltip
+                formatter={(value: any) => formatCellValue(Number(value), false)}
+                labelStyle={{ color: '#111827', fontWeight: 600, marginBottom: 2 }}
+                contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontSize: '13px' }}
+            />
+        );
+
+        return (
+            <div className="rounded-xl border border-gray-200 bg-white p-4 w-full">
+                {spec.primary_value && (
+                    <div className="mb-3 flex items-baseline gap-4">
+                        <div>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide">{spec.primary_label || 'Total'}</p>
+                            <p className="text-2xl font-bold text-gray-900">{spec.primary_value}</p>
+                        </div>
                     </div>
+                )}
+                <div className="h-[380px] w-full mt-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                        {spec.chart_type === "multi_line" ? (
+                            <LineChart data={data} margin={commonMargin}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                {commonXAxis}
+                                {commonYAxis}
+                                {commonTooltip}
+                                <Legend iconType="circle" iconSize={8}
+                                    wrapperStyle={{ paddingTop: '12px', fontSize: '12px', color: '#6b7280' }} />
+                                {spec.pivot_config?.stack_keys?.map((key, i) => (
+                                    <Line
+                                        key={key}
+                                        type="monotone"
+                                        dataKey={key}
+                                        name={cleanColumnName(key)}
+                                        stroke={colors[i % colors.length]}
+                                        strokeWidth={2.5}
+                                        dot={false}
+                                        activeDot={{ r: 5, strokeWidth: 0 }}
+                                    />
+                                ))}
+                            </LineChart>
+                        ) : (
+                            <BarChart data={data} margin={commonMargin}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                {commonXAxis}
+                                {commonYAxis}
+                                {commonTooltip}
+                                <Legend iconType="square" iconSize={10}
+                                    wrapperStyle={{ paddingTop: '12px', fontSize: '12px', color: '#6b7280' }} />
+                                {spec.chart_type === "stacked_bar" && spec.pivot_config?.stack_keys?.map((key, i) => (
+                                    <Bar
+                                        key={key}
+                                        dataKey={key}
+                                        name={cleanColumnName(key)}
+                                        stackId="a"
+                                        fill={colors[i % colors.length]}
+                                        maxBarSize={56}
+                                        radius={[i === spec.pivot_config!.stack_keys.length - 1 ? 6 : 0,
+                                        i === spec.pivot_config!.stack_keys.length - 1 ? 6 : 0, 0, 0]}
+                                    />
+                                ))}
+                                {spec.chart_type === "grouped_bar" && spec.series?.map((s, i) => {
+                                    // Handle SeriesConfig objects (for comparison charts)
+                                    if (isSeriesConfig(s)) {
+                                        return (
+                                            <Bar
+                                                key={s.key}
+                                                dataKey={s.key}
+                                                name={s.label}
+                                                fill={colors[i % colors.length]}
+                                                maxBarSize={40}
+                                                radius={[4, 4, 0, 0]}
+                                            />
+                                        );
+                                    }
+                                    // Handle DataSeries objects (for regular charts)
+                                    return (
+                                        <Bar
+                                            key={s.label}
+                                            dataKey={s.label}
+                                            name={s.label}
+                                            fill={colors[i % colors.length]}
+                                            maxBarSize={40}
+                                            radius={[4, 4, 0, 0]}
+                                        />
+                                    );
+                                })}
+                            </BarChart>
+                        )}
+                    </ResponsiveContainer>
                 </div>
-            )}
-            <div className="h-[380px] w-full mt-4">
-                <ResponsiveContainer width="100%" height="100%">
-                    {spec.chart_type === "multi_line" ? (
-                        <LineChart data={data} margin={commonMargin}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                            {commonXAxis}
-                            {commonYAxis}
-                            {commonTooltip}
-                            <Legend iconType="circle" iconSize={8}
-                                wrapperStyle={{ paddingTop: '12px', fontSize: '12px', color: '#6b7280' }} />
-                            {spec.pivot_config?.stack_keys?.map((key, i) => (
-                                <Line
-                                    key={key}
-                                    type="monotone"
-                                    dataKey={key}
-                                    name={cleanColumnName(key)}
-                                    stroke={colors[i % colors.length]}
-                                    strokeWidth={2.5}
-                                    dot={false}
-                                    activeDot={{ r: 5, strokeWidth: 0 }}
-                                />
-                            ))}
-                        </LineChart>
-                    ) : (
-                        <BarChart data={data} margin={commonMargin}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                            {commonXAxis}
-                            {commonYAxis}
-                            {commonTooltip}
-                            <Legend iconType="square" iconSize={10}
-                                wrapperStyle={{ paddingTop: '12px', fontSize: '12px', color: '#6b7280' }} />
-                            {spec.chart_type === "stacked_bar" && spec.pivot_config?.stack_keys?.map((key, i) => (
-                                <Bar
-                                    key={key}
-                                    dataKey={key}
-                                    name={cleanColumnName(key)}
-                                    stackId="a"
-                                    fill={colors[i % colors.length]}
-                                    maxBarSize={56}
-                                    radius={[i === spec.pivot_config!.stack_keys.length - 1 ? 6 : 0,
-                                    i === spec.pivot_config!.stack_keys.length - 1 ? 6 : 0, 0, 0]}
-                                />
-                            ))}
-                            {spec.chart_type === "grouped_bar" && spec.series?.map((s, i) => (
-                                <Bar
-                                    key={s.key}
-                                    dataKey={s.key}
-                                    name={s.label}
-                                    fill={colors[i % colors.length]}
-                                    maxBarSize={40}
-                                    radius={[4, 4, 0, 0]}
-                                />
-                            ))}
-                        </BarChart>
-                    )}
-                </ResponsiveContainer>
             </div>
-        </div>
-    );
+        );
+    } catch (error) {
+        console.error("RechartsRenderer error:", error, { spec });
+        return (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 w-full">
+                <p className="text-red-600">Chart rendering error: {String(error)}</p>
+                <p className="text-red-500 text-sm mt-2">Chart type: {spec.chart_type}</p>
+            </div>
+        );
+    }
 }
 

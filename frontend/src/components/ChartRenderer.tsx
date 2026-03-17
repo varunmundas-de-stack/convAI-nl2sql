@@ -543,10 +543,10 @@ function getSeverityStyles(severity: string): string {
 
 // Helper to format numbers consistently
 function formatNumber(value: number): string {
-    if (value >= 1_000_000_000) {
-        return `${(value / 1_000_000_000).toFixed(1)}B`;
-    } else if (value >= 1_000_000) {
-        return `${(value / 1_000_000).toFixed(1)}M`;
+    if (value >= 1_00_00_000) { // 1 crore
+        return `${(value / 1_00_00_000).toFixed(1)}Cr`;
+    } else if (value >= 1_00_000) { // 1 lakh
+        return `${(value / 1_00_000).toFixed(1)}L`;
     } else if (value >= 1_000) {
         return `${(value / 1_000).toFixed(1)}K`;
     } else if (value % 1 !== 0) {

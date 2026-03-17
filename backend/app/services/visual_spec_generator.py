@@ -834,11 +834,11 @@ def _build_color_map(insights: InsightResult, x_values: list) -> dict[str, Optio
 
 
 def _format_number(value: float) -> str:
-    """Format a number for human display."""
-    if abs(value) >= 1_000_000_000:
-        return f"{value / 1_000_000_000:.1f}B"
-    elif abs(value) >= 1_000_000:
-        return f"{value / 1_000_000:.1f}M"
+    """Format a number for human display using Indian numbering system."""
+    if abs(value) >= 1_00_00_000:  # 1 crore
+        return f"{value / 1_00_00_000:.1f}Cr"
+    elif abs(value) >= 1_00_000:  # 1 lakh
+        return f"{value / 1_00_000:.1f}L"
     elif abs(value) >= 1_000:
         return f"{value / 1_000:.1f}K"
     elif isinstance(value, float) and value != int(value):

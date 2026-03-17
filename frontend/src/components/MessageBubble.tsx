@@ -12,9 +12,19 @@ interface MessageBubbleProps {
     rawBackendData?: any;
     onClarify?: (value: string) => void;
     isActiveClarification?: boolean;
+    onRetry?: (modifiedQuery: string) => void;
+    originalQuery?: string;
 }
 
-export default function MessageBubble({ message, responseData, rawBackendData, onClarify, isActiveClarification }: MessageBubbleProps) {
+export default function MessageBubble({
+    message,
+    responseData,
+    rawBackendData,
+    onClarify,
+    isActiveClarification,
+    onRetry,
+    originalQuery
+}: MessageBubbleProps) {
     const isUser = message.role === "user";
     const isSystem = message.role === "system";
 
@@ -102,6 +112,8 @@ export default function MessageBubble({ message, responseData, rawBackendData, o
                                 ? JSON.stringify(rawBackendData.cube_query)
                                 : undefined
                         }
+                        originalQuery={originalQuery}
+                        onRetry={onRetry}
                     />
                 )}
             </div>

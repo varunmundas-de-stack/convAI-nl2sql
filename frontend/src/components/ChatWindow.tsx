@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
 import { ArrowUp, Plus } from "lucide-react";
-import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession } from "@/services/api";
+import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession, retryQuery } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
 import { parseClarificationAnswers } from "@/utils/clarificationParser";
@@ -12,6 +12,7 @@ export default function ChatWindow() {
     const [isBackendAvailable, setIsBackendAvailable] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [sessionId, setSessionId] = useState<string | null>(null);
+    const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const {
@@ -125,6 +126,47 @@ export default function ChatWindow() {
         }
     }
 
+    async function handleRetry(modifiedQuery: string, originalMessage: any) {
+        if (isLoading || !isBackendAvailable || !sessionId) return;
+
+        // Use the original_query from the backend response (not effective_query)
+        // The original_query is what we want for RLHF logging
+        const originalQuery = originalMessage.rawBackendData?.original_query ||
+                             originalMessage.rawBackendData?.query ||
+                             modifiedQuery;
+
+        setRetryingMessageId(originalMessage.id);
+        setIsLoading(true);
+
+        try {
+            const result = await retryQuery(
+                originalMessage.rawBackendData?.request_id,
+                modifiedQuery,
+                sessionId,
+                originalQuery
+            );
+
+            // Update session ID from response
+            if (result.sessionId) {
+                setSessionId(result.sessionId);
+            }
+
+            // Add user message with the modified query
+            addUserMessage(modifiedQuery);
+
+            // Handle the response
+            handleResponse(result.response, result.raw);
+        } catch (error) {
+            handleResponse({
+                type: "error",
+                message: error instanceof Error ? error.message : "Retry failed",
+            });
+        } finally {
+            setIsLoading(false);
+            setRetryingMessageId(null);
+        }
+    }
+
     function handleNewConversation() {
         if (confirm("Start a new conversation? This will clear the current chat history.")) {
             resetSession();
@@ -203,16 +245,36 @@ export default function ChatWindow() {
                         </div>
                     )}
 
-                    {messages.map((msg) => (
-                        <MessageBubble
-                            key={msg.id}
-                            message={msg}
-                            responseData={msg.responseData}
-                            rawBackendData={msg.rawBackendData}
-                            onClarify={submitClarification}
-                            isActiveClarification={pendingClarification === msg.responseData}
-                        />
-                    ))}
+                    {messages.map((msg, index) => {
+                        // Determine the query to show in retry modal
+                        // Use effective_query (original + clarifications) for display
+                        let originalQuery = "";
+                        if (msg.role === "assistant" && msg.rawBackendData?.effective_query) {
+                            // Use the effective query (original + clarifications)
+                            originalQuery = msg.rawBackendData.effective_query;
+                        } else if (msg.role === "assistant" && msg.rawBackendData?.original_query) {
+                            // Fall back to original query from backend
+                            originalQuery = msg.rawBackendData.original_query;
+                        } else if (index > 0 && messages[index - 1].role === "user") {
+                            // Final fallback to previous user message
+                            originalQuery = messages[index - 1].content;
+                        }
+
+                        return (
+                            <MessageBubble
+                                key={msg.id}
+                                message={msg}
+                                responseData={msg.responseData}
+                                rawBackendData={msg.rawBackendData}
+                                onClarify={submitClarification}
+                                isActiveClarification={pendingClarification === msg.responseData}
+                                onRetry={msg.role === "assistant" && msg.rawBackendData?.request_id
+                                    ? (modifiedQuery) => handleRetry(modifiedQuery, msg)
+                                    : undefined}
+                                originalQuery={originalQuery}
+                            />
+                        );
+                    })}
 
                     {isLoading && (
                         <div className="flex justify-start mb-4">

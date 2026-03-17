@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Star, ThumbsUp, ThumbsDown, Check, ChevronDown, ChevronUp } from "lucide-react";
+import { Star, ThumbsUp, ThumbsDown, Check, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
 import { submitFeedback } from "@/services/api";
+import RetryModal from "./RetryModal";
 
 interface FeedbackBarProps {
     requestId: string;
@@ -12,6 +13,8 @@ interface FeedbackBarProps {
     responseSummary: string;
     fullResponse?: string;
     sqlQuery?: string;
+    originalQuery?: string;
+    onRetry?: (modifiedQuery: string) => void;
 }
 
 export default function FeedbackBar({
@@ -22,14 +25,18 @@ export default function FeedbackBar({
     responseSummary,
     fullResponse,
     sqlQuery,
+    originalQuery,
+    onRetry,
 }: FeedbackBarProps) {
-    const [phase, setPhase] = useState<"idle" | "rating" | "submitted">("idle");
+    const [phase, setPhase] = useState<"idle" | "rating" | "submitted" | "retrying">("idle");
     const [rating, setRating] = useState<number>(0);
     const [hoveredStar, setHoveredStar] = useState<number>(0);
     const [showCorrection, setShowCorrection] = useState(false);
     const [correction, setCorrection] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [sentiment, setSentiment] = useState<"up" | "down" | null>(null);
+    const [showRetryModal, setShowRetryModal] = useState(false);
+    const [isRetryLoading, setIsRetryLoading] = useState(false);
 
     async function handleSubmit() {
         if (rating === 0 || isSubmitting) return;
@@ -60,6 +67,32 @@ export default function FeedbackBar({
         setPhase("rating");
     }
 
+    function handleRetryClick() {
+        if (!onRetry) return;
+        setShowRetryModal(true);
+    }
+
+    async function handleRetrySubmit(modifiedQuery: string) {
+        if (!onRetry) return;
+
+        setIsRetryLoading(true);
+        try {
+            await onRetry(modifiedQuery);
+            setShowRetryModal(false);
+            setPhase("retrying");
+        } catch (error) {
+            console.error("Retry failed:", error);
+            // Keep modal open to allow user to try again
+        } finally {
+            setIsRetryLoading(false);
+        }
+    }
+
+    function handleRetryCancel() {
+        if (isRetryLoading) return;
+        setShowRetryModal(false);
+    }
+
     if (phase === "submitted") {
         return (
             <div className="flex items-center gap-1.5 mt-3 text-green-600 text-xs">
@@ -69,24 +102,53 @@ export default function FeedbackBar({
         );
     }
 
+    if (phase === "retrying") {
+        return (
+            <div className="flex items-center gap-1.5 mt-3 text-blue-600 text-xs">
+                <RotateCcw size={14} className="animate-spin" strokeWidth={2.5} />
+                <span>Processing retry...</span>
+            </div>
+        );
+    }
+
     if (phase === "idle") {
         return (
-            <div className="flex items-center gap-2 mt-3">
-                <button
-                    onClick={() => handleThumb("up")}
-                    className="p-1.5 rounded-md text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
-                    title="Good response"
-                >
-                    <ThumbsUp size={14} />
-                </button>
-                <button
-                    onClick={() => handleThumb("down")}
-                    className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                    title="Bad response"
-                >
-                    <ThumbsDown size={14} />
-                </button>
-            </div>
+            <>
+                <div className="flex items-center gap-2 mt-3">
+                    <button
+                        onClick={() => handleThumb("up")}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                        title="Good response"
+                    >
+                        <ThumbsUp size={14} />
+                    </button>
+                    <button
+                        onClick={() => handleThumb("down")}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        title="Bad response"
+                    >
+                        <ThumbsDown size={14} />
+                    </button>
+                    {onRetry && (
+                        <button
+                            onClick={handleRetryClick}
+                            className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            title="Retry with different query"
+                        >
+                            <RotateCcw size={14} />
+                        </button>
+                    )}
+                </div>
+
+                {/* Retry Modal */}
+                <RetryModal
+                    isOpen={showRetryModal}
+                    originalQuery={originalQuery || query}
+                    onSubmit={handleRetrySubmit}
+                    onCancel={handleRetryCancel}
+                    isLoading={isRetryLoading}
+                />
+            </>
         );
     }
 

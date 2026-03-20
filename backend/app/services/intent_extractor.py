@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -308,29 +309,38 @@ def _init_log_db() -> None:
 # PUBLIC INTERFACE
 # =============================================================================
 
-def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None) -> dict[str, Any]:
+def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None, use_dspy: Optional[bool] = None) -> dict[str, Any]:
     """
     Extract intent from natural language query.
-    
+
     This is the ONLY public function in this module.
-    
+
     Args:
         query: Natural language user query
         previous_qco: Optional QCO from the previous query in this session
-        
+        prompt_version: Optional prompt version for RLHF
+        use_dspy: Force DSPy mode (overrides environment variable)
+
     Returns:
         Raw intent dict (UNTRUSTED, semantically unvalidated)
-        
+
     Raises:
         ExtractionError: Technical failure (LLM error, timeout, invalid JSON)
         FileNotFoundError: Prompt template or catalog missing
-        
+
     The returned dict is NOT validated against the catalog.
     Semantic validation happens downstream in intent_validator.
     """
     import time
     start_time = time.monotonic()
-    
+
+    # Check if DSPy mode is requested
+    should_use_dspy = use_dspy if use_dspy is not None else _should_use_dspy()
+
+    if should_use_dspy:
+        return _extract_intent_dspy(query, previous_qco, start_time)
+
+    # Continue with monolithic extraction
     raw_response = None
     intent_dict = None
     error = None
@@ -414,3 +424,96 @@ def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None
         #     error=error,
         #     duration_ms=duration_ms,
         # )
+
+
+# =============================================================================
+# DSPY INTEGRATION
+# =============================================================================
+
+def _should_use_dspy() -> bool:
+    """Check if DSPy mode should be used."""
+    try:
+        from app.dspy_pipeline.config import is_dspy_mode
+        return is_dspy_mode()
+    except ImportError:
+        logger.warning("DSPy pipeline not available, falling back to monolithic")
+        return False
+
+
+def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject], start_time: float) -> dict[str, Any]:
+    """
+    Extract intent using DSPy pipeline.
+
+    Args:
+        query: Natural language query
+        previous_qco: Previous query context
+        start_time: Start time for duration tracking
+
+    Returns:
+        Raw intent dict compatible with existing pipeline
+
+    Raises:
+        ExtractionError: Technical failure
+    """
+    try:
+        from app.dspy_pipeline.config import get_dspy_pipeline
+        from app.models.intent import Intent
+        from datetime import date
+
+        logger.info("🎯 [DSPy Integration] ======================================")
+        logger.info("🎯 [DSPy Integration] Using DSPy pipeline for intent extraction")
+        logger.info(f"🎯 [DSPy Integration] Query length: {len(query)} characters")
+        logger.info(f"🎯 [DSPy Integration] Has previous context: {'Yes' if previous_qco else 'No'}")
+        logger.info("🎯 [DSPy Integration] ======================================")
+
+        # Get configured pipeline
+        logger.debug("🎯 [DSPy Integration] Loading DSPy pipeline configuration")
+        pipeline = get_dspy_pipeline()
+
+        # Format previous context from QCO
+        previous_context = previous_qco.to_prompt_context() if previous_qco else ""
+        if previous_context:
+            logger.debug(f"🎯 [DSPy Integration] Previous context length: {len(previous_context)} characters")
+
+        # Call DSPy pipeline
+        logger.info("🎯 [DSPy Integration] 🚀 Calling DSPy pipeline...")
+        intent_result: Intent = pipeline(
+            query=query,
+            previous_context=previous_context,
+            current_date=date.today().isoformat()
+        )
+
+        # Convert to dict format expected by downstream code
+        intent_dict = intent_result.model_dump()
+
+        # Log successful extraction
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info("🎯 [DSPy Integration] ======================================")
+        logger.info("🎯 [DSPy Integration] ✅ DSPy extraction completed successfully!")
+        logger.info(f"🎯 [DSPy Integration] Duration: {duration_ms}ms")
+        logger.info(f"🎯 [DSPy Integration] Output scope: {intent_dict['sales_scope']}")
+        logger.info(f"🎯 [DSPy Integration] Output metrics: {len(intent_dict['metrics'])} items")
+        if intent_dict.get('group_by'):
+            logger.info(f"🎯 [DSPy Integration] Output dimensions: {len(intent_dict['group_by'])} items")
+        if intent_dict.get('filters'):
+            logger.info(f"🎯 [DSPy Integration] Output filters: {len(intent_dict['filters'])} items")
+        logger.info("🎯 [DSPy Integration] ======================================")
+
+        return intent_dict
+
+    except ImportError as e:
+        logger.error("🎯 [DSPy Integration] ❌ DSPy pipeline import failed")
+        logger.error(f"🎯 [DSPy Integration] Import error: {e}")
+        raise ExtractionError(f"DSPy pipeline not available: {e}") from e
+
+    except Exception as e:
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.error("🎯 [DSPy Integration] ======================================")
+        logger.error(f"🎯 [DSPy Integration] ❌ DSPy extraction failed after {duration_ms}ms")
+        logger.error(f"🎯 [DSPy Integration] Error: {str(e)}")
+        logger.error("🎯 [DSPy Integration] ======================================")
+        # Convert to extraction error for consistent error handling
+        if "timeout" in str(e).lower():
+            raise LLMTimeoutError(f"DSPy pipeline timeout: {e}") from e
+        else:
+            raise LLMCallError(f"DSPy pipeline error: {e}") from e

@@ -309,7 +309,7 @@ def _init_log_db() -> None:
 # PUBLIC INTERFACE
 # =============================================================================
 
-def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None, use_dspy: Optional[bool] = None) -> dict[str, Any]:
+def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None, use_dspy: Optional[bool] = None, skip_reset_overrides: bool = False) -> dict[str, Any]:
     """
     Extract intent from natural language query.
 
@@ -338,7 +338,7 @@ def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None
     should_use_dspy = use_dspy if use_dspy is not None else _should_use_dspy()
 
     if should_use_dspy:
-        return _extract_intent_dspy(query, previous_qco, start_time)
+        return _extract_intent_dspy(query, previous_qco, start_time, skip_reset_overrides)
 
     # Continue with monolithic extraction
     raw_response = None
@@ -440,7 +440,7 @@ def _should_use_dspy() -> bool:
         return False
 
 
-def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject], start_time: float) -> dict[str, Any]:
+def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject], start_time: float, skip_reset_overrides: bool = False) -> dict[str, Any]:
     """
     Extract intent using DSPy pipeline.
 
@@ -457,6 +457,8 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
     """
     try:
         from app.dspy_pipeline.config import get_dspy_pipeline
+        from app.dspy_pipeline.clarification_tool import ClarificationRequiredException
+        from app.services.intent_errors import IntentIncompleteError
         from app.models.intent import Intent
         from datetime import date
 
@@ -475,13 +477,24 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
         if previous_context:
             logger.debug(f"🎯 [DSPy Integration] Previous context length: {len(previous_context)} characters")
 
+        from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+
         # Call DSPy pipeline
         logger.info("🎯 [DSPy Integration] 🚀 Calling DSPy pipeline...")
-        intent_result: Intent = pipeline(
-            query=query,
-            previous_context=previous_context,
-            current_date=date.today().isoformat()
-        )
+        try:
+            intent_result: Intent = pipeline(
+                query=query,
+                previous_context=previous_context,
+                current_date=date.today().isoformat()
+            )
+        finally:
+            # Clear field overrides after the pipeline run completes, unless we're in a
+            # clarification re-run where we want to preserve previously resolved answers
+            # (whether it succeeded, raised ClarificationRequiredException, or errored).
+            if not skip_reset_overrides:
+                _ct.reset_for_new_request()
+            else:
+                logger.debug("🎯 [DSPy Integration] Skipping field override reset for clarification re-run")
 
         # Convert to dict format expected by downstream code
         intent_dict = intent_result.model_dump()
@@ -500,6 +513,55 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
         logger.info("🎯 [DSPy Integration] ======================================")
 
         return intent_dict
+
+    except ClarificationRequiredException as e:
+        # Convert DSPy clarification exception to the format expected by orchestrator
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info("🎯 [DSPy Integration] ======================================")
+        logger.info(f"🎯 [DSPy Integration] 🤔 Clarification required after {duration_ms}ms")
+        logger.info(f"🎯 [DSPy Integration] Request ID: {e.request_id}")
+        logger.info(f"🎯 [DSPy Integration] Question: {e.clarification_request.question}")
+        logger.info(f"🎯 [DSPy Integration] Type: {e.clarification_request.clarification_type}")
+        logger.info(f"🎯 [DSPy Integration] Field: {e.clarification_request.field_name}")
+        logger.info(f"🎯 [DSPy Integration] Options: {len(e.clarification_request.options)}")
+        logger.info("🎯 [DSPy Integration] ======================================")
+
+        # Create compatible IntentIncompleteError
+        # Extract option labels for allowed_values (what user sees)
+        allowed_values = []
+        if e.clarification_request.options:
+            allowed_values = [f"{opt.label}: {opt.description}" if opt.description else opt.label
+                              for opt in e.clarification_request.options]
+
+        # Determine missing fields from the clarification request
+        missing_fields = [e.clarification_request.field_name]
+        if e.clarification_request.field_path:
+            missing_fields = [e.clarification_request.field_path]
+
+        # Create partial intent from agent context if available
+        partial_intent = {"clarification_type": e.clarification_request.clarification_type.value}
+        if hasattr(e, 'agent_context') and e.agent_context:
+            partial_intent.update(e.agent_context.get('partial_output') or {})
+
+        # Also store DSPy-specific clarification info for potential direct handling
+        partial_intent["dspy_clarification_request_id"] = e.request_id
+        partial_intent["dspy_clarification_options"] = [
+            {"id": opt.id, "label": opt.label, "description": opt.description, "value": opt.value}
+            for opt in e.clarification_request.options
+        ]
+
+        # Build a user-friendly clarification message
+        clarification_message = e.clarification_request.question
+        if e.clarification_request.context:
+            clarification_message += f" {e.clarification_request.context}"
+
+        # Convert to IntentIncompleteError format that orchestrator expects
+        raise IntentIncompleteError(
+            missing_fields=missing_fields,
+            clarification_message=clarification_message,
+            partial_intent=partial_intent,
+            allowed_values=allowed_values
+        ) from e
 
     except ImportError as e:
         logger.error("🎯 [DSPy Integration] ❌ DSPy pipeline import failed")

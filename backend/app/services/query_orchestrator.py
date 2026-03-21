@@ -262,7 +262,7 @@ def _get_catalog() -> CatalogManager:
 # ORCHESTRATOR - THE MAIN FUNCTION
 # =============================================================================
 
-def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorResponse:
+def execute_query(query: str, session_id: Optional[str] = None, _skip_reset_overrides: bool = False, _resolved_clarifications: Optional[Dict[str, Any]] = None) -> OrchestratorResponse:
     """
     Execute a natural language query through the complete pipeline.
     
@@ -349,12 +349,28 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
         # -------------------------------------------------------------------------
         # STEP 2: Extract intent (LLM call, with QCO context)
         # -------------------------------------------------------------------------
-        response = _extract_intent(response, start_time, previous_qco=previous_qco)
+        response = _extract_intent(response, start_time, previous_qco=previous_qco, skip_reset_overrides=_skip_reset_overrides)
         if response.error:
             root_span.set_status(Status(StatusCode.ERROR, response.error.message))
             root_span.set_attribute("error.type", response.error.error_type)
             root_span.set_attribute("error.stage", response.error.stage)
             root_span.set_attribute("error.message", response.error.message)
+            return response
+        # DSPy pipeline may raise clarification at extraction stage (before validation)
+        if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
+            root_span.set_attribute("output.clarification_requested", True)
+            root_span.set_attribute("output.missing_fields", str(response.missing_fields or []))
+            root_span.set_attribute("output.clarification_message", response.clarification_message or "")
+            state = PipelineState(
+                request_id=response.request_id,
+                original_query=query,
+                intent=response.raw_intent or {},
+                missing_fields=response.missing_fields or [],
+                session_id=session_id,
+                resolved_clarifications=_resolved_clarifications or {}
+            )
+            save_state(state)
+            logger.info(f"DSPy clarification requested at extraction stage, saved state {response.request_id}")
             return response
         
         # -------------------------------------------------------------------------
@@ -416,6 +432,7 @@ def execute_query(query: str, session_id: Optional[str] = None) -> OrchestratorR
                 intent=response.merged_intent or response.raw_intent,
                 missing_fields=response.missing_fields or [],
                 session_id=session_id,
+                resolved_clarifications=_resolved_clarifications or {}
             )
             save_state(state)
             logger.info(f"Clarification requested, saved state {response.request_id}")
@@ -527,6 +544,10 @@ def resume_query(request_id: str, clarification_answers: dict, session_id: Optio
         span.set_attribute("input.clarification_answers", str(clarification_answers)[:500])
         span.set_attribute("input.value", json.dumps(clarification_answers, default=str))
         result = _resume_query_inner(request_id, clarification_answers, session_id=session_id)
+        # _resume_query_inner may return an OrchestratorResponse (when DSPy re-runs
+        # execute_query) or a plain dict. Normalise to dict for span tracking.
+        if hasattr(result, "to_dict"):
+            result = result.to_dict()
         span.set_attribute("output.success", result.get("success", False))
         span.set_attribute("output.stage", result.get("stage", ""))
         span.set_attribute("output.row_count", len(result.get("data") or []))
@@ -568,6 +589,175 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
     # Recover session_id from state if not provided by caller
     resolved_session_id = session_id or state.session_id
 
+    # Check if this is a DSPy clarification that needs special handling
+    if (state.intent.get("dspy_clarification_request_id") and
+        state.intent.get("clarification_type") in ["metric", "dimension", "time"]):
+
+        logger.info(f"Handling DSPy clarification for request {state.intent.get('dspy_clarification_request_id')}")
+
+        try:
+            clarification_type = state.intent["clarification_type"]
+            dspy_request_id = state.intent["dspy_clarification_request_id"]
+            # Use the options stored in the saved intent — no dependency on the in-memory tool
+            dspy_options = state.intent.get("dspy_clarification_options", [])
+
+            # Build lookup maps from stored options
+            label_to_value = {opt["label"]: opt["value"] for opt in dspy_options}
+            id_to_value = {opt["id"]: opt["value"] for opt in dspy_options}
+            # Also build case-insensitive maps for robustness
+            label_lower_to_value = {k.lower(): v for k, v in label_to_value.items()}
+            id_lower_to_value = {k.lower(): v for k, v in id_to_value.items()}
+            value_set = {opt["value"] for opt in dspy_options}
+
+            # Resolve what the user selected (support many answer formats)
+            resolved_value = None
+            for _field, answer in clarification_answers.items():
+                candidates = answer if isinstance(answer, list) else [answer]
+                for candidate in candidates:
+                    candidate = str(candidate).strip()
+                    cl = candidate.lower()
+
+                    # 1. Exact label match  (e.g. "State")
+                    if candidate in label_to_value:
+                        resolved_value = label_to_value[candidate]
+                    # 2. Exact id match  (e.g. "state")
+                    elif candidate in id_to_value:
+                        resolved_value = id_to_value[candidate]
+                    # 3. Direct value match  (e.g. "state" is itself the catalog value)
+                    elif candidate in value_set:
+                        resolved_value = candidate
+                    # 4. Case-insensitive label match  (e.g. "STATE")
+                    elif cl in label_lower_to_value:
+                        resolved_value = label_lower_to_value[cl]
+                    # 5. Case-insensitive id match
+                    elif cl in id_lower_to_value:
+                        resolved_value = id_lower_to_value[cl]
+                    else:
+                        # 6. "Label: description" format — UI sends this when user picks a chip
+                        #    e.g. "State: State dimension"  →  label = "State"
+                        if ":" in candidate:
+                            label_part = candidate.split(":", 1)[0].strip()
+                            resolved_value = (
+                                label_to_value.get(label_part)
+                                or label_lower_to_value.get(label_part.lower())
+                            )
+                        # 7. Partial / substring label match as last resort
+                        if not resolved_value:
+                            for label, value in label_to_value.items():
+                                if cl in label.lower() or label.lower() in cl:
+                                    resolved_value = value
+                                    break
+
+                    if resolved_value:
+                        break
+                if resolved_value:
+                    break
+
+            if resolved_value:
+                logger.info(f"DSPy clarification resolved to value: '{resolved_value}' (type={clarification_type})")
+
+                # Also mark as resolved in the clarification tool if request is still pending
+                try:
+                    from app.dspy_pipeline.clarification_tool import clarification_tool as _dspy_tool
+                    pending_req = _dspy_tool.get_clarification_request(dspy_request_id)
+                    if pending_req:
+                        matched_ids = [opt.id for opt in pending_req.options if opt.value == resolved_value]
+                        if matched_ids:
+                            _dspy_tool.provide_clarification(request_id=dspy_request_id,
+                                                             selected_option_ids=matched_ids)
+                except Exception as _ce:
+                    logger.debug(f"Could not mark DSPy clarification as completed (non-fatal): {_ce}")
+
+                # Build a clean patched intent (strip DSPy metadata keys)
+                _dspy_meta_keys = {"clarification_type", "dspy_clarification_request_id",
+                                   "dspy_clarification_options"}
+                base_intent = {k: v for k, v in state.intent.items() if k not in _dspy_meta_keys}
+
+                # Ensure base_intent has required fields with defaults if missing
+                if "sales_scope" not in base_intent:
+                    base_intent["sales_scope"] = "SECONDARY"
+                if "metrics" not in base_intent:
+                    base_intent["metrics"] = [{"name": "net_value", "aggregation": "sum"}]
+
+                # Inject the resolved value into the right field
+                if clarification_type == "dimension":
+                    base_intent["group_by"] = [resolved_value]
+                elif clarification_type == "metric":
+                    base_intent["metrics"] = [{"name": resolved_value, "aggregation": "sum"}]
+                elif clarification_type == "time":
+                    # Handle time clarification - the resolved_value should be a time window
+                    base_intent["time"] = {
+                        "dimension": "invoice_date",
+                        "window": resolved_value,
+                        "start_date": None,
+                        "end_date": None,
+                        "granularity": None
+                    }
+
+                logger.info(
+                    f"DSPy clarification resolved for '{resolved_value}' — re-running full pipeline "
+                    f"to discover any remaining ambiguities (multi-clarification support)"
+                )
+
+                # Store the resolved clarification to prevent infinite loops
+                resolved_clarifications = getattr(state, 'resolved_clarifications', {}) or {}
+                
+                # Map DSPy clarification type back to the field name agents check for
+                field_name_map = {
+                    "dimension": "group_by",
+                    "metric": "metrics", 
+                    "time": "time"
+                }
+                mapped_field = field_name_map.get(clarification_type, clarification_type)
+                resolved_clarifications[mapped_field] = resolved_value
+
+                # Seed the per-request field override so DimensionsAgent /
+                # MetricsAgent / TimeAgent can skip re-asking for this already-answered term
+                # without scanning global completed_responses (which leaks across requests).
+                # IMPORTANT: reset first, then set — so any stale overrides from a
+                # prior request are cleared before seeding the new answer.
+                try:
+                    from app.dspy_pipeline.clarification_tool import clarification_tool as _dspy_ct
+                    _dspy_ct.reset_for_new_request()  # clear any prior session's values
+
+                    # Restore all previously resolved clarifications
+                    for prev_type, prev_value in resolved_clarifications.items():
+                        # Backward compatibility for states saved before the mapping fix
+                        field_name_map = {
+                            "dimension": "group_by",
+                            "metric": "metrics", 
+                            "time": "time"
+                        }
+                        actual_type = field_name_map.get(prev_type, prev_type)
+                        _dspy_ct.set_field_override(actual_type, prev_value)
+                        logger.info(f"Restored clarification override: {actual_type} = {prev_value}")
+
+                except Exception as e:
+                    logger.warning(f"Failed to set clarification overrides: {e}")
+                    pass
+                # Delete the old state — a fresh state will be created if needed on the next run
+                try:
+                    delete_state(state.request_id)
+                except Exception:
+                    pass
+                # Re-run the full pipeline: the DimensionsAgent will see the resolved
+                # clarification in field_resolved_overrides and skip re-asking for it.
+                # Any NEW ambiguity found will trigger another clarification round.
+                return execute_query(
+                    query=state.original_query,
+                    session_id=resolved_session_id,
+                    _skip_reset_overrides=True,  # Preserve field overrides for multi-clarification
+                    _resolved_clarifications=resolved_clarifications
+                )
+            else:
+                logger.warning("Could not resolve DSPy clarification answer to a known option — falling through")
+
+        except Exception as e:
+            logger.error(f"Error handling DSPy clarification: {e}")
+            # Fall through to standard clarification handling
+
+
+    # Standard clarification handling for non-DSPy clarifications
     # BUG-02 FIX: Load previous QCO so merge_intent can apply inheritance rules
     previous_qco = None
     if resolved_session_id:
@@ -620,6 +810,7 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
                 intent=merged_intent,
                 missing_fields=response.missing_fields or [],
                 session_id=resolved_session_id,
+                resolved_clarifications=getattr(state, 'resolved_clarifications', {}) or {}
             ))
             response.duration_ms = int((time.monotonic() - start_time) * 1000)
             return response.to_dict()
@@ -681,7 +872,7 @@ def _resume_query_inner(request_id: str, clarification_answers: dict, session_id
         return response.to_dict()
 
 
-def _extract_intent(response: OrchestratorResponse, start_time: float, previous_qco: Optional[QueryContextObject] = None) -> OrchestratorResponse:
+def _extract_intent(response: OrchestratorResponse, start_time: float, previous_qco: Optional[QueryContextObject] = None, skip_reset_overrides: bool = False) -> OrchestratorResponse:
     with tracer.start_as_current_span("intent.extract") as span:
         span.set_attribute("input.query", response.query[:500])
         span.set_attribute("input.has_previous_qco", previous_qco is not None)
@@ -692,9 +883,10 @@ def _extract_intent(response: OrchestratorResponse, start_time: float, previous_
         try:
             logger.info("Step 2: Extracting intent...")
             raw_intent = extract_intent(
-                response.query, 
-                previous_qco=previous_qco, 
-                prompt_version=response.prompt_version
+                response.query,
+                previous_qco=previous_qco,
+                prompt_version=response.prompt_version,
+                skip_reset_overrides=skip_reset_overrides
             )
             response.raw_intent = raw_intent
             response.stage = PipelineStage.INTENT_EXTRACTED
@@ -705,6 +897,23 @@ def _extract_intent(response: OrchestratorResponse, start_time: float, previous_
             span.set_attribute("output.raw_intent", str(raw_intent)[:1000])
             span.set_attribute("output.value", json.dumps(raw_intent, default=str))
             logger.info(f"Intent extracted: {raw_intent}")
+
+        except IntentIncompleteError as e:
+            # DSPy pipeline requested clarification during intent extraction
+            logger.warning(f"DSPy clarification needed during extraction: {e}")
+            span.set_attribute("output.clarification_requested", True)
+            span.set_attribute("output.missing_fields", str(e.missing_fields))
+            span.set_attribute("output.clarification_message", e.clarification_message or "")
+            response.clarification = True
+            response.missing_fields = e.missing_fields
+            response.clarification_message = e.clarification_message
+            response.allowed_values = e.allowed_values
+            # Store DSPy clarification metadata into raw_intent so resume_query can use it
+            raw_intent = e.partial_intent or {}
+            response.raw_intent = raw_intent
+            response.stage = PipelineStage.CLARIFICATION_REQUESTED
+            response.error = None
+            response.duration_ms = int((time.monotonic() - start_time) * 1000)
 
         except JSONParseError as e:
             logger.error(f"JSON parse error: {e}")
@@ -1196,7 +1405,7 @@ def execute_retry_query(
                 span.set_attribute("context.has_previous_qco", False)
 
             # Extract intent with context
-            response = _extract_intent(response, start_time, previous_qco=previous_qco)
+            response = _extract_intent(response, start_time, previous_qco=previous_qco, skip_reset_overrides=False)
             if response.error:
                 response.duration_ms = int((time.monotonic() - start_time) * 1000)
                 return response

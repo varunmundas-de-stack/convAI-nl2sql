@@ -170,6 +170,44 @@ class ClarificationTool:
         """Initialize the clarification tool."""
         self.pending_requests: Dict[str, ClarificationRequest] = {}
         self.completed_responses: Dict[str, ClarificationResponse] = {}
+        # Per-request overrides: {field_name: resolved_catalog_value}
+        # Populated by the resume path before re-running the pipeline.
+        # Cleared at the start of every fresh (non-resume) pipeline run.
+        self.field_resolved_overrides: Dict[str, str] = {}
+
+    def reset_for_new_request(self) -> None:
+        """
+        Clear per-request state so a fresh query never sees answers
+        from a prior user session.
+
+        Call this at the start of every NEW (non-resume) pipeline execution.
+        """
+        self.field_resolved_overrides = {}
+
+    def set_field_override(self, field_name: str, resolved_value: str) -> None:
+        """
+        Store a resolved clarification answer for the current re-run.
+
+        Called by the resume path BEFORE re-running the pipeline so that
+        agents can skip re-asking the same clarification question.
+
+        Args:
+            field_name:     e.g. "group_by" or "metrics"
+            resolved_value: the catalog value, e.g. "state" or "net_value"
+        """
+        self.field_resolved_overrides[field_name] = resolved_value
+        logger.debug(
+            f"[ClarificationTool] Field override set: {field_name!r} → {resolved_value!r}"
+        )
+
+    def get_field_override(self, field_name: str) -> Optional[str]:
+        """
+        Retrieve the resolved value for a field (if set for this re-run).
+
+        Returns None when running fresh (no prior clarification for this field).
+        """
+        return self.field_resolved_overrides.get(field_name)
+
 
     def request_clarification(
         self,

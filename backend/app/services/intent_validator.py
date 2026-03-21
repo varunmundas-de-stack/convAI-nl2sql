@@ -104,24 +104,11 @@ class IntentValidator:
         # --- Derive intent type for rule checks ---
         intent_type = derive_intent_type_safe(intent)
 
-        # --- Rule 1: Time is mandatory AND must have a date range ---
-        # Both conditions must be true:
-        #   (a) a time block must exist (window or start_date/end_date)
-        #   (b) granularity alone is NOT enough — a range is always required
-        if intent.time is None:
-            missing_fields.append("time")
-            clarification_questions.append(
-                "What time range should this query cover? "
-            )
-        else:
-            has_range = bool(intent.time.window) or bool(
-                intent.time.start_date and intent.time.end_date
-            )
-            if not has_range:
-                missing_fields.append("time.window")
-                clarification_questions.append(
-                    "What time range should this query cover? "
-                )
+        # time is optional — ScopeTimeAgent (DSPy Stage 2) already decided
+        # whether a time constraint is needed for the query. If it chose not to
+        # emit one, the query runs over all available data, which is valid.
+        # Rule 1 ("time mandatory") is intentionally removed.
+
 
         # --- Rule 4: Trend without granularity → clarify ---
         # Exception: if a derived_metric is present that the period planner
@@ -251,8 +238,6 @@ class IntentValidator:
                 allowed_values = list(self.catalog.raw_catalog().get("dimensions", {}).keys())
             elif first_missing == "time.granularity":
                 allowed_values = ["day", "week", "month", "quarter", "year"]
-            elif first_missing in ("time", "time.window"):
-                allowed_values = list(self.catalog.raw_catalog().get("time_windows", {}).keys())
             elif first_missing == "post_processing.comparison.comparison_window":
                 allowed_values = ["previous_period", "last_month", "last_quarter", "last_year"]
                 

@@ -51,6 +51,41 @@ DIMENSION_ALIASES = {
     "product": "product_desc"
 }
 
+# Semantic groups: natural-language terms → list of candidate catalog dimensions
+# When a term matches a group with 2+ candidates, clarification is requested.
+DIMENSION_SEMANTIC_GROUPS: dict = {
+    # Geographic / location ambiguity
+    "location":    ["zone", "state", "city"],
+    "geography":   ["zone", "state", "city"],
+    "geo":         ["zone", "state", "city"],
+    "area":        ["zone", "state", "city"],
+    "place":       ["zone", "state", "city"],
+    "place name":  ["zone", "state", "city"],
+    "where":       ["zone", "state", "city"],
+    # Product ambiguity
+    "item":        ["product_desc", "sku_code", "brand"],
+    "product":     ["product_desc", "sku_code"],
+    "goods":       ["product_desc", "category"],
+    "product group": ["category", "sub_category", "brand"],
+    # Channel ambiguity
+    "channel":     ["retailer_type", "route_name"],
+    "outlet":      ["retailer_name", "retailer_type"],
+    "customer":    ["retailer_name", "distributor_name"],
+    # Route ambiguity
+    "route":       ["route_code", "route_name"],
+}
+
+# Metric semantic groups
+METRIC_SEMANTIC_GROUPS: dict = {
+    "value":    ["net_value", "gross_value"],
+    "amount":   ["net_value", "gross_value"],
+    "money":    ["net_value", "gross_value"],
+    "profit":   ["net_value", "gross_value"],
+    "units":    ["billed_qty", "count"],
+    "volume":   ["billed_qty", "count"],
+    "orders":   ["count", "net_value"],
+}
+
 # Time windows from catalog
 TIME_WINDOWS = frozenset([
     "today", "yesterday", "last_7_days", "last_30_days", "last_90_days",
@@ -121,9 +156,59 @@ class ClassifiedQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ScopeResult(BaseModel):
+    """
+    Output of ScopeAgent - resolved sales scope.
+    """
+    sales_scope: Literal["PRIMARY", "SECONDARY"] = Field(
+        ...,
+        description="Resolved sales scope based on query context"
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TimeResult(BaseModel):
+    """
+    Output of TimeAgent - resolved time specification with decision logic.
+    """
+    time_window: Optional[str] = Field(
+        None,
+        description="Named time window if matches catalog exactly"
+    )
+
+    start_date: Optional[str] = Field(
+        None,
+        description="Explicit start date in YYYY-MM-DD format"
+    )
+
+    end_date: Optional[str] = Field(
+        None,
+        description="Explicit end date in YYYY-MM-DD format"
+    )
+
+    granularity: Optional[Literal["day", "week", "month", "quarter", "year"]] = Field(
+        None,
+        description="Time grouping granularity for trend queries"
+    )
+
+    has_time_constraint: bool = Field(
+        ...,
+        description="Whether any time constraint was specified"
+    )
+
+    requires_clarification: bool = Field(
+        default=False,
+        description="Whether time clarification is needed based on query type"
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# Backwards compatibility alias with TimeResult fields for legacy tests
 class ScopeTimeResult(BaseModel):
     """
-    Output of ScopeTimeAgent - resolved sales scope and time specification.
+    Legacy combined scope and time result for backwards compatibility.
     """
     sales_scope: Literal["PRIMARY", "SECONDARY"] = Field(
         ...,
@@ -276,3 +361,58 @@ def get_hierarchy_next_level(current_dim: str) -> Optional[str]:
         idx = PRODUCT_HIERARCHY.index(current_dim)
         return PRODUCT_HIERARCHY[idx + 1] if idx < len(PRODUCT_HIERARCHY) - 1 else None
     return None
+
+
+def find_ambiguous_dimension_candidates(term: str, valid_dims: frozenset) -> list:
+    """
+    Deterministically find catalog dimension candidates for an ambiguous term.
+
+    Returns a list of matching catalog dimension names when the term is
+    ambiguous (not a direct alias/catalog hit, but semantically matches
+    multiple dimensions). Returns an empty list when unambiguous.
+    """
+    t = term.strip().lower()
+
+    # 1. Direct catalog match or single-target alias → not ambiguous
+    direct = resolve_dimension_alias(t)
+    if direct in valid_dims:
+        return []  # Resolves cleanly to one dimension
+
+    # 2. Semantic group lookup → ambiguous if 2+ candidates exist
+    group = DIMENSION_SEMANTIC_GROUPS.get(t)
+    if group:
+        candidates = [d for d in group if d in valid_dims]
+        if len(candidates) >= 2:
+            return candidates
+
+    # 3. Substring fallback: term is a sub/super-string of dimension names
+    substring_matches = [
+        d for d in valid_dims
+        if t in d.replace("_", " ") or d.replace("_", " ") in t
+    ]
+    if len(substring_matches) >= 2:
+        return substring_matches
+
+    return []
+
+
+def find_ambiguous_metric_candidates(term: str) -> list:
+    """
+    Deterministically find catalog metric candidates for an ambiguous term.
+    Returns a list of matching metric names, or empty if unambiguous.
+    """
+    t = term.strip().lower()
+
+    # Direct alias → single target
+    direct = resolve_metric_alias(t)
+    if direct in CATALOG_METRICS:
+        return []
+
+    # Semantic group lookup
+    group = METRIC_SEMANTIC_GROUPS.get(t)
+    if group:
+        candidates = [m for m in group if m in CATALOG_METRICS]
+        if len(candidates) >= 2:
+            return candidates
+
+    return []

@@ -14,34 +14,35 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 # =============================================================================
 
 # Metrics available in the catalog
-CATALOG_METRICS = frozenset({
-    "count",        # count of transactions      (aggregation: count)
-    "net_value",    # total net sales value       (aggregation: sum)
-    "gross_value",  # total gross sales value     (aggregation: sum)
-    "tax_value",    # total tax amount            (aggregation: sum)
-    "billed_qty",   # total sales quantity        (aggregation: sum)
-})
+METRICS_CATALOG = [
+    {
+        "name": "count",
+        "description": "Number of sales transactions",
+        "aggregation": "count",
+    },
+    {
+        "name": "net_value",
+        "description": "Total net sales value after discounts",
+        "aggregation": "sum",
+    },
+    {
+        "name": "gross_value",
+        "description": "Total gross sales value before discounts",
+        "aggregation": "sum",
+    },
+    {
+        "name": "tax_value",
+        "description": "Total tax amount",
+        "aggregation": "sum",
+    },
+    {
+        "name": "billed_qty",
+        "description": "Total sales quantity (units/volume sold)",
+        "aggregation": "sum",
+    },
+]
 
-# Metric aliases for user-friendly terms
-METRIC_ALIASES: dict[str, str] = {
-    "volume_qty":   "billed_qty",
-    "quantity":     "billed_qty",
-    "volume":       "billed_qty",
-    "transactions": "count",
-    "orders":       "count",
-    "sales":        "net_value",
-    "revenue":      "net_value",
-    "turnover":     "net_value",
-}
-
-# Ambiguous terms that could map to multiple metrics → trigger clarification.
-METRIC_SEMANTIC_GROUPS: dict[str, list[str]] = {
-    "value":  ["net_value", "gross_value"],
-    "amount": ["net_value", "gross_value"],
-    "money":  ["net_value", "gross_value"],
-    "profit": ["net_value", "gross_value"],
-    "units":  ["billed_qty", "count"],
-}
+CATALOG_METRICS = frozenset(m["name"] for m in METRICS_CATALOG)
 
 # Dimensions available in both PRIMARY and SECONDARY
 COMMON_DIMENSIONS = frozenset({
@@ -59,30 +60,6 @@ SECONDARY_ONLY_DIMENSIONS = frozenset({
 # All valid dimensions
 ALL_DIMENSIONS = COMMON_DIMENSIONS | SECONDARY_ONLY_DIMENSIONS
 
-# Dimension aliases
-DIMENSION_ALIASES: dict[str, str] = {
-    "territory": "zone",
-    "region":    "zone",
-    "distributor": "distributor_name",
-    "retailer":  "retailer_name",
-    "product":   "product_desc",
-}
-
-# Semantic groups: natural-language terms → list of candidate catalog dimensions
-# When a term matches a group with 2+ candidates, clarification is requested.
-DIMENSION_SEMANTIC_GROUPS: dict[str, list[str]] = {
-    "location":      ["zone", "state", "city"],
-    "geography":     ["zone", "state", "city"],
-    "geo":           ["zone", "state", "city"],
-    "area":          ["zone", "state", "city"],
-    "item":          ["product_desc", "sku_code", "brand"],
-    "product group": ["category", "sub_category", "brand"],
-    "channel":       ["retailer_type", "route_name"],
-    "outlet":        ["retailer_name", "retailer_type"],
-    "customer":      ["retailer_name", "distributor_name"],
-    "route":         ["route_code", "route_name"],
-}
-
 # Time windows from catalog
 TIME_WINDOWS = frozenset({
     "today", "yesterday",
@@ -97,11 +74,6 @@ TIME_GRANULARITIES = frozenset({
     "day", "week", "month", "quarter", "year"
 })
 
-
-
-GEO_HIERARCHY     = ["zone", "state", "city"]
-PRODUCT_HIERARCHY = ["category", "sub_category", "brand", "sku_code"]
- 
 # =============================================================================
 # AGENT 1 OUTPUT — ClassifiedQuery
 # =============================================================================
@@ -353,7 +325,7 @@ class MetricsResult(BaseModel):
         It is parallel to metrics (same index = same metric).
     """
  
-    metrics: List[str] = Field(
+    metrics: List[MetricSpec] = Field(
         min_length=1,
         description=(
             "Canonical metric names from CATALOG_METRICS. "
@@ -507,7 +479,7 @@ class TimeSpec(BaseModel):
     """Time block in the final Intent. Always uses 'invoice_date'."""
  
     dimension: Literal["invoice_date"] = Field(default="invoice_date")
-    window: Optional[str] = Field(default=None)
+    window: Optional[str] = Field(alias="time_window")
     start_date: Optional[str] = Field(default=None)
     end_date: Optional[str] = Field(default=None)
     granularity: Optional[Literal["day", "week", "month", "quarter", "year"]] = Field(default=None)
@@ -547,68 +519,66 @@ class Intent(BaseModel):
 def get_valid_dimensions_for_scope(scope: str) -> frozenset[str]:
     """Returns the set of valid dimensions for a given sales scope."""
     return COMMON_DIMENSIONS if scope == "PRIMARY" else ALL_DIMENSIONS
- 
- 
-def resolve_metric_alias(term: str) -> str:
-    """Resolves a metric alias to its canonical name. Returns term unchanged if not an alias."""
-    return METRIC_ALIASES.get(term.lower(), term)
- 
- 
-def resolve_dimension_alias(term: str) -> str:
-    """Resolves a dimension alias to its canonical name. Returns term unchanged if not an alias."""
-    return DIMENSION_ALIASES.get(term.lower(), term)
- 
- 
+  
 def is_valid_time_window(window: str) -> bool:
     return window in TIME_WINDOWS
+
+ 
+# def resolve_metric_alias(term: str) -> str:
+#     """Resolves a metric alias to its canonical name. Returns term unchanged if not an alias."""
+#     return METRIC_ALIASES.get(term.lower(), term)
  
  
-def get_hierarchy_next_level(current_dim: str) -> Optional[str]:
-    """Returns the next level down in the hierarchy for drill-down operations."""
-    for hierarchy in (GEO_HIERARCHY, PRODUCT_HIERARCHY):
-        if current_dim in hierarchy:
-            idx = hierarchy.index(current_dim)
-            return hierarchy[idx + 1] if idx < len(hierarchy) - 1 else None
-    return None
+# def resolve_dimension_alias(term: str) -> str:
+#     """Resolves a dimension alias to its canonical name. Returns term unchanged if not an alias."""
+#     return DIMENSION_ALIASES.get(term.lower(), term)
+ 
+# def get_hierarchy_next_level(current_dim: str) -> Optional[str]:
+#     """Returns the next level down in the hierarchy for drill-down operations."""
+#     for hierarchy in (GEO_HIERARCHY, PRODUCT_HIERARCHY):
+#         if current_dim in hierarchy:
+#             idx = hierarchy.index(current_dim)
+#             return hierarchy[idx + 1] if idx < len(hierarchy) - 1 else None
+#     return None
  
  
-def find_ambiguous_dimension_candidates(term: str, valid_dims: frozenset) -> list:
-    """
-    Returns candidate catalog dimensions when a term is ambiguous (2+ matches).
-    Returns empty list if the term resolves cleanly to one dimension.
-    """
-    t = term.strip().lower()
+# def find_ambiguous_dimension_candidates(term: str, valid_dims: frozenset) -> list:
+#     """
+#     Returns candidate catalog dimensions when a term is ambiguous (2+ matches).
+#     Returns empty list if the term resolves cleanly to one dimension.
+#     """
+#     t = term.strip().lower()
  
-    # Direct alias or catalog match → unambiguous
-    if resolve_dimension_alias(t) in valid_dims:
-        return []
+#     # Direct alias or catalog match → unambiguous
+#     if resolve_dimension_alias(t) in valid_dims:
+#         return []
  
-    # Semantic group match
-    group = DIMENSION_SEMANTIC_GROUPS.get(t)
-    if group:
-        candidates = [d for d in group if d in valid_dims]
-        if len(candidates) >= 2:
-            return candidates
+#     # Semantic group match
+#     group = DIMENSION_SEMANTIC_GROUPS.get(t)
+#     if group:
+#         candidates = [d for d in group if d in valid_dims]
+#         if len(candidates) >= 2:
+#             return candidates
  
-    # Substring fallback
-    matches = [d for d in valid_dims if t in d.replace("_", " ") or d.replace("_", " ") in t]
-    return matches if len(matches) >= 2 else []
+#     # Substring fallback
+#     matches = [d for d in valid_dims if t in d.replace("_", " ") or d.replace("_", " ") in t]
+#     return matches if len(matches) >= 2 else []
  
  
-def find_ambiguous_metric_candidates(term: str) -> list:
-    """
-    Returns candidate metrics when a term is ambiguous (2+ matches).
-    Returns empty list if the term resolves cleanly to one metric.
-    """
-    t = term.strip().lower()
+# def find_ambiguous_metric_candidates(term: str) -> list:
+#     """
+#     Returns candidate metrics when a term is ambiguous (2+ matches).
+#     Returns empty list if the term resolves cleanly to one metric.
+#     """
+#     t = term.strip().lower()
  
-    if resolve_metric_alias(t) in CATALOG_METRICS:
-        return []
+#     if resolve_metric_alias(t) in CATALOG_METRICS:
+#         return []
  
-    group = METRIC_SEMANTIC_GROUPS.get(t)
-    if group:
-        candidates = [m for m in group if m in CATALOG_METRICS]
-        if len(candidates) >= 2:
-            return candidates
+#     group = METRIC_SEMANTIC_GROUPS.get(t)
+#     if group:
+#         candidates = [m for m in group if m in CATALOG_METRICS]
+#         if len(candidates) >= 2:
+#             return candidates
  
-    return []
+#     return []

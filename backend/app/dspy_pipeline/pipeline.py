@@ -52,6 +52,8 @@ class IntentExtractionPipeline(dspy.Module):
     ) -> Intent:
         overrides = overrides or {}
         logger.info("[DSPy Pipeline] Starting intent extraction pipeline execution")
+        if overrides:
+            logger.info(f"[DSPy Pipeline] Pipeline received overrides: {overrides}")
         pipeline_start_time = time.monotonic()
 
         # -------------------------
@@ -61,6 +63,7 @@ class IntentExtractionPipeline(dspy.Module):
         step_start = time.monotonic()
         classified_query = self.classifier(query=query)
         logger.info("[DSPy Pipeline] [1/8] Classifier completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [1/8] Output: %s", classified_query.model_dump_json() if hasattr(classified_query, "model_dump_json") else str(classified_query))
 
         # -------------------------
         # 2. Scope
@@ -69,6 +72,7 @@ class IntentExtractionPipeline(dspy.Module):
         step_start = time.monotonic()
         scope_result = self.scope(classified_query=classified_query, overrides=overrides)
         logger.info("[DSPy Pipeline] [2/8] Scope completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [2/8] Output: %s", scope_result.model_dump_json() if hasattr(scope_result, "model_dump_json") else str(scope_result))
 
         # -------------------------
         # 3. Time
@@ -82,6 +86,7 @@ class IntentExtractionPipeline(dspy.Module):
             overrides=overrides,
         )
         logger.info("[DSPy Pipeline] [3/8] Time completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [3/8] Output: %s", time_result.model_dump_json() if hasattr(time_result, "model_dump_json") else str(time_result))
 
         # -------------------------
         # 4. Metrics
@@ -94,6 +99,7 @@ class IntentExtractionPipeline(dspy.Module):
             overrides=overrides,
         )
         logger.info("[DSPy Pipeline] [4/8] Metrics completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [4/8] Output: %s", metrics_result.model_dump_json() if hasattr(metrics_result, "model_dump_json") else str(metrics_result))
 
         # -------------------------
         # 5. Dimensions
@@ -107,6 +113,7 @@ class IntentExtractionPipeline(dspy.Module):
             overrides=overrides,
         )
         logger.info("[DSPy Pipeline] [5/8] Dimensions completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [5/8] Output: %s", dimensions_result.model_dump_json() if hasattr(dimensions_result, "model_dump_json") else str(dimensions_result))
 
         # -------------------------
         # 6. Post Processing
@@ -119,6 +126,7 @@ class IntentExtractionPipeline(dspy.Module):
             dimensions_result=dimensions_result,
         )
         logger.info("[DSPy Pipeline] [6/8] Post Processing completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [6/8] Output: %s", post_processing_result.model_dump_json() if hasattr(post_processing_result, "model_dump_json") else str(post_processing_result))
 
         # -------------------------
         # 7. Assemble
@@ -134,6 +142,7 @@ class IntentExtractionPipeline(dspy.Module):
             post_processing_result=post_processing_result,
         )
         logger.info("[DSPy Pipeline] [7/8] Assembly completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [7/8] Output: %s", intent.model_dump_json() if hasattr(intent, "model_dump_json") else str(intent))
 
         # -------------------------
         # 8. Final Validation (CRITICAL)
@@ -142,6 +151,7 @@ class IntentExtractionPipeline(dspy.Module):
         step_start = time.monotonic()
         intent = Intent.model_validate(intent)
         logger.info("[DSPy Pipeline] [8/8] Final Validation completed in %dms", int((time.monotonic() - step_start) * 1000))
+        logger.info("[DSPy Pipeline] [8/8] Output: %s", intent.model_dump_json() if hasattr(intent, "model_dump_json") else str(intent))
 
         logger.info("[DSPy Pipeline] Pipeline execution completed successfully in %dms", int((time.monotonic() - pipeline_start_time) * 1000))
         return intent

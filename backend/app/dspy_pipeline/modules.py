@@ -187,7 +187,7 @@ class TimeModule(dspy.Module):
         # 2. Rule 5 — STRUCTURAL
         # -------------------------
         if intent in ["STRUCTURAL", "MINIMAL_MESSAGE"]:
-            return TimeResult()
+            raise ClarificationRequired(build_time_clarification(ambiguous_expression="time period", candidate_windows=sorted(TIME_WINDOWS)))
 
         # -------------------------
         # 3. Detect explicit time

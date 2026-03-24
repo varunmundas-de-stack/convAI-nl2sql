@@ -19,7 +19,6 @@ from .signatures import (
     ClassifyQuery,
     ResolveScope,
     ResolveTime,
-    ResolveScopeTime,
     ExtractMetrics,
     ResolveDimensions,
     AssembleIntent
@@ -35,11 +34,11 @@ from .schemas import (
     ClassifiedQuery,
     ScopeResult,
     TimeResult,
-    ScopeTimeResult,
     MetricsResult,
     DimensionsResult,
     FilterCondition,
-    PostProcessingSpec,
+    PostProcessingResult,
+    Intent,
     CATALOG_METRICS,
     ALL_DIMENSIONS,
     COMMON_DIMENSIONS,
@@ -51,7 +50,6 @@ from .schemas import (
     find_ambiguous_dimension_candidates,
     find_ambiguous_metric_candidates,
 )
-from ..models.intent import Intent, Metric, Filter, TimeSpec, RankingSpec, ComparisonSpec, PostProcessing
 
 logger = logging.getLogger(__name__)
 
@@ -76,49 +74,59 @@ class ClassifierAgent(dspy.Module):
         logger.debug(f"🏷️  [ClassifierAgent] Input query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
 
         try:
-            # Call DSPy predictor
+            # Call DSPy predictor - new signature returns complete ClassifiedQuery JSON
             logger.debug("🏷️  [ClassifierAgent] Calling DSPy ChainOfThought classifier")
             result = self.classifier(query=query)
 
-            logger.debug(f"🏷️  [ClassifierAgent] Raw DSPy output - metrics: {result.metric_terms}")
-            logger.debug(f"🏷️  [ClassifierAgent] Raw DSPy output - dimensions: {result.dimension_terms}")
-            logger.debug(f"🏷️  [ClassifierAgent] Raw DSPy output - time: {result.time_expressions}")
+            logger.debug(f"🏷️  [ClassifierAgent] Raw DSPy output: {result.classified_query}")
 
-            # Parse comma-separated lists
-            classified = ClassifiedQuery(
-                query_text=query,
-                metric_terms=self._parse_terms(result.metric_terms),
-                dimension_terms=self._parse_terms(result.dimension_terms),
-                filter_terms=self._parse_terms(result.filter_terms),
-                time_expressions=self._parse_terms(result.time_expressions),
-                ranking_indicators=self._parse_terms(result.ranking_indicators),
-                scope_indicators=self._parse_terms(result.scope_indicators),
-                comparison_indicators=self._parse_terms(result.comparison_indicators)
-            )
+            # Parse the JSON result into ClassifiedQuery object
+            if isinstance(result.classified_query, str):
+                # If it's a JSON string, parse it
+                import json
+                classified_dict = json.loads(result.classified_query)
+                classified = ClassifiedQuery(**classified_dict)
+            elif isinstance(result.classified_query, dict):
+                # If it's already a dict, use it directly
+                classified = ClassifiedQuery(**result.classified_query)
+            elif isinstance(result.classified_query, ClassifiedQuery):
+                # If it's already a ClassifiedQuery object, use it
+                classified = result.classified_query
+            else:
+                raise ValueError(f"Unexpected classified_query type: {type(result.classified_query)}")
 
             logger.info(f"🏷️  [ClassifierAgent] ✅ Classification successful")
-            logger.info(f"🏷️  [ClassifierAgent] Found {len(classified.metric_terms)} metric terms: {classified.metric_terms}")
-            logger.info(f"🏷️  [ClassifierAgent] Found {len(classified.dimension_terms)} dimension terms: {classified.dimension_terms}")
-            logger.info(f"🏷️  [ClassifierAgent] Found {len(classified.time_expressions)} time expressions: {classified.time_expressions}")
-            if classified.ranking_indicators:
-                logger.info(f"🏷️  [ClassifierAgent] Found ranking indicators: {classified.ranking_indicators}")
-            if classified.scope_indicators:
-                logger.info(f"🏷️  [ClassifierAgent] Found scope indicators: {classified.scope_indicators}")
+            logger.info(f"🏷️  [ClassifierAgent] Query intent: {classified.query_intent}")
+            logger.info(f"🏷️  [ClassifierAgent] Found {len(classified.classified_terms)} classified terms")
+            logger.info(f"🏷️  [ClassifierAgent] Found {len(classified.filter_hints)} filter hints")
+            if classified.explicit_scope:
+                logger.info(f"🏷️  [ClassifierAgent] Explicit scope: {classified.explicit_scope}")
+
+            # Log term breakdown by role
+            term_counts = {}
+            for term in classified.classified_terms:
+                role = term.role
+                term_counts[role] = term_counts.get(role, 0) + 1
+
+            for role, count in term_counts.items():
+                logger.info(f"🏷️  [ClassifierAgent] {role} terms: {count}")
 
             logger.debug(f"🏷️  [ClassifierAgent] Complete classification result: {classified.model_dump()}")
             return classified
 
         except Exception as e:
             logger.error(f"🏷️  [ClassifierAgent] ❌ Classification failed: {e}")
-            logger.warning(f"🏷️  [ClassifierAgent] 🔄 Falling back to empty classification")
-            # Fallback: empty classification
-            return ClassifiedQuery(query_text=query)
+            logger.warning(f"🏷️  [ClassifierAgent] 🔄 Falling back to minimal classification")
 
-    def _parse_terms(self, terms_str: str) -> List[str]:
-        """Parse comma-separated terms string into list."""
-        if not terms_str or terms_str.strip().lower() in ['none', 'null', '']:
-            return []
-        return [term.strip() for term in terms_str.split(',') if term.strip()]
+            # Fallback: minimal classification with required fields
+            return ClassifiedQuery(
+                original_query=query,
+                classified_terms=[],
+                query_intent="KPI",  # Safe default
+                filter_hints=[],
+                explicit_scope=None
+            )
+
 
 
 class ScopeAgent(dspy.Module):
@@ -136,20 +144,29 @@ class ScopeAgent(dspy.Module):
     def forward(self, classified_query: ClassifiedQuery) -> ScopeResult:
         """Resolve sales scope from query indicators."""
         logger.info("🏢 [ScopeAgent] Starting scope resolution")
-        logger.debug(f"🏢 [ScopeAgent] Scope indicators: {classified_query.scope_indicators}")
+        logger.debug(f"🏢 [ScopeAgent] Explicit scope: {classified_query.explicit_scope}")
 
         try:
-            # Call DSPy predictor with serialized input per RULE M4
-            classified_json = classified_query.model_dump_json()
+            # Call DSPy predictor - pass ClassifiedQuery object directly per new signature
             logger.debug("🏢 [ScopeAgent] Calling DSPy scope resolver")
-            result = self.resolver(classified_query=classified_json)
+            result = self.resolver(classified_query=classified_query)
 
-            logger.debug(f"🏢 [ScopeAgent] Raw DSPy output - scope: {result.sales_scope}")
+            logger.debug(f"🏢 [ScopeAgent] Raw DSPy output: {result.scope_result}")
 
-            # Parse and validate scope
-            scope_result = ScopeResult(
-                sales_scope=self._parse_sales_scope(result.sales_scope)
-            )
+            # Parse the JSON result into ScopeResult object
+            if isinstance(result.scope_result, str):
+                # If it's a JSON string, parse it
+                import json
+                scope_dict = json.loads(result.scope_result)
+                scope_result = ScopeResult(**scope_dict)
+            elif isinstance(result.scope_result, dict):
+                # If it's already a dict, use it directly
+                scope_result = ScopeResult(**result.scope_result)
+            elif isinstance(result.scope_result, ScopeResult):
+                # If it's already a ScopeResult object, use it
+                scope_result = result.scope_result
+            else:
+                raise ValueError(f"Unexpected scope_result type: {type(result.scope_result)}")
 
             logger.info(f"🏢 [ScopeAgent] ✅ Scope resolution successful")
             logger.info(f"🏢 [ScopeAgent] Sales scope: {scope_result.sales_scope}")
@@ -163,12 +180,6 @@ class ScopeAgent(dspy.Module):
             # Fallback: default scope
             return ScopeResult(sales_scope="SECONDARY")
 
-    def _parse_sales_scope(self, scope_str: str) -> str:
-        """Parse and validate sales scope."""
-        if not scope_str:
-            return "SECONDARY"
-        scope_upper = scope_str.strip().upper()
-        return scope_upper if scope_upper in ["PRIMARY", "SECONDARY"] else "SECONDARY"
 
 
 class TimeAgent(dspy.Module):
@@ -186,12 +197,15 @@ class TimeAgent(dspy.Module):
         super().__init__()
         self.resolver = dspy.Predict(ResolveTime)
 
-    def forward(self, classified_query: ClassifiedQuery, current_date: str, intent_category: str = "UNKNOWN", previous_context: str = "") -> TimeResult:
+    def forward(self, classified_query: ClassifiedQuery, current_date: str, previous_context: str = "") -> TimeResult:
         """Resolve time specification with decision logic and clarification rules."""
         logger.info("⏰ [TimeAgent] Starting time resolution")
         logger.debug(f"⏰ [TimeAgent] Current date: {current_date}")
-        logger.debug(f"⏰ [TimeAgent] Intent category: {intent_category}")
-        logger.debug(f"⏰ [TimeAgent] Time expressions: {classified_query.time_expressions}")
+        logger.debug(f"⏰ [TimeAgent] Query intent: {classified_query.query_intent}")
+
+        # Log time-related terms from classified query
+        time_terms = [term for term in classified_query.classified_terms if term.role in ["TIME_RANGE", "TIME_GRANULARITY"]]
+        logger.debug(f"⏰ [TimeAgent] Time-related terms: {[term.term for term in time_terms]}")
         logger.debug(f"⏰ [TimeAgent] Has previous context: {'Yes' if previous_context else 'No'}")
 
         # Check for already resolved time clarification to avoid re-asking
@@ -203,54 +217,45 @@ class TimeAgent(dspy.Module):
                 time_window=already_resolved_time,
                 start_date=None,
                 end_date=None,
-                granularity=None,
-                has_time_constraint=True,
-                requires_clarification=False
+                granularity=None
             )
 
         try:
-            # Call DSPy predictor with serialized input per RULE M4
-            classified_json = classified_query.model_dump_json()
+            # Call DSPy predictor - pass ClassifiedQuery object directly per new signature
             logger.debug("⏰ [TimeAgent] Calling DSPy time resolver")
             result = self.resolver(
-                classified_query=classified_json,
+                classified_query=classified_query,
                 current_date=current_date,
-                intent_category=intent_category,
+                query_intent=classified_query.query_intent,
                 previous_context=previous_context
             )
 
-            logger.debug(f"⏰ [TimeAgent] Raw DSPy output - window: {result.time_window}")
-            logger.debug(f"⏰ [TimeAgent] Raw DSPy output - dates: {result.start_date} to {result.end_date}")
-            logger.debug(f"⏰ [TimeAgent] Raw DSPy output - granularity: {result.granularity}")
-            logger.debug(f"⏰ [TimeAgent] Raw DSPy output - has_constraint: {result.has_time_constraint}")
-            logger.debug(f"⏰ [TimeAgent] Raw DSPy output - requires_clarification: {result.requires_clarification}")
-            logger.debug(f"⏰ [TimeAgent] Raw DSPy output - reasoning: {result.reasoning}")
+            logger.debug(f"⏰ [TimeAgent] Raw DSPy output: {result.time_result}")
 
-            # Parse and validate results
-            time_result = TimeResult(
-                time_window=self._parse_time_window(result.time_window),
-                start_date=self._parse_date(result.start_date),
-                end_date=self._parse_date(result.end_date),
-                granularity=self._parse_granularity(result.granularity),
-                has_time_constraint=self._parse_boolean(result.has_time_constraint, default=False),
-                requires_clarification=self._parse_boolean(result.requires_clarification, default=False)
-            )
+            # Parse the JSON result into TimeResult object
+            if isinstance(result.time_result, str):
+                # If it's a JSON string, parse it
+                import json
+                time_dict = json.loads(result.time_result)
+                time_result = TimeResult(**time_dict)
+            elif isinstance(result.time_result, dict):
+                # If it's already a dict, use it directly
+                time_result = TimeResult(**result.time_result)
+            elif isinstance(result.time_result, TimeResult):
+                # If it's already a TimeResult object, use it
+                time_result = result.time_result
+            else:
+                raise ValueError(f"Unexpected time_result type: {type(result.time_result)}")
 
             # Apply decision logic and clarification rules
             time_result = self._apply_time_decision_rules(
-                time_result, classified_query, intent_category, previous_context
+                time_result, classified_query, classified_query.query_intent, previous_context
             )
 
-            # Enforce TimeSpec constraint: window XOR dates (binary constraint per RULE D5)
-            if time_result.time_window and (time_result.start_date or time_result.end_date):
-                logger.warning("⏰ [TimeAgent] ⚠️  Both window and explicit dates provided, clearing dates")
-                time_result.start_date = None
-                time_result.end_date = None
-
             # Handle clarification request if needed
-            if time_result.requires_clarification:
-                from .clarification_tool import clarification_tool, ClarificationContext, ClarificationOption, ClarificationType
-                self._request_time_clarification(classified_query.query_text, intent_category)
+            if time_result.has_time_constraint and not time_result.time_window and not time_result.start_date:
+                # Need clarification if performance query but no time specified
+                self._request_time_clarification(classified_query.original_query, classified_query.query_intent)
 
             logger.info(f"⏰ [TimeAgent] ✅ Time resolution successful")
             if time_result.has_time_constraint:
@@ -263,9 +268,6 @@ class TimeAgent(dspy.Module):
             else:
                 logger.info("⏰ [TimeAgent] No time constraint specified")
 
-            if time_result.requires_clarification:
-                logger.info("⏰ [TimeAgent] Time clarification requested")
-
             logger.debug(f"⏰ [TimeAgent] Complete time result: {time_result.model_dump()}")
             return time_result
 
@@ -276,15 +278,15 @@ class TimeAgent(dspy.Module):
             logger.error(f"⏰ [TimeAgent] ❌ Time resolution failed: {e}")
             logger.warning(f"⏰ [TimeAgent] 🔄 Falling back to no time constraint")
             # Fallback: no time constraint
-            return TimeResult(has_time_constraint=False)
+            return TimeResult()
 
     def _apply_time_decision_rules(self, time_result: TimeResult, classified_query: ClassifiedQuery,
-                                 intent_category: str, previous_context: str) -> TimeResult:
+                                 query_intent: str, previous_context: str) -> TimeResult:
         """Apply the time decision framework rules."""
         logger.debug("⏰ [TimeAgent] Applying time decision rules")
 
         # Check if query is structural/catalog-based
-        is_structural_query = self._is_structural_query(classified_query, intent_category)
+        is_structural_query = self._is_structural_query(classified_query, query_intent)
 
         if is_structural_query:
             # Structural queries don't need time
@@ -294,10 +296,14 @@ class TimeAgent(dspy.Module):
             return time_result
 
         # Performance queries require time
+        # Check if query has time-related terms
+        time_terms = [term for term in classified_query.classified_terms
+                     if term.role in ["TIME_RANGE", "TIME_GRANULARITY"]]
+
         has_time_from_query = (
             time_result.time_window or
             time_result.start_date or
-            classified_query.time_expressions
+            bool(time_terms)
         )
 
         has_time_from_context = bool(previous_context and "time" in previous_context.lower())
@@ -316,7 +322,7 @@ class TimeAgent(dspy.Module):
 
         return time_result
 
-    def _is_structural_query(self, classified_query: ClassifiedQuery, intent_category: str) -> bool:
+    def _is_structural_query(self, classified_query: ClassifiedQuery, query_intent: str) -> bool:
         """Check if query is asking about structure/membership rather than performance."""
         # Check for structural intent keywords
         structural_keywords = [
@@ -324,13 +330,16 @@ class TimeAgent(dspy.Module):
             "brands", "zones", "categories", "products", "retailers", "distributors"
         ]
 
-        query_lower = classified_query.query_text.lower()
+        query_lower = classified_query.original_query.lower()
+
+        # Check if query has metric-related terms
+        metric_terms = [term for term in classified_query.classified_terms if term.role == "METRIC"]
 
         # If query asks "what/which X" without metrics, it's likely structural
         for keyword in structural_keywords:
             if keyword in query_lower:
                 # Check if it's asking about entities without measuring them
-                if not classified_query.metric_terms and not any(
+                if not metric_terms and not any(
                     metric_word in query_lower for metric_word in ["sales", "revenue", "value", "quantity", "count"]
                 ):
                     return True
@@ -344,10 +353,10 @@ class TimeAgent(dspy.Module):
             "all-time", "lifetime", "historical", "complete", "entire"
         ]
 
-        query_lower = classified_query.query_text.lower()
+        query_lower = classified_query.original_query.lower()
         return any(indicator in query_lower for indicator in all_time_indicators)
 
-    def _request_time_clarification(self, query_text: str, intent_category: str):
+    def _request_time_clarification(self, query_text: str, query_intent: str):
         """Request time clarification using the clarification tool."""
         from .clarification_tool import clarification_tool, ClarificationContext, ClarificationOption, ClarificationType, ClarificationRequiredException
 
@@ -361,7 +370,7 @@ class TimeAgent(dspy.Module):
             "DEFAULT": "What time period would you like to analyze?"
         }
 
-        question = clarification_prompts.get(intent_category, clarification_prompts["DEFAULT"])
+        question = clarification_prompts.get(query_intent, clarification_prompts["DEFAULT"])
 
         # Common time options
         options = [
@@ -401,17 +410,17 @@ class TimeAgent(dspy.Module):
             agent_name="TimeAgent",
             step_name="resolve_time",
             input_data=query_text,
-            metadata={"intent_category": intent_category}
+            metadata={"query_intent": query_intent}
         )
 
         request_id = clarification_tool.request_clarification(
             clarification_type=ClarificationType.TIME,
             field_name="time",
             question=question,
-            context=f"This {intent_category.lower()} query requires a time period to provide meaningful results.",
+            context=f"This {query_intent.lower()} query requires a time period to provide meaningful results.",
             options=options,
             allow_custom=True,
-            metadata={"intent_category": intent_category}
+            metadata={"query_intent": query_intent}
         )
 
         # Get the request object
@@ -456,121 +465,6 @@ class TimeAgent(dspy.Module):
             return default
         return bool_str.strip().lower() in ['true', 'yes', '1']
 
-
-class ScopeTimeAgent(dspy.Module):
-    """
-    Legacy Agent 2: Sales scope and time resolution (DEPRECATED).
-
-    This is kept for backwards compatibility during the transition period.
-    Use ScopeAgent and TimeAgent separately for new implementations.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.resolver = dspy.Predict(ResolveScopeTime)
-
-    def forward(self, classified_query: ClassifiedQuery, current_date: str) -> ScopeTimeResult:
-        """Resolve sales scope and time specification (DEPRECATED)."""
-        logger.warning("⚠️  [ScopeTimeAgent] Using legacy combined agent - consider migrating to separate ScopeAgent and TimeAgent")
-        logger.info("⏰ [ScopeTimeAgent] Starting scope and time resolution")
-        logger.debug(f"⏰ [ScopeTimeAgent] Current date: {current_date}")
-        logger.debug(f"⏰ [ScopeTimeAgent] Time expressions: {classified_query.time_expressions}")
-        logger.debug(f"⏰ [ScopeTimeAgent] Scope indicators: {classified_query.scope_indicators}")
-
-        try:
-            # Call DSPy predictor with serialized input per RULE M4
-            classified_json = classified_query.model_dump_json()
-            logger.debug("⏰ [ScopeTimeAgent] Calling DSPy resolver")
-            result = self.resolver(
-                classified_query=classified_json,
-                current_date=current_date
-            )
-
-            logger.debug(f"⏰ [ScopeTimeAgent] Raw DSPy output - scope: {result.sales_scope}")
-            logger.debug(f"⏰ [ScopeTimeAgent] Raw DSPy output - window: {result.time_window}")
-            logger.debug(f"⏰ [ScopeTimeAgent] Raw DSPy output - dates: {result.start_date} to {result.end_date}")
-            logger.debug(f"⏰ [ScopeTimeAgent] Raw DSPy output - granularity: {result.granularity}")
-
-            # Parse and validate results
-            scope_time = ScopeTimeResult(
-                sales_scope=self._parse_sales_scope(result.sales_scope),
-                time_window=self._parse_time_window(result.time_window),
-                start_date=self._parse_date(result.start_date),
-                end_date=self._parse_date(result.end_date),
-                granularity=self._parse_granularity(result.granularity),
-                has_time_constraint=self._parse_boolean(result.has_time_constraint, default=False)
-            )
-
-            # Enforce TimeSpec constraint: window XOR dates (binary constraint in Python per RULE D5)
-            if scope_time.time_window and (scope_time.start_date or scope_time.end_date):
-                logger.warning("⏰ [ScopeTimeAgent] ⚠️  Both window and explicit dates provided, clearing dates")
-                scope_time.start_date = None
-                scope_time.end_date = None
-
-            logger.info(f"⏰ [ScopeTimeAgent] ✅ Scope resolution successful")
-            logger.info(f"⏰ [ScopeTimeAgent] Sales scope: {scope_time.sales_scope}")
-            if scope_time.has_time_constraint:
-                if scope_time.time_window:
-                    logger.info(f"⏰ [ScopeTimeAgent] Time window: {scope_time.time_window}")
-                else:
-                    logger.info(f"⏰ [ScopeTimeAgent] Date range: {scope_time.start_date} to {scope_time.end_date}")
-                if scope_time.granularity:
-                    logger.info(f"⏰ [ScopeTimeAgent] Granularity: {scope_time.granularity}")
-            else:
-                logger.info("⏰ [ScopeTimeAgent] No time constraint specified")
-
-            logger.debug(f"⏰ [ScopeTimeAgent] Complete scope/time result: {scope_time.model_dump()}")
-            return scope_time
-
-        except Exception as e:
-            logger.error(f"⏰ [ScopeTimeAgent] ❌ Scope/time resolution failed: {e}")
-            logger.warning(f"⏰ [ScopeTimeAgent] 🔄 Falling back to default scope, no time")
-            # Fallback: default scope, no time
-            return ScopeTimeResult(
-                sales_scope="SECONDARY",
-                has_time_constraint=False
-            )
-
-    def _parse_sales_scope(self, scope_str: str) -> str:
-        """Parse and validate sales scope."""
-        if not scope_str:
-            return "SECONDARY"
-        scope_upper = scope_str.strip().upper()
-        return scope_upper if scope_upper in ["PRIMARY", "SECONDARY"] else "SECONDARY"
-
-    def _parse_time_window(self, window_str: str) -> Optional[str]:
-        """Parse and validate time window."""
-        if not window_str or window_str.strip().lower() in ['none', 'null', '']:
-            return None
-        window = window_str.strip()
-        return window if window in TIME_WINDOWS else None
-
-    def _parse_date(self, date_str: str) -> Optional[str]:
-        """Parse and validate date string."""
-        if not date_str or date_str.strip().lower() in ['none', 'null', '']:
-            return None
-        # Basic validation of YYYY-MM-DD format
-        date = date_str.strip()
-        try:
-            datetime.strptime(date, "%Y-%m-%d")
-            return date
-        except ValueError:
-            return None
-
-    def _parse_granularity(self, granularity_str: str) -> Optional[str]:
-        """Parse and validate granularity."""
-        if not granularity_str or granularity_str.strip().lower() in ['none', 'null', '']:
-            return None
-        gran = granularity_str.strip()
-        return gran if gran in ["day", "week", "month", "quarter", "year"] else None
-
-    def _parse_boolean(self, bool_str: str, default: bool = False) -> bool:
-        """Parse boolean string."""
-        if not bool_str:
-            return default
-        return bool_str.strip().lower() in ['true', 'yes', '1']
-
-
 class MetricsAgent(dspy.Module):
     """
     Agent 3: Metric extraction and aggregation specification with integrated ambiguity reasoning.
@@ -586,10 +480,13 @@ class MetricsAgent(dspy.Module):
         """Extract and validate metrics with ambiguity detection."""
         logger.info("📊 [MetricsAgent] Starting metric extraction")
         logger.debug(f"📊 [MetricsAgent] Sales scope: {sales_scope}")
-        logger.debug(f"📊 [MetricsAgent] Metric terms: {classified_query.metric_terms}")
+
+        # Log metric-related terms from classified query
+        metric_terms = [term for term in classified_query.classified_terms if term.role == "METRIC"]
+        logger.debug(f"📊 [MetricsAgent] Metric terms: {[term.term for term in metric_terms]}")
 
         try:
-            # Prepare available metrics for ambiguity detection
+            # Prepare available metrics for context
             available_metrics = [
                 {
                     "name": name,
@@ -599,100 +496,82 @@ class MetricsAgent(dspy.Module):
                 for name in CATALOG_METRICS
             ]
 
-            # Call DSPy predictor with available metrics
-            classified_json = classified_query.model_dump_json()
+            # Call DSPy predictor - pass ClassifiedQuery object directly per new signature
             logger.debug("📊 [MetricsAgent] Calling DSPy extractor")
             result = self.extractor(
-                classified_query=classified_json,
+                classified_query=classified_query,
                 sales_scope=sales_scope,
-                available_metrics=str(available_metrics)
+                available_metrics=json.dumps(available_metrics)
             )
 
-            logger.debug(f"📊 [MetricsAgent] Raw DSPy output - metrics: {result.metrics}")
-            logger.debug(f"📊 [MetricsAgent] Raw DSPy output - aggregations: {result.aggregations}")
-            logger.debug(f"📊 [MetricsAgent] Raw DSPy output - ambiguous_terms: {result.ambiguous_terms}")
-            logger.debug(f"📊 [MetricsAgent] Raw DSPy output - ambiguity_confidence: {result.ambiguity_confidence}")
+            logger.debug(f"📊 [MetricsAgent] Raw DSPy output: {result.metrics_result}")
 
-            # Parse results
-            raw_metrics = self._parse_terms(result.metrics)
-            raw_aggregations = self._parse_terms(result.aggregations)
-            ambiguous_terms = self._parse_terms(result.ambiguous_terms)
-            ambiguity_confidence = self._parse_float(result.ambiguity_confidence)
-            ambiguous_matches = self._parse_json(result.ambiguous_matches)
+            # Parse the JSON result into MetricsResult object
+            if isinstance(result.metrics_result, str):
+                # If it's a JSON string, parse it
+                metrics_dict = json.loads(result.metrics_result)
+                metrics_result = MetricsResult(**metrics_dict)
+            elif isinstance(result.metrics_result, dict):
+                # If it's already a dict, use it directly
+                metrics_result = MetricsResult(**result.metrics_result)
+            elif isinstance(result.metrics_result, MetricsResult):
+                # If it's already a MetricsResult object, use it
+                metrics_result = result.metrics_result
+            else:
+                raise ValueError(f"Unexpected metrics_result type: {type(result.metrics_result)}")
 
-            # Check for ambiguity and request clarification if needed
-            if ambiguous_terms and ambiguity_confidence > 0.7:
-                # Check if this metric was already resolved in the current clarification re-run
-                already_resolved_metric = clarification_tool.get_field_override("metrics")
-                
-                if already_resolved_metric:
-                    logger.info(
-                        f"📊 [MetricsAgent] Metric term was already clarified "
-                        f"→ using resolved value '{already_resolved_metric}'"
-                    )
-                    # Override the raw metrics with the resolved value
-                    raw_metrics = [already_resolved_metric]
-                else:
-                    logger.info("📊 [MetricsAgent] 🤔 Ambiguity detected, requesting clarification")
-                    self._request_metric_clarification(
-                        query=classified_query.query_text,
-                        ambiguous_terms=ambiguous_terms,
-                        ambiguous_matches=ambiguous_matches,
-                        reasoning=result.reasoning
-                    )
-
-            # Continue with normal validation if no ambiguity
-            validated_metrics = []
-            validated_aggregations = []
-
-            for i, metric in enumerate(raw_metrics):
-                resolved_metric = resolve_metric_alias(metric)
-                logger.debug(f"📊 [MetricsAgent] Resolving '{metric}' -> '{resolved_metric}'")
-
-                if resolved_metric in CATALOG_METRICS:
-                    validated_metrics.append(resolved_metric)
-                    # Use provided aggregation or default
-                    if i < len(raw_aggregations) and raw_aggregations[i] in ["sum", "count", "avg"]:
-                        validated_aggregations.append(raw_aggregations[i])
-                        logger.debug(f"📊 [MetricsAgent] Using provided aggregation: {raw_aggregations[i]}")
-                    else:
-                        # Default aggregation based on metric
-                        default_agg = "count" if resolved_metric == "count" else "sum"
-                        validated_aggregations.append(default_agg)
-                        logger.debug(f"📊 [MetricsAgent] Using default aggregation: {default_agg}")
-                else:
-                    logger.warning(f"📊 [MetricsAgent] ⚠️  Invalid metric '{resolved_metric}' not in catalog")
-
-            # Ensure at least one metric
-            if not validated_metrics:
-                logger.warning("📊 [MetricsAgent] ⚠️  No valid metrics found, defaulting to net_value")
-                validated_metrics = ["net_value"]
-                validated_aggregations = ["sum"]
-
-            metrics_result = MetricsResult(
-                metrics=validated_metrics,
-                aggregations=validated_aggregations
-            )
+            # Validate and process the metrics
+            metrics_result = self._validate_and_process_metrics(metrics_result)
 
             logger.info(f"📊 [MetricsAgent] ✅ Metric extraction successful")
-            logger.info(f"📊 [MetricsAgent] Extracted {len(validated_metrics)} metrics:")
-            for metric, agg in zip(validated_metrics, validated_aggregations):
-                logger.info(f"📊 [MetricsAgent]   - {metric} ({agg})")
+            logger.info(f"📊 [MetricsAgent] Extracted {len(metrics_result.metrics)} metrics: {metrics_result.metrics}")
+            logger.info(f"📊 [MetricsAgent] Aggregations: {metrics_result.aggregations}")
 
             logger.debug(f"📊 [MetricsAgent] Complete metrics result: {metrics_result.model_dump()}")
             return metrics_result
 
-        except ClarificationRequiredException:
-            # Re-raise clarification exceptions
-            raise
         except Exception as e:
-            logger.error(f"📊 [MetricsAgent] ❌ Metrics extraction failed: {e}")
+            logger.error(f"📊 [MetricsAgent] ❌ Metric extraction failed: {e}")
             logger.warning(f"📊 [MetricsAgent] 🔄 Falling back to default metric")
-            # Fallback: default metric
+            # Fallback: default net_value metric
             return MetricsResult(
                 metrics=["net_value"],
                 aggregations=["sum"]
             )
+
+    def _validate_and_process_metrics(self, metrics_result: MetricsResult) -> MetricsResult:
+        """Validate and process metrics from LLM output."""
+        validated_metrics = []
+        validated_aggregations = []
+
+        for i, metric in enumerate(metrics_result.metrics):
+            resolved_metric = resolve_metric_alias(metric)
+            logger.debug(f"📊 [MetricsAgent] Resolving '{metric}' -> '{resolved_metric}'")
+
+            if resolved_metric in CATALOG_METRICS:
+                validated_metrics.append(resolved_metric)
+                # Use provided aggregation or default
+                if i < len(metrics_result.aggregations) and metrics_result.aggregations[i] in ["sum", "count", "avg"]:
+                    validated_aggregations.append(metrics_result.aggregations[i])
+                    logger.debug(f"📊 [MetricsAgent] Using provided aggregation: {metrics_result.aggregations[i]}")
+                else:
+                    # Default aggregation based on metric
+                    default_agg = "count" if resolved_metric == "count" else "sum"
+                    validated_aggregations.append(default_agg)
+                    logger.debug(f"📊 [MetricsAgent] Using default aggregation: {default_agg}")
+            else:
+                logger.warning(f"📊 [MetricsAgent] ⚠️  Invalid metric '{resolved_metric}' not in catalog")
+
+        # Ensure at least one metric
+        if not validated_metrics:
+            logger.warning("📊 [MetricsAgent] ⚠️  No valid metrics found, defaulting to net_value")
+            validated_metrics = ["net_value"]
+            validated_aggregations = ["sum"]
+
+        return MetricsResult(
+            metrics=validated_metrics,
+            aggregations=validated_aggregations
+        )
 
     def _request_metric_clarification(
         self,
@@ -777,14 +656,16 @@ class DimensionsAgent(dspy.Module):
         """Resolve dimensions, filters, and context operations with ambiguity detection."""
         logger.info("🗂️  [DimensionsAgent] Starting dimensions resolution")
         logger.debug(f"🗂️  [DimensionsAgent] Sales scope: {sales_scope}")
-        logger.debug(f"🗂️  [DimensionsAgent] Dimension terms: {classified_query.dimension_terms}")
-        logger.debug(f"🗂️  [DimensionsAgent] Filter terms: {classified_query.filter_terms}")
+
+        # Log dimension-related terms from classified query
+        dimension_terms = [term for term in classified_query.classified_terms if term.role == "DIMENSION"]
+        filter_terms = [term for term in classified_query.classified_terms if term.role == "FILTER_VALUE"]
+        logger.debug(f"🗂️  [DimensionsAgent] Dimension terms: {[term.term for term in dimension_terms]}")
+        logger.debug(f"🗂️  [DimensionsAgent] Filter terms: {[term.term for term in filter_terms]}")
         logger.debug(f"🗂️  [DimensionsAgent] Has previous context: {'Yes' if previous_context else 'No'}")
-        if previous_context:
-            logger.debug(f"🗂️  [DimensionsAgent] Previous context preview: {previous_context[:100]}...")
 
         try:
-            # Prepare available dimensions for ambiguity detection
+            # Prepare available dimensions for context
             valid_dims = get_valid_dimensions_for_scope(sales_scope)
             available_dimensions = [
                 {
@@ -795,296 +676,120 @@ class DimensionsAgent(dspy.Module):
                 for dim in valid_dims
             ]
 
-            # ── PRE-LLM DETERMINISTIC AMBIGUITY CHECK ──────────────────────────
-            # Check each classified dimension term against the catalog BEFORE
-            # calling the LLM. This is reliable regardless of LLM confidence.
-            for term in classified_query.dimension_terms:
-                candidates = find_ambiguous_dimension_candidates(term, valid_dims)
-                if candidates:
-                    # Check if this term was already resolved in the current
-                    # clarification re-run (multi-clarification support).
-                    # Use get_field_override() which is scoped per-request —
-                    # never leaks answers from a previous user session.
-                    already_resolved = clarification_tool.get_field_override("group_by")
-                    # Only accept this override if it's actually one of the
-                    # valid candidates for the current ambiguous term.
-                    if already_resolved and already_resolved not in candidates:
-                        already_resolved = None
-                    if already_resolved:
-                        logger.info(
-                            f"🗂️  [DimensionsAgent] Term '{term}' was already clarified "
-                            f"→ using resolved value '{already_resolved}'"
-                        )
-                        # Will be injected below after LLM call via override
-                        # Store for post-LLM injection
-                        classified_query = classified_query.model_copy(
-                            update={"dimension_terms": [
-                                already_resolved if t == term else t
-                                for t in classified_query.dimension_terms
-                            ]}
-                        )
-                    else:
-                        logger.info(
-                            f"🗂️  [DimensionsAgent] 🤔 Pre-LLM: '{term}' is ambiguous, "
-                            f"candidates: {candidates}"
-                        )
-                        self._request_dimension_clarification(
-                            query=classified_query.query_text,
-                            ambiguous_terms=[term],
-                            ambiguous_matches=[
-                                {
-                                    "name": c,
-                                    "label": c.replace("_", " ").title(),
-                                    "description": f"{c.replace('_', ' ').title()} dimension"
-                                }
-                                for c in candidates
-                            ],
-                            reasoning=f"'{term}' is not a direct catalog dimension and "
-                                      f"matches multiple candidates: {candidates}"
-                        )
-            # ────────────────────────────────────────────────────────────────────
-
-            # Call DSPy predictor
-            classified_json = classified_query.model_dump_json()
+            # Call DSPy predictor - pass ClassifiedQuery object directly per new signature
             logger.debug("🗂️  [DimensionsAgent] Calling DSPy resolver")
             result = self.resolver(
-                classified_query=classified_json,
+                classified_query=classified_query,
                 sales_scope=sales_scope,
-                available_dimensions=str(available_dimensions),
+                available_dimensions=json.dumps(available_dimensions),
                 previous_context=previous_context
             )
 
-            logger.debug(f"🗂️  [DimensionsAgent] Raw DSPy output - group_by: {result.group_by}")
-            logger.debug(f"🗂️  [DimensionsAgent] Raw DSPy output - filters: {result.filters}")
-            logger.debug(f"🗂️  [DimensionsAgent] Raw DSPy output - context_op: {result.context_operation}")
-            logger.debug(f"🗂️  [DimensionsAgent] Raw DSPy output - ranking: {result.ranking_enabled}")
-            logger.debug(f"🗂️  [DimensionsAgent] Raw DSPy output - ambiguous_terms: {result.ambiguous_terms}")
+            logger.debug(f"🗂️  [DimensionsAgent] Raw DSPy output: {result.dimensions_result}")
 
-            # Parse ambiguity information
-            ambiguous_terms = self._parse_terms(result.ambiguous_terms)
-            ambiguity_confidence = self._parse_float(result.ambiguity_confidence)
-            ambiguous_matches = self._parse_json(result.ambiguous_matches)
+            # Parse the JSON result into DimensionsResult object
+            if isinstance(result.dimensions_result, str):
+                # If it's a JSON string, parse it
+                dimensions_dict = json.loads(result.dimensions_result)
+                dimensions_result = DimensionsResult(**dimensions_dict)
+            elif isinstance(result.dimensions_result, dict):
+                # If it's already a dict, use it directly
+                dimensions_result = DimensionsResult(**result.dimensions_result)
+            elif isinstance(result.dimensions_result, DimensionsResult):
+                # If it's already a DimensionsResult object, use it
+                dimensions_result = result.dimensions_result
+            else:
+                raise ValueError(f"Unexpected dimensions_result type: {type(result.dimensions_result)}")
 
-            # LLM-based ambiguity check (secondary, after deterministic check)
-            if ambiguous_terms and ambiguity_confidence > 0.7:
-                logger.info("🗂️  [DimensionsAgent] 🤔 Ambiguity detected, requesting clarification")
-                self._request_dimension_clarification(
-                    query=classified_query.query_text,
-                    ambiguous_terms=ambiguous_terms,
-                    ambiguous_matches=ambiguous_matches,
-                    reasoning=result.reasoning
-                )
-
-            # Continue with normal processing if no ambiguity
-            # Parse dimensions
-            group_by = self._parse_and_validate_dimensions(
-                result.group_by, sales_scope
-            )
-
-            # Parse filters
-            filters = self._parse_filters(result.filters, sales_scope)
-
-            # Parse ranking
-            ranking_enabled = self._parse_boolean(result.ranking_enabled)
-            ranking_order = result.ranking_order if ranking_enabled else None
-            ranking_limit = self._parse_int(result.ranking_limit) if ranking_enabled else None
-
-            # Validate ranking requires group_by (binary constraint per RULE D5)
-            if ranking_enabled and not group_by:
-                logger.warning("🗂️  [DimensionsAgent] ⚠️  Ranking requested without group_by, disabling ranking")
-                ranking_enabled = False
-                ranking_order = None
-                ranking_limit = None
-
-            dimensions_result = DimensionsResult(
-                group_by=group_by,
-                filters=filters,
-                context_operation=self._parse_context_operation(result.context_operation)
-            )
+            # Validate and process the dimensions
+            dimensions_result = self._validate_and_process_dimensions(dimensions_result, sales_scope)
 
             logger.info(f"🗂️  [DimensionsAgent] ✅ Dimensions resolution successful")
-            if group_by:
-                logger.info(f"🗂️  [DimensionsAgent] Group by: {group_by}")
-            else:
-                logger.info("🗂️  [DimensionsAgent] No grouping dimensions")
-
-            if filters:
-                logger.info(f"🗂️  [DimensionsAgent] Found {len(filters)} filters:")
-                for f in filters:
-                    logger.info(f"🗂️  [DimensionsAgent]   - {f.dimension} {f.operator} {f.value}")
-            else:
-                logger.info("🗂️  [DimensionsAgent] No filters")
-
-            if ranking_enabled:
-                logger.info(f"🗂️  [DimensionsAgent] Ranking: {ranking_order} {ranking_limit}")
-
-            if dimensions_result.context_operation:
-                logger.info(f"🗂️  [DimensionsAgent] Context operation: {dimensions_result.context_operation}")
+            if dimensions_result.group_by:
+                logger.info(f"🗂️  [DimensionsAgent] Group by: {dimensions_result.group_by}")
+            if dimensions_result.filters:
+                logger.info(f"🗂️  [DimensionsAgent] Filters: {len(dimensions_result.filters)} filter(s)")
 
             logger.debug(f"🗂️  [DimensionsAgent] Complete dimensions result: {dimensions_result.model_dump()}")
             return dimensions_result
 
-        except ClarificationRequiredException:
-            # Re-raise clarification exceptions
-            raise
         except Exception as e:
             logger.error(f"🗂️  [DimensionsAgent] ❌ Dimensions resolution failed: {e}")
             logger.warning(f"🗂️  [DimensionsAgent] 🔄 Falling back to no dimensions")
             # Fallback: no dimensions
-            return DimensionsResult()
-
-    def _request_dimension_clarification(
-        self,
-        query: str,
-        ambiguous_terms: List[str],
-        ambiguous_matches: List[Dict[str, str]],
-        reasoning: str
-    ):
-        """Request dimension clarification using the clarification tool."""
-        agent_context = ClarificationContext(
-            agent_name="DimensionsAgent",
-            step_name="resolve_dimensions",
-            input_data=query,
-            metadata={
-                "ambiguous_terms": ambiguous_terms,
-                "reasoning": reasoning
-            }
-        )
-
-        clarification_tool.request_dimension_clarification(
-            ambiguous_terms=ambiguous_terms or ["dimensions"],
-            available_dimensions=ambiguous_matches or [
-                {
-                    "name": dim,
-                    "label": dim.replace("_", " ").title(),
-                    "description": f"{dim.replace('_', ' ').title()} dimension"
-                }
-                for dim in ALL_DIMENSIONS
-            ],
-            agent_context=agent_context
-        )
-
-    def _parse_terms(self, terms_str: str) -> List[str]:
-        """Parse comma-separated terms string."""
-        if not terms_str or terms_str.strip().lower() in ['none', 'null', '']:
-            return []
-        return [term.strip() for term in terms_str.split(',') if term.strip()]
-
-    def _parse_float(self, value: str) -> float:
-        """Parse float from agent output."""
-        try:
-            if isinstance(value, (int, float)):
-                return float(value)
-            import re
-            numbers = re.findall(r'(\d+\.?\d*)', str(value))
-            if numbers:
-                return max(0.0, min(1.0, float(numbers[0]) / 100 if float(numbers[0]) > 1 else float(numbers[0])))
-            return 0.0
-        except:
-            return 0.0
-
-    def _parse_json(self, value: str) -> List[Dict[str, str]]:
-        """Parse JSON from agent output."""
-        try:
-            import json
-            parsed = json.loads(str(value))
-            if isinstance(parsed, list):
-                return parsed
-        except:
-            pass
-        return []
-
-    def _parse_and_validate_dimensions(self, dims_str: str, sales_scope: str) -> Optional[List[str]]:
-        """Parse and validate dimensions against scope."""
-        if not dims_str or dims_str.strip().lower() in ['none', 'null', '']:
-            return None
-
-        raw_dims = [dim.strip() for dim in dims_str.split(',') if dim.strip()]
-        if not raw_dims:
-            return None
-
-        # Get valid dimensions for scope
+            return DimensionsResult(group_by=None, filters=None)
+    def _validate_and_process_dimensions(self, dimensions_result: DimensionsResult, sales_scope: str) -> DimensionsResult:
+        """Validate and process dimensions from LLM output."""
         valid_dims = get_valid_dimensions_for_scope(sales_scope)
 
-        # Resolve aliases and validate
-        validated_dims = []
-        for dim in raw_dims:
-            resolved_dim = resolve_dimension_alias(dim)
-            if resolved_dim in valid_dims:
-                validated_dims.append(resolved_dim)
-                # ANTI-PATTERN A2: Never allow invoice_date in group_by
-                if resolved_dim == "invoice_date":
-                    logger.warning("invoice_date not allowed in group_by, removing")
-                    validated_dims.remove(resolved_dim)
+        # Validate group_by dimensions
+        validated_group_by = None
+        if dimensions_result.group_by:
+            validated_group_by = []
+            for dim in dimensions_result.group_by:
+                resolved_dim = resolve_dimension_alias(dim)
+                if resolved_dim in valid_dims:
+                    validated_group_by.append(resolved_dim)
+                    logger.debug(f"🗂️  [DimensionsAgent] Validated dimension: {resolved_dim}")
+                else:
+                    logger.warning(f"🗂️  [DimensionsAgent] ⚠️  Invalid dimension '{resolved_dim}' not in scope")
 
-        # Limit to max 2 dimensions per RULE
-        if len(validated_dims) > 2:
-            logger.warning(f"Too many dimensions ({len(validated_dims)}), limiting to 2")
-            validated_dims = validated_dims[:2]
+            # Apply hierarchy constraints (max 1 per hierarchy)
+            validated_group_by = self._apply_hierarchy_constraints(validated_group_by)
 
-        return validated_dims if validated_dims else None
+            # Limit to 2 dimensions max
+            if len(validated_group_by) > 2:
+                logger.warning(f"🗂️  [DimensionsAgent] ⚠️  Too many dimensions, limiting to first 2")
+                validated_group_by = validated_group_by[:2]
 
-    def _parse_filters(self, filters_str: str, sales_scope: str) -> Optional[List[FilterCondition]]:
-        """Parse filters JSON array."""
-        if not filters_str or filters_str.strip().lower() in ['none', 'null', '']:
-            return None
+            if not validated_group_by:
+                validated_group_by = None
 
-        try:
-            filters_data = json.loads(filters_str)
-            if not isinstance(filters_data, list):
-                return None
+        # Validate filters
+        validated_filters = None
+        if dimensions_result.filters:
+            validated_filters = []
+            for filter_cond in dimensions_result.filters:
+                if filter_cond.dimension in valid_dims:
+                    validated_filters.append(filter_cond)
+                    logger.debug(f"🗂️  [DimensionsAgent] Validated filter: {filter_cond.dimension} {filter_cond.operator} {filter_cond.value}")
+                else:
+                    logger.warning(f"🗂️  [DimensionsAgent] ⚠️  Invalid filter dimension '{filter_cond.dimension}'")
 
-            valid_dims = get_valid_dimensions_for_scope(sales_scope)
-            filters = []
+            if not validated_filters:
+                validated_filters = None
 
-            for filter_data in filters_data:
-                if not isinstance(filter_data, dict):
-                    continue
+        return DimensionsResult(
+            group_by=validated_group_by,
+            filters=validated_filters
+        )
 
-                dimension = filter_data.get('dimension')
-                if not dimension:
-                    continue
+    def _apply_hierarchy_constraints(self, dimensions: List[str]) -> List[str]:
+        """Apply hierarchy constraints - max 1 dimension per hierarchy."""
+        from .schemas import GEO_HIERARCHY, PRODUCT_HIERARCHY
 
-                resolved_dim = resolve_dimension_alias(dimension)
-                if resolved_dim not in valid_dims:
-                    continue
+        geo_dims = [d for d in dimensions if d in GEO_HIERARCHY]
+        product_dims = [d for d in dimensions if d in PRODUCT_HIERARCHY]
+        other_dims = [d for d in dimensions if d not in GEO_HIERARCHY and d not in PRODUCT_HIERARCHY]
 
-                filter_obj = FilterCondition(
-                    dimension=resolved_dim,
-                    operator=filter_data.get('operator', 'equals'),
-                    value=filter_data.get('value', '')
-                )
-                filters.append(filter_obj)
+        # Keep only first dimension from each hierarchy
+        result = []
+        if geo_dims:
+            result.append(geo_dims[0])
+            if len(geo_dims) > 1:
+                logger.warning(f"🗂️  [DimensionsAgent] ⚠️  Multiple geo dimensions, keeping only: {geo_dims[0]}")
 
-            return filters if filters else None
+        if product_dims:
+            result.append(product_dims[0])
+            if len(product_dims) > 1:
+                logger.warning(f"🗂️  [DimensionsAgent] ⚠️  Multiple product dimensions, keeping only: {product_dims[0]}")
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.warning(f"Failed to parse filters: {e}")
-            return None
+        result.extend(other_dims)
+        return result
 
-    def _parse_context_operation(self, operation_str: str) -> Optional[str]:
-        """Parse context operation."""
-        if not operation_str or operation_str.strip().lower() in ['none', 'null', '']:
-            return None
-        op = operation_str.strip().upper()
-        valid_ops = ["MINIMAL_MESSAGE", "DRILL_DOWN", "ALSO_BY", "REPLACE_BY"]
-        return op if op in valid_ops else None
-
-    def _parse_boolean(self, bool_str: str) -> bool:
-        """Parse boolean string."""
-        if not bool_str:
-            return False
-        return bool_str.strip().lower() in ['true', 'yes', '1']
-
-    def _parse_int(self, int_str: str) -> Optional[int]:
-        """Parse integer string."""
-        if not int_str or int_str.strip().lower() in ['none', 'null', '']:
-            return None
-        try:
-            return int(int_str.strip())
-        except ValueError:
-            return None
-
+# =============================================================================
+# ASSEMBLER
+# =============================================================================
 
 class Assembler(dspy.Module):
     """
@@ -1100,12 +805,14 @@ class Assembler(dspy.Module):
         self.assembler = dspy.Predict(AssembleIntent)
 
     def forward(self,
+                classified_query: ClassifiedQuery,
                 scope_result: ScopeResult,
                 time_result: TimeResult,
                 metrics_result: MetricsResult,
                 dimensions_result: DimensionsResult) -> Intent:
-        """Assemble final intent from separate scope and time results."""
+        """Assemble final intent from individual agent results."""
         logger.info("🔧 [Assembler] Starting final intent assembly")
+        logger.debug(f"🔧 [Assembler] Query intent: {classified_query.query_intent}")
         logger.debug(f"🔧 [Assembler] Scope: {scope_result.sales_scope}")
         logger.debug(f"🔧 [Assembler] Time constraint: {time_result.has_time_constraint}")
         logger.debug(f"🔧 [Assembler] Metrics: {len(metrics_result.metrics)} items")
@@ -1113,19 +820,9 @@ class Assembler(dspy.Module):
         logger.debug(f"🔧 [Assembler] Filters: {len(dimensions_result.filters) if dimensions_result.filters else 0} items")
 
         try:
-            # Combine scope and time into ScopeTimeResult for compatibility
-            scope_time_result = ScopeTimeResult(
-                sales_scope=scope_result.sales_scope,
-                time_window=time_result.time_window,
-                start_date=time_result.start_date,
-                end_date=time_result.end_date,
-                granularity=time_result.granularity,
-                has_time_constraint=time_result.has_time_constraint
-            )
-
-            # Phase 1: LLM-based merge per RULE D6
+            # Phase 1: LLM-based merge using new signature
             logger.debug("🔧 [Assembler] Phase 1: LLM-based merge")
-            merged_intent = self._llm_merge(scope_time_result, metrics_result, dimensions_result)
+            merged_intent = self._llm_merge(classified_query, scope_result, time_result, metrics_result, dimensions_result)
 
             # Phase 2: Python constraint enforcement per RULE D6
             logger.debug("🔧 [Assembler] Phase 2: Python constraint enforcement")
@@ -1136,12 +833,10 @@ class Assembler(dspy.Module):
             logger.info(f"🔧 [Assembler] Final metrics: {[m.name for m in final_intent.metrics]}")
             if final_intent.group_by:
                 logger.info(f"🔧 [Assembler] Final group_by: {final_intent.group_by}")
-            if final_intent.filters:
-                logger.info(f"🔧 [Assembler] Final filters: {len(final_intent.filters)} items")
             if final_intent.time:
                 if final_intent.time.window:
                     logger.info(f"🔧 [Assembler] Final time: {final_intent.time.window}")
-                elif final_intent.time.start_date:
+                else:
                     logger.info(f"🔧 [Assembler] Final time: {final_intent.time.start_date} to {final_intent.time.end_date}")
 
             logger.debug(f"🔧 [Assembler] Complete final intent: {final_intent.model_dump()}")
@@ -1149,113 +844,126 @@ class Assembler(dspy.Module):
 
         except Exception as e:
             logger.error(f"🔧 [Assembler] ❌ Intent assembly failed: {e}")
-            logger.warning(f"🔧 [Assembler] 🔄 Falling back to minimal valid intent")
-            # Fallback: minimal valid intent
-            return self._create_fallback_intent(metrics_result)
+            logger.warning(f"🔧 [Assembler] 🔄 Falling back to manual assembly")
+            # Fallback: manual assembly
+            return self._manual_assembly(classified_query, scope_result, time_result, metrics_result, dimensions_result)
 
-    def _llm_merge(self, scope_time: ScopeTimeResult, metrics: MetricsResult,
-                   dimensions: DimensionsResult) -> Intent:
+    def _llm_merge(self, classified_query: ClassifiedQuery, scope_result: ScopeResult,
+                   time_result: TimeResult, metrics_result: MetricsResult,
+                   dimensions_result: DimensionsResult) -> Intent:
         """Phase 1: LLM-based merge of upstream results."""
         logger.debug("🔧 [Assembler] Attempting LLM-based merge")
         try:
-            # Serialize upstream results per RULE M4
-            scope_time_json = scope_time.model_dump_json()
-            metrics_json = metrics.model_dump_json()
-            dimensions_json = dimensions.model_dump_json()
-
+            # Call DSPy predictor with all individual results per new signature
             result = self.assembler(
-                scope_time_result=scope_time_json,
-                metrics_result=metrics_json,
-                dimensions_result=dimensions_json
+                classified_query=classified_query,
+                scope_result=scope_result,
+                time_result=time_result,
+                metrics_result=metrics_result,
+                dimensions_result=dimensions_result
             )
 
-            # Parse the final intent JSON
-            intent_data = json.loads(result.final_intent)
+            logger.debug(f"🔧 [Assembler] Raw LLM merge output: {result.final_intent}")
 
-            # Clean the data to only include valid Intent fields
-            valid_fields = {
-                'sales_scope', 'metrics', 'group_by', 'filters', 'time', 'post_processing'
-            }
-            cleaned_data = {k: v for k, v in intent_data.items() if k in valid_fields}
+            # Parse the JSON result into Intent object
+            if isinstance(result.final_intent, str):
+                # If it's a JSON string, parse it
+                intent_dict = json.loads(result.final_intent)
+                intent = Intent(**intent_dict)
+            elif isinstance(result.final_intent, dict):
+                # If it's already a dict, use it directly
+                intent = Intent(**result.final_intent)
+            elif isinstance(result.final_intent, Intent):
+                # If it's already an Intent object, use it
+                intent = result.final_intent
+            else:
+                raise ValueError(f"Unexpected final_intent type: {type(result.final_intent)}")
 
-            # Fix metrics format - ensure they're Metric objects, not strings
-            if 'metrics' in cleaned_data and cleaned_data['metrics']:
-                fixed_metrics = []
-                for metric in cleaned_data['metrics']:
-                    if isinstance(metric, str):
-                        # Convert string to Metric object
-                        fixed_metrics.append(Metric(name=metric, aggregation="sum"))
-                    elif isinstance(metric, dict):
-                        # Already a dict, convert to Metric
-                        fixed_metrics.append(Metric(**metric))
-                    else:
-                        # Already a Metric object
-                        fixed_metrics.append(metric)
-                cleaned_data['metrics'] = fixed_metrics
-
-            # Fix filters format if needed
-            if 'filters' in cleaned_data and cleaned_data['filters']:
-                fixed_filters = []
-                for filter_item in cleaned_data['filters']:
-                    if isinstance(filter_item, dict):
-                        fixed_filters.append(Filter(**filter_item))
-                    else:
-                        fixed_filters.append(filter_item)
-                cleaned_data['filters'] = fixed_filters
-
-            # Fix time format if needed
-            if 'time' in cleaned_data and cleaned_data['time']:
-                if isinstance(cleaned_data['time'], dict):
-                    cleaned_data['time'] = TimeSpec(**cleaned_data['time'])
-
-            logger.debug("🔧 [Assembler] LLM merge successful, cleaned and fixed data types")
-            return Intent(**cleaned_data)
+            logger.debug("🔧 [Assembler] ✅ LLM merge successful")
+            return intent
 
         except Exception as e:
-            logger.warning(f"🔧 [Assembler] ⚠️  LLM merge failed: {e}, using manual assembly")
-            return self._manual_assembly(scope_time, metrics, dimensions)
+            logger.warning(f"🔧 [Assembler] ⚠️  LLM merge failed: {e}")
+            logger.debug("🔧 [Assembler] Falling back to manual assembly")
+            # Fallback to manual assembly
+            return self._manual_assembly(classified_query, scope_result, time_result, metrics_result, dimensions_result)
 
-    def _manual_assembly(self, scope_time: ScopeTimeResult, metrics: MetricsResult,
-                         dimensions: DimensionsResult) -> Intent:
+    def _manual_assembly(self, classified_query: ClassifiedQuery, scope_result: ScopeResult,
+                         time_result: TimeResult, metrics_result: MetricsResult,
+                         dimensions_result: DimensionsResult) -> Intent:
         """Manual assembly fallback."""
         logger.debug("🔧 [Assembler] Using manual assembly fallback")
 
+        # Import schema classes from the new schema
+        from .schemas import MetricSpec, TimeSpec, PostProcessingResult
+
         # Build metrics
-        metric_objects = [
-            Metric(name=name, aggregation=agg)
-            for name, agg in zip(metrics.metrics, metrics.aggregations)
+        metrics = [
+            MetricSpec(name=metrics_result.metrics[i], aggregation=metrics_result.aggregations[i])
+            for i in range(len(metrics_result.metrics))
         ]
 
-        # Build filters
-        filter_objects = None
-        if dimensions.filters:
-            filter_objects = [
-                Filter(
-                    dimension=f.dimension,
-                    operator=f.operator,
-                    value=f.value
-                ) for f in dimensions.filters
-            ]
-
-        # Build time spec
+        # Build time specification
         time_spec = None
-        if scope_time.has_time_constraint:
+        if time_result.has_time_constraint:
             time_spec = TimeSpec(
                 dimension="invoice_date",
-                window=scope_time.time_window,
-                start_date=scope_time.start_date,
-                end_date=scope_time.end_date,
-                granularity=scope_time.granularity
+                window=time_result.time_window,
+                start_date=time_result.start_date,
+                end_date=time_result.end_date,
+                granularity=time_result.granularity
             )
 
-        logger.debug("🔧 [Assembler] Manual assembly completed")
-        return Intent(
-            sales_scope=scope_time.sales_scope,
-            metrics=metric_objects,
-            group_by=dimensions.group_by,
-            filters=filter_objects,
-            time=time_spec
+        # Build post-processing based on query intent
+        post_processing = None
+        if classified_query.query_intent in ["RANKING", "COMPARISON", "TREND"]:
+            post_processing = self._derive_post_processing(classified_query.query_intent, time_result)
+
+        # Assemble final intent
+        intent = Intent(
+            sales_scope=scope_result.sales_scope,
+            metrics=metrics,
+            group_by=dimensions_result.group_by,
+            filters=dimensions_result.filters,
+            time=time_spec,
+            post_processing=post_processing
         )
+
+        logger.debug("🔧 [Assembler] ✅ Manual assembly successful")
+        return intent
+
+    def _derive_post_processing(self, query_intent: str, time_result: TimeResult) -> Optional[PostProcessingResult]:
+        """Derive post-processing configuration from query intent."""
+        from .schemas import RankingConfig, ComparisonConfig
+
+        if query_intent == "RANKING":
+            return PostProcessingResult(
+                ranking=RankingConfig(enabled=True, order="desc", limit=10),
+                comparison=None,
+                derived_metric="none"
+            )
+        elif query_intent == "COMPARISON":
+            if time_result.time_window:
+                return PostProcessingResult(
+                    ranking=None,
+                    comparison=ComparisonConfig(type="period", comparison_window=time_result.time_window),
+                    derived_metric="period_change"
+                )
+        elif query_intent == "TREND" and time_result.granularity:
+            derived_metric = "none"
+            if time_result.time_window and "month" in time_result.time_window:
+                derived_metric = "mom_growth"
+            elif time_result.time_window and "year" in time_result.time_window:
+                derived_metric = "yoy_growth"
+
+            return PostProcessingResult(
+                ranking=None,
+                comparison=None,
+                derived_metric=derived_metric
+            )
+
+        return None
+       
 
     def _enforce_constraints(self, intent: Intent) -> Intent:
         """Phase 2: Binary constraint enforcement in Python per RULE D5."""
@@ -1312,8 +1020,9 @@ class Assembler(dspy.Module):
 
     def _create_fallback_intent(self, metrics: MetricsResult) -> Intent:
         """Create minimal fallback intent."""
+        from .schemas import MetricSpec
         metric_objects = [
-            Metric(name=name, aggregation=agg)
+            MetricSpec(name=name, aggregation=agg)
             for name, agg in zip(metrics.metrics, metrics.aggregations)
         ]
 

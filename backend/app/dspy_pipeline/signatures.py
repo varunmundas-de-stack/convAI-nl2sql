@@ -14,10 +14,10 @@ from .schemas import (
     ClassifiedQuery,
     ScopeResult,
     TimeResult,
-    ScopeTimeResult,
     MetricsResult,
     DimensionsResult,
-    PostProcessingSpec
+    PostProcessingResult,
+    Intent
 )
 
 # =============================================================================
@@ -25,210 +25,119 @@ from .schemas import (
 # =============================================================================
 
 class ClassifyQuery(dspy.Signature):
-    """Label query terms with their semantic roles for downstream processing."""
+    """Classify query terms with semantic roles and determine query intent."""
 
-    query = dspy.InputField(desc="Natural language query to classify")
+    query: str = dspy.InputField(desc="Natural language query to classify")
 
-    # Output fields with constraint descriptions for optimizer
-    metric_terms = dspy.OutputField(
-        desc="comma-separated metric terms (sales, revenue, quantity). "
-             "use base terms only, no derived calculations"
-    )
-
-    dimension_terms = dspy.OutputField(
-        desc="comma-separated dimension terms (zone, brand, category). "
-             "include both grouping and filter dimensions"
-    )
-
-    filter_terms = dspy.OutputField(
-        desc="comma-separated filter condition indicators (equals, in, contains). "
-             "include specific values mentioned"
-    )
-
-    time_expressions = dspy.OutputField(
-        desc="comma-separated time-related terms (last month, daily, trend). "
-             "include both ranges and granularities"
-    )
-
-    ranking_indicators = dspy.OutputField(
-        desc="comma-separated ranking terms (top, bottom, highest, lowest). "
-             "include numeric limits if specified"
-    )
-
-    scope_indicators = dspy.OutputField(
-        desc="comma-separated scope terms (primary, secondary). "
-             "empty if no explicit scope mentioned"
-    )
-
-    comparison_indicators = dspy.OutputField(
-        desc="comma-separated comparison terms (vs, compared, growth). "
-             "include period comparison signals"
+    # Output the complete classified query as JSON
+    classified_query: ClassifiedQuery = dspy.OutputField(
+        desc="JSON object with ClassifiedQuery structure containing: "
+             "original_query (string), "
+             "classified_terms (array of objects with term, role, catalog_match), "
+             "query_intent (KPI|DISTRIBUTION|RANKING|TREND|COMPARISON|DRILL_DOWN|MINIMAL_MESSAGE|STRUCTURAL), "
+             "filter_hints (array of objects with dimension and value), "
+             "explicit_scope (PRIMARY|SECONDARY or null). "
+             "Resolve aliases: quantity→billed_qty, territory→zone, sales→net_value. "
+             "Use roles: METRIC, DIMENSION, TIME_RANGE, TIME_GRANULARITY, FILTER_VALUE, RANKING, SCOPE, COMPARISON, TREND"
     )
 
 
 class ResolveScope(dspy.Signature):
-    """Determine sales scope from classified query terms."""
+    """Determine sales scope from classified query."""
 
-    classified_query = dspy.InputField(desc="Query with labeled semantic terms")
+    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
 
-    # Output fields for scope resolution
-    sales_scope = dspy.OutputField(
-        desc="PRIMARY or SECONDARY. default SECONDARY if no explicit scope. "
-             "PRIMARY only if explicitly mentioned"
+    # Output ScopeResult as JSON
+    scope_result: ScopeResult = dspy.OutputField(
+        desc="JSON object with ScopeResult structure containing: "
+             "sales_scope (PRIMARY|SECONDARY). "
+             "Default SECONDARY if no explicit scope. "
+             "PRIMARY only if explicitly mentioned in query"
     )
 
 
 class ResolveTime(dspy.Signature):
     """Determine time constraints from classified query with decision logic and clarification rules."""
 
-    classified_query = dspy.InputField(desc="Query with labeled semantic terms")
-    current_date = dspy.InputField(desc="Current date in YYYY-MM-DD format")
-    intent_category = dspy.InputField(desc="Query intent category (KPI, DISTRIBUTION, RANKING, TREND, COMPARISON, etc.)")
-    previous_context = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
+    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    current_date: str = dspy.InputField(desc="Current date in YYYY-MM-DD format")
+    query_intent: str = dspy.InputField(desc="Query intent from classified query (KPI, DISTRIBUTION, RANKING, TREND, COMPARISON, etc.)")
+    previous_context: str = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
 
-    # Output fields for time resolution
-    time_window = dspy.OutputField(
-        desc="exact TIME_WINDOW match only (last_30_days, month_to_date). "
-             "null if no exact match found"
+    # Output TimeResult as JSON
+    time_result: TimeResult = dspy.OutputField(
+        desc="JSON object with TimeResult structure containing: "
+             "time_window (exact TIME_WINDOW match or null), "
+             "start_date (YYYY-MM-DD or null), "
+             "end_date (YYYY-MM-DD or null), "
+             "granularity (day|week|month|quarter|year or null for non-trend queries). "
+             "Use time_window for exact matches like 'last_30_days', 'month_to_date'. "
+             "Use start_date/end_date only if no time_window matches. "
+             "Default granularity to 'week' for TREND queries without explicit granularity. "
+             "Window and dates are mutually exclusive - never set both"
     )
 
-    start_date = dspy.OutputField(
-        desc="YYYY-MM-DD start date. use only if time_window is null. "
-             "calculate from current_date for relative expressions"
-    )
-
-    end_date = dspy.OutputField(
-        desc="YYYY-MM-DD end date. use only if time_window is null. "
-             "inclusive end date"
-    )
-
-    granularity = dspy.OutputField(
-        desc="day|week|month|quarter|year for trend queries only. "
-             "null for snapshot/distribution queries. default week for vague trends"
-    )
-
-    has_time_constraint = dspy.OutputField(
-        desc="true if any time constraint specified, false otherwise"
-    )
-
-    requires_clarification = dspy.OutputField(
-        desc="true if query requires time but none provided and no previous context available. "
-             "false if time is provided, inherited from context, or not needed for query type"
-    )
-
-    reasoning = dspy.OutputField(
-        desc="brief explanation of time decision logic and whether clarification is needed"
-    )
-
-
-# Keep old signature for backwards compatibility during transition
-ResolveScopeTime = ResolveScope
 
 
 class ExtractMetrics(dspy.Signature):
-    """Extract and validate metrics from classified query with ambiguity detection."""
+    """Extract and validate metrics from classified query."""
 
-    classified_query = dspy.InputField(desc="Query with labeled metric terms")
-    sales_scope = dspy.InputField(desc="Resolved sales scope (PRIMARY/SECONDARY)")
-    available_metrics = dspy.InputField(desc="JSON list of available metrics with name, label, description")
+    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    sales_scope: str = dspy.InputField(desc="Resolved sales scope (PRIMARY/SECONDARY)")
+    available_metrics: str = dspy.InputField(desc="JSON list of available metrics with name, label, description")
 
-    metrics = dspy.OutputField(
-        desc="comma-separated catalog metric names only (count, net_value, gross_value, tax_value, billed_qty). "
-             "resolve aliases: quantity→billed_qty, sales→net_value. minimum 1 metric"
-    )
-
-    aggregations = dspy.OutputField(
-        desc="comma-separated aggregation functions parallel to metrics (sum, count, avg). "
-             "default sum for value metrics, count for transaction metrics"
-    )
-
-    ambiguous_terms = dspy.OutputField(
-        desc="comma-separated terms from query that could refer to multiple metrics. "
-             "empty if all metric references are clear"
-    )
-
-    ambiguity_confidence = dspy.OutputField(
-        desc="confidence score 0.0-1.0 that ambiguous terms exist in the query. "
-             "0.0 means no ambiguity, 1.0 means high ambiguity"
-    )
-
-    ambiguous_matches = dspy.OutputField(
-        desc="JSON array of metrics that could match the ambiguous terms. "
-             "empty if no ambiguity detected"
-    )
-
-    reasoning = dspy.OutputField(
-        desc="brief explanation of metric extraction decisions and any ambiguities found"
+    # Output MetricsResult as JSON
+    metrics_result: MetricsResult = dspy.OutputField(
+        desc="JSON object with MetricsResult structure containing: "
+             "metrics (array of canonical metric names: count, net_value, gross_value, tax_value, billed_qty), "
+             "aggregations (parallel array: sum, count, avg). "
+             "Resolve aliases: quantity→billed_qty, sales→net_value. "
+             "Default to ['net_value'] if ambiguous. "
+             "Use 'count' aggregation for count metric, 'sum' for others. "
+             "Must contain at least one metric"
     )
 
 
 class ResolveDimensions(dspy.Signature):
-    """Resolve dimensions, filters, and apply context-aware operations with ambiguity detection."""
+    """Resolve dimensions and filters from classified query."""
 
-    classified_query = dspy.InputField(desc="Query with labeled dimension/filter terms")
-    sales_scope = dspy.InputField(desc="Resolved sales scope for dimension validation")
-    available_dimensions = dspy.InputField(desc="JSON list of available dimensions with name, label, description")
-    previous_context = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
+    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    sales_scope: str = dspy.InputField(desc="Resolved sales scope for dimension validation")
+    available_dimensions: str = dspy.InputField(desc="JSON list of available dimensions with name, label, description")
+    previous_context: str = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
 
-    group_by = dspy.OutputField(
-        desc="comma-separated dimension names for grouping (zone, brand, category). "
-             "null if no grouping. never include invoice_date. max 2 non-time dimensions"
-    )
-
-    filters = dspy.OutputField(
-        desc="JSON array of filter objects with dimension, operator, value. "
-             "null if no filters. validate dimensions against scope"
-    )
-
-    context_operation = dspy.OutputField(
-        desc="MINIMAL_MESSAGE|DRILL_DOWN|ALSO_BY|REPLACE_BY if context operation detected. "
-             "null for standalone queries"
-    )
-
-    ranking_enabled = dspy.OutputField(
-        desc="true if top/bottom N requested and group_by present. false otherwise"
-    )
-
-    ranking_order = dspy.OutputField(
-        desc="desc for top/highest, asc for bottom/lowest. null if no ranking"
-    )
-
-    ranking_limit = dspy.OutputField(
-        desc="numeric limit for ranking (5 for top 5). null if no ranking"
-    )
-
-    ambiguous_terms = dspy.OutputField(
-        desc="comma-separated terms from query that could refer to multiple dimensions. "
-             "empty if all dimension references are clear"
-    )
-
-    ambiguity_confidence = dspy.OutputField(
-        desc="confidence score 0.0-1.0 that ambiguous dimension terms exist. "
-             "0.0 means no ambiguity, 1.0 means high ambiguity"
-    )
-
-    ambiguous_matches = dspy.OutputField(
-        desc="JSON array of dimensions that could match the ambiguous terms. "
-             "empty if no ambiguity detected"
-    )
-
-    reasoning = dspy.OutputField(
-        desc="brief explanation of dimension resolution decisions and any ambiguities found"
+    # Output DimensionsResult as JSON
+    dimensions_result: DimensionsResult = dspy.OutputField(
+        desc="JSON object with DimensionsResult structure containing: "
+             "group_by (array of canonical dimension names for grouping or null), "
+             "filters (array of FilterCondition objects with dimension, operator, value or null). "
+             "Max 2 dimensions in group_by. Never include 'invoice_date'. "
+             "Max 1 dimension per hierarchy (geo: zone/state/city, product: category/sub_category/brand/sku_code). "
+             "FilterCondition has dimension (string), operator (equals|not_equals|in|not_in|contains), "
+             "value (string or array for in/not_in operators). "
+             "Validate dimensions against scope constraints"
     )
 
 
 class AssembleIntent(dspy.Signature):
-    """Merge upstream results into final intent structure."""
+    """Merge upstream results into final intent structure with post-processing."""
 
     # All upstream results as inputs
-    scope_time_result = dspy.InputField(desc="Resolved scope and time from ScopeTimeAgent")
-    metrics_result = dspy.InputField(desc="Validated metrics from MetricsAgent")
-    dimensions_result = dspy.InputField(desc="Dimensions and filters from DimensionsAgent")
+    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with original query and intent")
+    scope_result: ScopeResult = dspy.InputField(desc="ScopeResult object from ScopeAgent")
+    time_result: TimeResult = dspy.InputField(desc="TimeResult object from TimeAgent")
+    metrics_result: MetricsResult = dspy.InputField(desc="MetricsResult object from MetricsAgent")
+    dimensions_result: DimensionsResult = dspy.InputField(desc="DimensionsResult object from DimensionsAgent")
 
     # Final intent assembly
-    final_intent = dspy.OutputField(
-        desc="complete Intent JSON with all fields populated. "
-             "metrics must be array of objects with 'name' and 'aggregation' fields. "
-             "ensure consistency across all upstream results. "
-             "only include valid Intent fields: sales_scope, metrics, group_by, filters, time, post_processing"
+    final_intent: Intent = dspy.OutputField(
+        desc="Complete Intent object with all fields populated: "
+             "sales_scope (PRIMARY|SECONDARY), "
+             "metrics (array of objects with name and aggregation fields), "
+             "group_by (array of dimension names or null), "
+             "filters (array of FilterCondition objects or null), "
+             "time (TimeSpec object with dimension='invoice_date', window/start_date/end_date, granularity or null), "
+             "post_processing (PostProcessingResult with ranking, comparison, derived_metric or null). "
+             "Derive post_processing from query_intent: RANKING→ranking config, COMPARISON→comparison config, "
+             "TREND→derived_metric based on time window. Ensure consistency across all fields."
     )

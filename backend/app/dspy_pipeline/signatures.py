@@ -45,14 +45,17 @@ class ClassifyQuery(dspy.Signature):
 class ResolveScope(dspy.Signature):
     """Determine sales scope from classified query."""
 
-    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    classified_query: ClassifiedQuery = dspy.InputField(
+        desc="ClassifiedQuery object with structured terms and roles"
+    )
 
-    # Output ScopeResult as JSON
     scope_result: ScopeResult = dspy.OutputField(
-        desc="JSON object with ScopeResult structure containing: "
-             "sales_scope (PRIMARY|SECONDARY). "
-             "Default SECONDARY if no explicit scope. "
-             "PRIMARY only if explicitly mentioned in query"
+        desc=(
+            "JSON object with ScopeResult containing: "
+            "sales_scope (PRIMARY|SECONDARY). "
+            "Only return a value if explicitly indicated in the query. "
+            "Do NOT assume a default if scope is not mentioned."
+        )
     )
 
 
@@ -88,13 +91,15 @@ class ExtractMetrics(dspy.Signature):
 
     # Output MetricsResult as JSON
     metrics_result: MetricsResult = dspy.OutputField(
-        desc="JSON object with MetricsResult structure containing: "
-             "metrics (array of canonical metric names: count, net_value, gross_value, tax_value, billed_qty), "
-             "aggregations (parallel array: sum, count, avg). "
-             "Resolve aliases: quantity→billed_qty, sales→net_value. "
-             "Default to ['net_value'] if ambiguous. "
-             "Use 'count' aggregation for count metric, 'sum' for others. "
-             "Must contain at least one metric"
+        desc="""
+        Return a list of candidate metrics from the catalog.
+
+        Rules:
+        - If query clearly maps to ONE metric → return single-item list
+        - If query is ambiguous → return MULTIPLE candidate metrics
+        - All metrics MUST be from provided catalog
+        - Do NOT guess if ambiguous — return all plausible matches
+        """
     )
 
 
@@ -118,26 +123,51 @@ class ResolveDimensions(dspy.Signature):
              "Validate dimensions against scope constraints"
     )
 
+class ResolvePostProcessing(dspy.Signature):
+    """Infer high-level post-processing intent."""
 
-class AssembleIntent(dspy.Signature):
-    """Merge upstream results into final intent structure with post-processing."""
-
-    # All upstream results as inputs
-    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with original query and intent")
-    scope_result: ScopeResult = dspy.InputField(desc="ScopeResult object from ScopeAgent")
-    time_result: TimeResult = dspy.InputField(desc="TimeResult object from TimeAgent")
-    metrics_result: MetricsResult = dspy.InputField(desc="MetricsResult object from MetricsAgent")
-    dimensions_result: DimensionsResult = dspy.InputField(desc="DimensionsResult object from DimensionsAgent")
-
-    # Final intent assembly
-    final_intent: Intent = dspy.OutputField(
-        desc="Complete Intent object with all fields populated: "
-             "sales_scope (PRIMARY|SECONDARY), "
-             "metrics (array of objects with name and aggregation fields), "
-             "group_by (array of dimension names or null), "
-             "filters (array of FilterCondition objects or null), "
-             "time (TimeSpec object with dimension='invoice_date', window/start_date/end_date, granularity or null), "
-             "post_processing (PostProcessingResult with ranking, comparison, derived_metric or null). "
-             "Derive post_processing from query_intent: RANKING→ranking config, COMPARISON→comparison config, "
-             "TREND→derived_metric based on time window. Ensure consistency across all fields."
+    classified_query: ClassifiedQuery = dspy.InputField(
+        desc="Contains query_intent (RANKING, COMPARISON, TREND, etc.) and extracted hints like top/bottom, limits, etc."
     )
+
+    time_result: TimeResult = dspy.InputField(
+        desc="Resolved time context (window, dates, granularity)"
+    )
+
+    dimensions_result: DimensionsResult = dspy.InputField(
+        desc="Contains group_by (required for ranking)"
+    )
+
+    post_processing_result: PostProcessingResult = dspy.OutputField(
+        desc=(
+            "Return PostProcessingResult with: "
+            "ranking (enabled/order/limit), "
+            "comparison (type/comparison_window), "
+            "derived_metric (none|wow_growth|mom_growth|yoy_growth|period_change|contribution_percent|avg_price). "
+            "Focus only on user intent — do not enforce constraints."
+        )
+    )
+
+# class AssembleIntent(dspy.Signature):
+#     """Merge upstream results into the final intent structure."""
+ 
+#     # All upstream results as inputs
+#     classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with original query and intent")
+#     scope_result: ScopeResult = dspy.InputField(desc="ScopeResult object from ScopeAgent")
+#     time_result: TimeResult = dspy.InputField(desc="TimeResult object from TimeAgent")
+#     metrics_result: MetricsResult = dspy.InputField(desc="MetricsResult object from MetricsAgent")
+#     dimensions_result: DimensionsResult = dspy.InputField(desc="DimensionsResult object from DimensionsAgent")
+#     post_processing_result: PostProcessingResult = dspy.InputField(desc="PostProcessingResult object from PostProcessingAgent")
+ 
+#     # Final intent assembly
+#     final_intent: Intent = dspy.OutputField(
+#         desc="Complete Intent object assembled from all upstream inputs with no derivation: "
+#              "sales_scope from scope_result.sales_scope, "
+#              "metrics from metrics_result (each entry has name and aggregation), "
+#              "group_by from dimensions_result.group_by (array or null), "
+#              "filters from dimensions_result.filters (array or null), "
+#              "time (TimeSpec with dimension='invoice_date', window from time_result.time_window, "
+#              "      start_date/end_date from time_result, granularity from time_result.granularity) or null if no time constraint, "
+#              "post_processing from post_processing_result or null if all fields are null/none. "
+#              "Do not re-derive any field — copy values directly from the corresponding input."
+#     )

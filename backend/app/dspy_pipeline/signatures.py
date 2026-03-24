@@ -37,7 +37,7 @@ class ClassifyQuery(dspy.Signature):
              "query_intent (KPI|DISTRIBUTION|RANKING|TREND|COMPARISON|DRILL_DOWN|MINIMAL_MESSAGE|STRUCTURAL), "
              "filter_hints (array of objects with dimension and value), "
              "explicit_scope (PRIMARY|SECONDARY or null). "
-             "Resolve aliases: quantity→billed_qty, territory→zone, sales→net_value. "
+             "DO NOT guess catalog_match for generic/vague terms like 'region', 'location', 'product'. Leave catalog_match null if ambiguous. "
              "Use roles: METRIC, DIMENSION, TIME_RANGE, TIME_GRANULARITY, FILTER_VALUE, RANKING, SCOPE, COMPARISON, TREND"
     )
 
@@ -95,10 +95,11 @@ class ExtractMetrics(dspy.Signature):
         Return a list of candidate metrics from the catalog.
 
         Rules:
+        - If NO metric is explicitly specified, return all the available metrics as MULTIPLE candidates.
         - If query clearly maps to ONE metric → return single-item list
         - If query is ambiguous → return MULTIPLE candidate metrics
         - All metrics MUST be from provided catalog
-        - Do NOT guess if ambiguous — return all plausible matches
+        - Do Not guess if ambiguous — return all plausible matches
         """
     )
 
@@ -113,14 +114,24 @@ class ResolveDimensions(dspy.Signature):
 
     # Output DimensionsResult as JSON
     dimensions_result: DimensionsResult = dspy.OutputField(
-        desc="JSON object with DimensionsResult structure containing: "
-             "group_by (array of canonical dimension names for grouping or null), "
-             "filters (array of FilterCondition objects with dimension, operator, value or null). "
-             "Max 2 dimensions in group_by. Never include 'invoice_date'. "
-             "Max 1 dimension per hierarchy (geo: zone/state/city, product: category/sub_category/brand/sku_code). "
-             "FilterCondition has dimension (string), operator (equals|not_equals|in|not_in|contains), "
-             "value (string or array for in/not_in operators). "
-             "Validate dimensions against scope constraints"
+    desc="""
+    JSON object with DimensionsResult containing:
+
+    group_by:
+      - array of dimension names matching the user's intent from available_dimensions.
+      - If the user explicitly asks for a specific dimension (e.g. 'country'), return just that one ['country'].
+      - If the user uses a VAGUE/GENERIC term that matches multiple specific catalog fields, you MUST return ALL matching candidate fields in the area.
+      - NEVER arbitrarily choose just one field if the user's term is generic. Give every valid possibility.
+
+    filters:
+      - array of FilterCondition objects or null
+
+    Rules:
+      - Max 2 dimensions for grouping (EXCEPT when returning >2 candidates for a generic/ambiguous term)
+      - Never include 'invoice_date'
+      - Only use dimensions exactly as named in available_dimensions
+      - Respect hierarchy constraints (geo/product)
+    """
     )
 
 class ResolvePostProcessing(dspy.Signature):

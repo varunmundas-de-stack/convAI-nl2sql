@@ -104,20 +104,7 @@ QueryIntent = Literal[
  
  
 class ClassifiedTerm(BaseModel):
-    """
-    One term from the query with its semantic role and resolved catalog name.
- 
-    WHY A UNIFIED LIST (not separate metric_terms=[], dimension_terms=[] lists):
-        Flat role-specific lists lose the term↔role pairing. Downstream agents
-        need to know both what the term was AND what role it plays. For example,
-        "Gold Flake" is a FILTER_VALUE that resolves to dimension "brand" —
-        that two-part relationship cannot be stored in a flat string list.
- 
-    WHY catalog_match IS RESOLVED HERE:
-        Alias resolution (quantity→billed_qty, territory→zone) happens once in
-        the Classifier. All downstream agents receive canonical names and never
-        need to know about aliases. This is the single point of alias resolution.
-    """
+    
     term: str = Field(
         description="Exact word or phrase as it appears in the query."
     )

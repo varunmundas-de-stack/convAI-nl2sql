@@ -49,13 +49,17 @@ def build_metric_clarification(
     ambiguous_terms: List[str],
     candidate_metrics: List[str],
 ) -> Clarification:
+
+    if not ambiguous_terms:
+        clarifying_question = "No metric mentioned. Choose one"
+    else:
+        clarifying_question = f"Which metric do you mean by '{', '.join(ambiguous_terms)}'?"
     return Clarification(
         request_id=str(uuid.uuid4()),
         field="metrics",
-        question=f"Which metric do you mean by '{', '.join(ambiguous_terms)}'?",
+        question=clarifying_question,
         options=candidate_metrics,
         multi_select=False,
-        context="Ambiguous metric term in query",
     )
 
 
@@ -63,13 +67,16 @@ def build_dimension_clarification(
     ambiguous_terms: List[str],
     candidate_dimensions: List[str],
 ) -> Clarification:
+    if not ambiguous_terms:
+        clarifying_question = "No dimension mentioned. Choose one"
+    else:
+        clarifying_question = f"Which dimension do you mean by '{', '.join(ambiguous_terms)}'?"
     return Clarification(
         request_id=str(uuid.uuid4()),
         field="group_by",
-        question=f"Which dimension do you mean by '{', '.join(ambiguous_terms)}'?",
+        question=clarifying_question,
         options=candidate_dimensions,
         multi_select=False,
-        context="Ambiguous dimension term in query",
     )
 
 
@@ -77,13 +84,16 @@ def build_time_clarification(
     ambiguous_expression: str,
     candidate_windows: List[str],
 ) -> Clarification:
+    if ambiguous_expression == "time period":
+        clarifying_question = "No time period mentioned. Choose one"
+    else:
+        clarifying_question = f"What time period do you mean by '{ambiguous_expression}'?"
     return Clarification(
         request_id=str(uuid.uuid4()),
         field="time",
-        question=f"What time period do you mean by '{ambiguous_expression}'?",
+        question=clarifying_question,
         options=candidate_windows,
         multi_select=False,
-        context="Ambiguous time expression",
     )
 
 
@@ -94,7 +104,6 @@ def build_scope_clarification() -> Clarification:
         question="Which type of sales data do you want?",
         options=["PRIMARY", "SECONDARY"],
         multi_select=False,
-        context="Scope not specified in query",
     )
 
 

@@ -10,17 +10,19 @@ from datetime import date
 
 from app.dspy_pipeline.schemas import (
     ClassifiedQuery,
-    ScopeTimeResult,
+    ScopeResult,
+    TimeResult,
     MetricsResult,
     DimensionsResult,
     FilterCondition
 )
 from app.dspy_pipeline.modules import (
-    ClassifierAgent,
-    ScopeTimeAgent,
-    MetricsAgent,
-    DimensionsAgent,
-    Assembler
+    ClassifierModule,
+    ScopeModule,
+    TimeModule,
+    MetricsModule,
+    DimensionsModule,
+    AssemblerModule
 )
 from app.dspy_pipeline.pipeline import IntentExtractionPipeline
 from app.dspy_pipeline.training import intent_extraction_metric, IntentExtractionOptimizer
@@ -120,7 +122,7 @@ class TestScopeTimeAgent:
 
             result = agent.forward(classified_query, "2024-03-15")
 
-            assert isinstance(result, ScopeTimeResult)
+            assert isinstance(result, ScopeResult)
             assert result.sales_scope == "SECONDARY"
             assert result.time_window == "last_month"
             assert result.has_time_constraint is True

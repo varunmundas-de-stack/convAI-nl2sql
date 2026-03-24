@@ -17,7 +17,6 @@ from .modules import (
     ClassifierAgent,
     ScopeAgent,
     TimeAgent,
-    ScopeTimeAgent,
     MetricsAgent,
     DimensionsAgent,
     Assembler
@@ -26,12 +25,11 @@ from .schemas import (
     ClassifiedQuery,
     ScopeResult,
     TimeResult,
-    ScopeTimeResult,
     MetricsResult,
-    DimensionsResult
+    DimensionsResult,
+    Intent
 )
 from .clarification_tool import ClarificationRequiredException
-from ..models.intent import Intent
 
 logger = logging.getLogger(__name__)
 
@@ -121,14 +119,10 @@ class IntentExtractionPipeline(dspy.Module):
             logger.info("🚀 [DSPy Pipeline] 📍 Stage 3/6: Time Resolution")
             stage_start_time = time.time()
 
-            # Infer intent category for time decision logic
-            intent_category = self._infer_intent_category(classified_query)
-
             try:
                 time_result: TimeResult = self.time_agent(
                     classified_query,
                     current_date,
-                    intent_category,
                     previous_context
                 )
             except ClarificationRequiredException as clar_exc:
@@ -207,6 +201,7 @@ class IntentExtractionPipeline(dspy.Module):
             logger.info("🚀 [DSPy Pipeline] 📍 Stage 6/6: Final Assembly")
             stage_start_time = time.time()
             final_intent: Intent = self.assembler(
+                classified_query,
                 scope_result,
                 time_result,
                 metrics_result,
@@ -236,42 +231,13 @@ class IntentExtractionPipeline(dspy.Module):
             raise
 
     def _infer_intent_category(self, classified_query: ClassifiedQuery) -> str:
-        """Infer intent category from classified query terms for time decision logic."""
-        query_lower = classified_query.query_text.lower()
+        """
+        Get intent category from classified query.
 
-        # Check for trend indicators
-        if (classified_query.time_expressions and
-            any(trend_word in query_lower for trend_word in ["trend", "over time", "daily", "weekly", "monthly"])):
-            return "TREND"
-
-        # Check for ranking indicators
-        if classified_query.ranking_indicators or any(
-            rank_word in query_lower for rank_word in ["top", "bottom", "highest", "lowest", "best", "worst"]
-        ):
-            return "RANKING"
-
-        # Check for comparison indicators
-        if classified_query.comparison_indicators or any(
-            comp_word in query_lower for comp_word in ["vs", "versus", "compared", "compare", "growth", "change"]
-        ):
-            return "COMPARISON"
-
-        # Check for distribution indicators
-        if classified_query.dimension_terms and any(
-            dist_word in query_lower for dist_word in ["by", "breakdown", "split", "across", "distribution"]
-        ):
-            return "DISTRIBUTION"
-
-        # Check for structural/catalog queries
-        if any(struct_word in query_lower for struct_word in
-               ["what", "which", "list", "show", "available", "exist", "have"]):
-            return "CATALOG"
-
-        # Default to KPI for metric-focused queries
-        if classified_query.metric_terms:
-            return "KPI"
-
-        return "UNKNOWN"
+        Note: This method is now simplified since ClassifiedQuery directly contains
+        the query_intent determined by the ClassifierAgent.
+        """
+        return classified_query.query_intent
 
     def get_pipeline_info(self) -> dict:
         """Get information about the pipeline structure."""

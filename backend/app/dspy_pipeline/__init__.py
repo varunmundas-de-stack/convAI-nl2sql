@@ -6,31 +6,37 @@ LLM prompt for intent extraction. The pipeline follows decomposition rules
 to separate concerns into specialized agents.
 
 Architecture:
-1. ClassifierAgent - Term classification and semantic labeling
-2. ScopeTimeAgent - Sales scope and time resolution
-3. MetricsAgent - Metric extraction and aggregation
-4. DimensionsAgent - Dimensions, filters, and context handling
-5. Assembler - Final assembly with binary constraint enforcement
+1. ClassifierAgent - Term classification and semantic labeling with intent determination
+2. ScopeAgent - Sales scope determination (PRIMARY/SECONDARY)
+3. TimeAgent - Time constraint resolution with decision logic
+4. MetricsAgent - Metric extraction and aggregation specification
+5. DimensionsAgent - Dimensions and filters resolution
+6. Assembler - Final assembly with post-processing and constraint enforcement
 
 Key Benefits:
 - Independent optimization per agent
 - Better failure isolation
 - Maintainable constraints in Python
 - Higher accuracy through specialization
+- Intent-centric design with structured JSON outputs
 """
 
 from .pipeline import IntentExtractionPipeline
 from .schemas import (
     ClassifiedQuery,
-    ScopeTimeResult,
+    ScopeResult,
+    TimeResult,
     MetricsResult,
-    DimensionsResult
+    DimensionsResult,
+    Intent
 )
 
 __all__ = [
     "IntentExtractionPipeline",
     "ClassifiedQuery",
-    "ScopeTimeResult",
+    "ScopeResult",
+    "TimeResult",
     "MetricsResult",
-    "DimensionsResult"
+    "DimensionsResult",
+    "Intent"
 ]

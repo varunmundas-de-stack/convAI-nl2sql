@@ -2,12 +2,11 @@
 DSPy Configuration for Intent Extraction.
 
 This module configures the DSPy environment and provides utilities for
-switching between monolithic and modular pipelines.
+DSPy pipeline management.
 """
 
 import os
 import logging
-from typing import Optional
 from pathlib import Path
 
 import dspy
@@ -59,27 +58,6 @@ def configure_dspy_model() -> None:
     except Exception as e:
         logger.error(f"Failed to configure DSPy: {e}")
         raise
-
-
-def get_pipeline_mode() -> str:
-    """
-    Get the current pipeline mode from environment variable.
-
-    Returns:
-        str: "monolithic" or "dspy"
-    """
-    # Check multiple possible environment variables
-    if os.getenv("USE_DSPY", "false").lower() == "true":
-        return "dspy"
-    elif os.getenv("INTENT_EXTRACTION_MODE", "monolithic").lower() == "dspy":
-        return "dspy"
-    else:
-        return "monolithic"
-
-
-def is_dspy_mode() -> bool:
-    """Check if DSPy mode is enabled."""
-    return get_pipeline_mode() == "dspy"
 
 
 # =============================================================================

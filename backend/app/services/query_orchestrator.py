@@ -303,9 +303,28 @@ def execute_query(query: str, session_id: Optional[str] = None, _skip_reset_over
             stage=PipelineStage.RECEIVED,
         )
         response.original_query = query  # Store the original query
-        
-        logger.info(f"Pipeline started: '{query[:100]}...' (session={session_id})")
-        
+
+        logger.info(f"Pipeline started: '{query[:100]}...' (session={session_id}, request={response.request_id})")
+
+        # -------------------------------------------------------------------------
+        # STEP 0.5: Reset clarification tool state for new sessions
+        # -------------------------------------------------------------------------
+        # Reset clarification tool state to prevent cross-session pollution.
+        # Only reset when starting a completely fresh session (no session_id provided).
+        # This fixes the issue where clarifications from one chat persist into new chats.
+        if not _skip_reset_overrides and not session_id:
+            try:
+                from app.dspy_pipeline.clarification_tool import clarification_tool as _global_ct
+                _global_ct.reset_for_new_request()
+                logger.debug(f"Reset clarification tool state for new session {response.request_id}")
+            except Exception as e:
+                logger.warning(f"Failed to reset clarification tool for request {response.request_id}: {e}")
+        else:
+            if _skip_reset_overrides:
+                logger.debug(f"Skipping clarification tool reset for clarification re-run {response.request_id}")
+            elif session_id:
+                logger.debug(f"Skipping clarification tool reset for existing session {session_id}")
+
         # -------------------------------------------------------------------------
         # STEP 1: Load previous QCO (non-fatal if missing)
         # -------------------------------------------------------------------------
@@ -1314,6 +1333,18 @@ def _complete_pipeline(response: OrchestratorResponse, start_time: float) -> Orc
         response.success = True
         response.stage = PipelineStage.COMPLETED
         response.duration_ms = int((time.monotonic() - start_time) * 1000)
+
+        # Clean up clarification tool state to prevent memory leaks
+        try:
+            from app.dspy_pipeline.clarification_tool import clarification_tool as _global_ct
+            # Clean up completed responses to prevent memory accumulation
+            request_id = response.request_id
+            cleaned_count = _global_ct.cleanup_request_state(request_id_prefix=request_id, max_entries=100)
+            if cleaned_count > 0:
+                logger.debug(f"Cleaned up {cleaned_count} clarification entries for completed request {request_id}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup clarification tool for request {response.request_id}: {e}")
+
         logger.info(f"Pipeline completed in {response.duration_ms}ms")
         
     except Exception as e:

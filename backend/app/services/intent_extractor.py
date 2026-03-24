@@ -219,97 +219,10 @@ def _call_llm(prompt: str, *, retry_once: bool = True) -> str:
 
 
 # =============================================================================
-# SQLITE LOGGING
-# =============================================================================
-
-def _init_log_db() -> None:
-    """
-    Initialize the SQLite logging database.
-    
-    Creates the logs directory and table if they don't exist.
-    """
-    # Ensure logs directory exists
-    LOG_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    
-    conn = sqlite3.connect(str(LOG_DB_PATH))
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS extraction_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                query TEXT NOT NULL,
-                prompt_hash TEXT,
-                raw_response TEXT,
-                parsed_intent TEXT,
-                error_type TEXT,
-                error_message TEXT,
-                model_id TEXT,
-                duration_ms INTEGER
-            )
-        """)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-# def _log_extraction(
-#     query: str,
-#     prompt_hash: str,
-#     raw_response: str | None,
-#     parsed_intent: dict[str, Any] | None,
-#     error: Exception | None,
-#     duration_ms: int
-# ) -> None:
-#     """
-#     Log an extraction attempt to SQLite database.
-    
-#     Args:
-#         query: Original user query
-#         prompt_hash: Hash of the full prompt
-#         raw_response: Raw LLM response text (or None if failed)
-#         parsed_intent: Parsed intent dict (or None if failed)
-#         error: Exception if any occurred
-#         duration_ms: Duration of the extraction in milliseconds
-#     """
-#     try:
-#         _init_log_db()
-        
-#         conn = sqlite3.connect(str(LOG_DB_PATH))
-#         try:
-#             cursor = conn.cursor()
-#             cursor.execute(
-#                 """
-#                 INSERT INTO extraction_logs (
-#                     timestamp, query, prompt_hash, raw_response, 
-#                     parsed_intent, error_type, error_message, model_id, duration_ms
-#                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-#                 """,
-#                 (
-#                     datetime.now(timezone.utc).isoformat(),
-#                     query,
-#                     prompt_hash,
-#                     raw_response,
-#                     json.dumps(parsed_intent) if parsed_intent else None,
-#                     type(error).__name__ if error else None,
-#                     str(error) if error else None,
-#                     MODEL_ID,
-#                     duration_ms,
-#                 )
-#             )
-#             conn.commit()
-#         finally:
-#             conn.close()
-#     except Exception as e:
-#         # Don't fail extraction due to logging errors
-#         logger.warning(f"Failed to log extraction: {e}")
-
-
-# =============================================================================
 # PUBLIC INTERFACE
 # =============================================================================
 
-def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None, use_dspy: Optional[bool] = None, skip_reset_overrides: bool = False) -> dict[str, Any]:
+def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None, prompt_version: Optional[str] = None, use_dspy: Optional[bool] = None, skip_reset_overrides: bool = False, overrides: Optional[dict] = None) -> dict[str, Any]:
     """
     Extract intent from natural language query.
 
@@ -338,7 +251,7 @@ def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None
     should_use_dspy = use_dspy if use_dspy is not None else _should_use_dspy()
 
     if should_use_dspy:
-        return _extract_intent_dspy(query, previous_qco, start_time, skip_reset_overrides)
+        return _extract_intent_dspy(query, previous_qco, start_time, skip_reset_overrides, overrides)
 
     # Continue with monolithic extraction
     raw_response = None
@@ -379,20 +292,6 @@ def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None
     
         # Call LLM
         raw_response = _call_llm(prompt)
-
-        # # Log to JSON file
-        # log_file_path = Path(__file__).parent.parent.parent / "logs" / "extraction_logs.json"
-        # log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        # with open(log_file_path, "a") as f:
-        #     json.dump({
-        #         "query": query,
-        #         "prompt_hash": prompt_hash,
-        #         "raw_response": raw_response,
-        #         "start_time": start_time,
-        #         "duration_ms": int((time.monotonic() - start_time) * 1000),
-        #     }, f)
-        #     f.write("\n")  # Add newline for JSONL format
-
         
         # Log raw output
         logger.info(
@@ -412,18 +311,6 @@ def extract_intent(query: str, previous_qco: Optional[QueryContextObject] = None
     except Exception as e:
         error = e
         raise
-        
-    finally:
-        # Always log to SQLite, even on error
-        duration_ms = int((time.monotonic() - start_time) * 1000)
-        # _log_extraction(
-        #     query=query,
-        #     prompt_hash=prompt_hash or "",
-        #     raw_response=raw_response,
-        #     parsed_intent=intent_dict,
-        #     error=error,
-        #     duration_ms=duration_ms,
-        # )
 
 
 # =============================================================================
@@ -440,7 +327,7 @@ def _should_use_dspy() -> bool:
         return False
 
 
-def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject], start_time: float, skip_reset_overrides: bool = False) -> dict[str, Any]:
+def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject], start_time: float, skip_reset_overrides: bool = False, overrides: Optional[dict] = None) -> dict[str, Any]:
     """
     Extract intent using DSPy pipeline.
 
@@ -448,6 +335,7 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
         query: Natural language query
         previous_qco: Previous query context
         start_time: Start time for duration tracking
+        overrides: Pipeline clarification overrides
 
     Returns:
         Raw intent dict compatible with existing pipeline
@@ -457,7 +345,7 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
     """
     try:
         from app.dspy_pipeline.config import get_dspy_pipeline
-        from app.dspy_pipeline.clarification_tool import ClarificationRequiredException
+        from app.dspy_pipeline.clarification_tool import ClarificationRequired
         from app.services.intent_errors import IntentIncompleteError
         from app.models.intent import Intent
         from datetime import date
@@ -477,24 +365,14 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
         if previous_context:
             logger.debug(f"🎯 [DSPy Integration] Previous context length: {len(previous_context)} characters")
 
-        from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
-
         # Call DSPy pipeline
         logger.info("🎯 [DSPy Integration] 🚀 Calling DSPy pipeline...")
-        try:
-            intent_result: Intent = pipeline(
-                query=query,
-                previous_context=previous_context,
-                current_date=date.today().isoformat()
-            )
-        finally:
-            # Clear field overrides after the pipeline run completes, unless we're in a
-            # clarification re-run where we want to preserve previously resolved answers
-            # (whether it succeeded, raised ClarificationRequiredException, or errored).
-            if not skip_reset_overrides:
-                _ct.reset_for_new_request()
-            else:
-                logger.debug("🎯 [DSPy Integration] Skipping field override reset for clarification re-run")
+        intent_result: Intent = pipeline(
+            query=query,
+            previous_context=previous_context,
+            current_date=date.today().isoformat(),
+            overrides=overrides,
+        )
 
         # Convert to dict format expected by downstream code
         intent_dict = intent_result.model_dump()
@@ -504,8 +382,8 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
         logger.info("🎯 [DSPy Integration] ======================================")
         logger.info("🎯 [DSPy Integration] ✅ DSPy extraction completed successfully!")
         logger.info(f"🎯 [DSPy Integration] Duration: {duration_ms}ms")
-        logger.info(f"🎯 [DSPy Integration] Output scope: {intent_dict['sales_scope']}")
-        logger.info(f"🎯 [DSPy Integration] Output metrics: {len(intent_dict['metrics'])} items")
+        logger.info(f"🎯 [DSPy Integration] Output scope: {intent_dict.get('sales_scope')}")
+        logger.info(f"🎯 [DSPy Integration] Output metrics: {len(intent_dict.get('metrics', []))} items")
         if intent_dict.get('group_by'):
             logger.info(f"🎯 [DSPy Integration] Output dimensions: {len(intent_dict['group_by'])} items")
         if intent_dict.get('filters'):
@@ -514,46 +392,29 @@ def _extract_intent_dspy(query: str, previous_qco: Optional[QueryContextObject],
 
         return intent_dict
 
-    except ClarificationRequiredException as e:
+    except ClarificationRequired as e:
         # Convert DSPy clarification exception to the format expected by orchestrator
         duration_ms = int((time.monotonic() - start_time) * 1000)
         logger.info("🎯 [DSPy Integration] ======================================")
         logger.info(f"🎯 [DSPy Integration] 🤔 Clarification required after {duration_ms}ms")
-        logger.info(f"🎯 [DSPy Integration] Request ID: {e.request_id}")
-        logger.info(f"🎯 [DSPy Integration] Question: {e.clarification_request.question}")
-        logger.info(f"🎯 [DSPy Integration] Type: {e.clarification_request.clarification_type}")
-        logger.info(f"🎯 [DSPy Integration] Field: {e.clarification_request.field_name}")
-        logger.info(f"🎯 [DSPy Integration] Options: {len(e.clarification_request.options)}")
+        logger.info(f"🎯 [DSPy Integration] Request ID: {e.clarification.request_id}")
+        logger.info(f"🎯 [DSPy Integration] Question: {e.clarification.question}")
+        logger.info(f"🎯 [DSPy Integration] Field: {e.clarification.field}")
+        logger.info(f"🎯 [DSPy Integration] Options: {len(e.clarification.options)}")
         logger.info("🎯 [DSPy Integration] ======================================")
 
         # Create compatible IntentIncompleteError
-        # Extract option labels for allowed_values (what user sees)
-        allowed_values = []
-        if e.clarification_request.options:
-            allowed_values = [f"{opt.label}: {opt.description}" if opt.description else opt.label
-                              for opt in e.clarification_request.options]
+        missing_fields = [e.clarification.field]
+        clarification_message = e.clarification.question
+        if e.clarification.context:
+            clarification_message += f" {e.clarification.context}"
 
-        # Determine missing fields from the clarification request
-        missing_fields = [e.clarification_request.field_name]
-        if e.clarification_request.field_path:
-            missing_fields = [e.clarification_request.field_path]
-
-        # Create partial intent from agent context if available
-        partial_intent = {"clarification_type": e.clarification_request.clarification_type.value}
-        if hasattr(e, 'agent_context') and e.agent_context:
-            partial_intent.update(e.agent_context.get('partial_output') or {})
-
-        # Also store DSPy-specific clarification info for potential direct handling
-        partial_intent["dspy_clarification_request_id"] = e.request_id
-        partial_intent["dspy_clarification_options"] = [
-            {"id": opt.id, "label": opt.label, "description": opt.description, "value": opt.value}
-            for opt in e.clarification_request.options
-        ]
-
-        # Build a user-friendly clarification message
-        clarification_message = e.clarification_request.question
-        if e.clarification_request.context:
-            clarification_message += f" {e.clarification_request.context}"
+        allowed_values = [str(opt) for opt in e.clarification.options]
+        
+        partial_intent = {
+            "dspy_clarification_request_id": e.clarification.request_id,
+            "dspy_clarification_options": e.clarification.options
+        }
 
         # Convert to IntentIncompleteError format that orchestrator expects
         raise IntentIncompleteError(

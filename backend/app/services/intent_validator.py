@@ -483,18 +483,7 @@ def validate_intent(raw_intent: Dict[str, Any], catalog: CatalogManager, origina
         
     Raises:
         IntentValidationError subclass on validation failure
-    
-    Example:
-        >>> from backend.app.services.catalog_manager import CatalogManager
-        >>> catalog = CatalogManager("path/to/catalog.yaml")
-        >>> raw = {
-        ...     "intent_type": "snapshot",
-        ...     "metric": "total_quantity",
-        ...     "time_range": {"window": "last_7_days"}
-        ... }
-        >>> intent = validate_intent(raw, catalog)
-        >>> print(intent.metric)
-        'total_quantity'
+
     """
     validator = IntentValidator(catalog)
     return validator.validate(raw_intent, original_query=original_query)

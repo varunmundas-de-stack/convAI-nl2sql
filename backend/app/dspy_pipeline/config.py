@@ -41,7 +41,7 @@ def configure_dspy_model() -> None:
         import dspy
 
         # Get model from environment or use default
-        model_id = os.getenv("ANTHROPIC_MODEL_ID", "claude-3-haiku-20240307")
+        model_id = os.getenv("ANTHROPIC_MODEL_ID", "claude-haiku-4-5")
 
         # Configure DSPy with Anthropic Claude via LiteLLM
         # LiteLLM handles the Anthropic API integration

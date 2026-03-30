@@ -15,6 +15,12 @@ import logging
 import time
 from typing import Any, Optional
 
+from app.dspy_pipeline.config import get_dspy_pipeline
+from app.dspy_pipeline.clarification_tool import ClarificationRequired
+from app.services.intent_errors import IntentIncompleteError
+from app.models.intent import Intent
+from datetime import date
+
 from app.models.qco import QueryContextObject
 
 
@@ -58,67 +64,59 @@ class EmptyResponseError(ExtractionError):
 # PUBLIC INTERFACE
 # =============================================================================
 
-def extract_intent(
-    query: str,
-    previous_qco: Optional[QueryContextObject] = None,
-    prompt_version: Optional[str] = None,
-    use_dspy: Optional[bool] = None,
-    skip_reset_overrides: bool = False,
-    overrides: Optional[dict] = None
-) -> dict[str, Any]:
-    """
-    Extract intent from natural language query using DSPy pipeline.
+# def extract_intent(
+#     query: str,
+#     previous_qco: Optional[QueryContextObject] = None,
+#     prompt_version: Optional[str] = None,
+#     use_dspy: Optional[bool] = None,
+#     skip_reset_overrides: bool = False,
+#     overrides: Optional[dict] = None
+# ) -> dict[str, Any]:
+#     """
+#     Extract intent from natural language query using DSPy pipeline.
 
-    Args:
-        query: Natural language user query
-        previous_qco: Optional QCO from the previous query in this session
-        prompt_version: Optional prompt version for RLHF (unused in DSPy mode)
-        use_dspy: Ignored - always uses DSPy pipeline
-        skip_reset_overrides: Pass to DSPy pipeline
-        overrides: Pipeline clarification overrides
+#     Args:
+#         query: Natural language user query
+#         previous_qco: Optional QCO from the previous query in this session
+#         prompt_version: Optional prompt version for RLHF (unused in DSPy mode)
+#         use_dspy: Ignored - always uses DSPy pipeline
+#         skip_reset_overrides: Pass to DSPy pipeline
+#         overrides: Pipeline clarification overrides
 
-    Returns:
-        Raw intent dict (UNTRUSTED, semantically unvalidated)
+#     Returns:
+#         Raw intent dict (UNTRUSTED, semantically unvalidated)
 
-    Raises:
-        ExtractionError: Technical failure (pipeline error, timeout)
-        IntentIncompleteError: Clarification required
+#     Raises:
+#         ExtractionError: Technical failure (pipeline error, timeout)
+#         IntentIncompleteError: Clarification required
 
-    The returned dict is NOT validated against the catalog.
-    Semantic validation happens downstream in intent_validator.
-    """
-    start_time = time.monotonic()
+#     The returned dict is NOT validated against the catalog.
+#     Semantic validation happens downstream in intent_validator.
+#     """
+#     start_time = time.monotonic()
 
-    # DSPy pipeline is the only extraction method
-    return _extract_intent_dspy(
-        query,
-        previous_qco,
-        start_time,
-        skip_reset_overrides,
-        overrides
-    )
+#     # DSPy pipeline is the only extraction method
+#     return _extract_intent_dspy(
+#         query,
+#         previous_qco,
+#         start_time,
+#         skip_reset_overrides,
+#         overrides
+#     )
 
 
 # =============================================================================
 # DSPY INTEGRATION
 # =============================================================================
 
-def _extract_intent_dspy(
+def extract_intent(
     query: str,
     previous_qco: Optional[QueryContextObject],
-    start_time: float,
     skip_reset_overrides: bool = False,
     overrides: Optional[dict] = None
 ) -> dict[str, Any]:
     """
     Extract intent using DSPy pipeline.
-
-    Args:
-        query: Natural language query
-        previous_qco: Previous query context
-        start_time: Start time for duration tracking
-        skip_reset_overrides: Pass to DSPy pipeline
-        overrides: Pipeline clarification overrides
 
     Returns:
         Raw intent dict compatible with existing pipeline
@@ -128,11 +126,7 @@ def _extract_intent_dspy(
         IntentIncompleteError: Clarification required
     """
     try:
-        from app.dspy_pipeline.config import get_dspy_pipeline
-        from app.dspy_pipeline.clarification_tool import ClarificationRequired
-        from app.services.intent_errors import IntentIncompleteError
-        from app.models.intent import Intent
-        from datetime import date
+        start_time = time.monotonic()
 
         logger.info(" [DSPy Integration] ======================================")
         logger.info(" [DSPy Integration] Using DSPy pipeline for intent extraction")

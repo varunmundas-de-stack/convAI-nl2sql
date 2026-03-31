@@ -135,14 +135,17 @@ class ClassifiedTerm(BaseModel):
         description="Semantic role this term plays in the query."
     )
     catalog_match: Optional[str] = Field(
-        default=None,
-        description=(
-            "Resolved canonical catalog name. Apply aliases: "
-            "quantity/volume → billed_qty, territory/region → zone, "
-            "distributor → distributor_name, retailer → retailer_name, "
-            "sales/revenue → net_value. "
-            "Null for RANKING/TREND/COMPARISON/SCOPE terms with no catalog entry."
+    default=None,
+    description=(
+        "The resolved canonical column name from the data catalog. "
+        "Apply known aliases and synonyms to map user-facing terms to their "
+        "standardized catalog equivalents. Null if the term has no direct "
+        "catalog entry (e.g. analytical intents like ranking, trends, or comparisons)."
         )
+    )
+    scope: Optional[Literal["PRIMARY", "SECONDARY"]] = Field(
+        default=None,
+        description="The scope implied by this term (e.g., 'secondary sales' implies SECONDARY). Null if not applicable."
     )
  
     model_config = ConfigDict(extra="forbid")

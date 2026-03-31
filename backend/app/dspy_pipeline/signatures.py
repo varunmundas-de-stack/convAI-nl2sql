@@ -45,8 +45,8 @@ class ClassifyQuery(dspy.Signature):
 class ResolveScope(dspy.Signature):
     """Determine sales scope from classified query."""
 
-    classified_query: ClassifiedQuery = dspy.InputField(
-        desc="ClassifiedQuery object with structured terms and roles"
+    classified_terms: str = dspy.InputField(
+        desc="JSON string containing only the classified terms with role SCOPE"
     )
 
     scope_result: ScopeResult = dspy.OutputField(
@@ -62,7 +62,7 @@ class ResolveScope(dspy.Signature):
 class ResolveTime(dspy.Signature):
     """Determine time constraints from classified query with decision logic and clarification rules."""
 
-    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    classified_terms: str = dspy.InputField(desc="JSON string containing only the classified terms with roles TIME_RANGE and TIME_GRANULARITY")
     current_date: str = dspy.InputField(desc="Current date in YYYY-MM-DD format")
     query_intent: str = dspy.InputField(desc="Query intent from classified query (KPI, DISTRIBUTION, RANKING, TREND, COMPARISON, etc.)")
     previous_context: str = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
@@ -85,7 +85,7 @@ class ResolveTime(dspy.Signature):
 class ExtractMetrics(dspy.Signature):
     """Extract and validate metrics from classified query."""
 
-    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    classified_terms: str = dspy.InputField(desc="JSON string containing only the classified terms with role METRIC")
     sales_scope: str = dspy.InputField(desc="Resolved sales scope (PRIMARY/SECONDARY)")
     available_metrics: str = dspy.InputField(desc="JSON list of available metrics with name, label, description")
 
@@ -107,7 +107,7 @@ class ExtractMetrics(dspy.Signature):
 class ResolveDimensions(dspy.Signature):
     """Resolve dimensions and filters from classified query."""
 
-    classified_query: ClassifiedQuery = dspy.InputField(desc="ClassifiedQuery object with structured terms and roles")
+    classified_terms: str = dspy.InputField(desc="JSON string containing only the classified terms with roles DIMENSION and FILTER_VALUE")
     sales_scope: str = dspy.InputField(desc="Resolved sales scope for dimension validation")
     available_dimensions: str = dspy.InputField(desc="JSON list of available dimensions with name, label, description")
     previous_context: str = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
@@ -137,8 +137,12 @@ class ResolveDimensions(dspy.Signature):
 class ResolvePostProcessing(dspy.Signature):
     """Infer high-level post-processing intent."""
 
-    classified_query: ClassifiedQuery = dspy.InputField(
-        desc="Contains query_intent (RANKING, COMPARISON, TREND, etc.) and extracted hints like top/bottom, limits, etc."
+    query_intent: str = dspy.InputField(
+        desc="The query_intent extracted from the classified query (e.g., RANKING, COMPARISON, TREND, etc.)"
+    )
+
+    classified_terms: str = dspy.InputField(
+        desc="JSON string containing only the classified terms with roles RANKING, COMPARISON, and TREND"
     )
 
     time_result: TimeResult = dspy.InputField(

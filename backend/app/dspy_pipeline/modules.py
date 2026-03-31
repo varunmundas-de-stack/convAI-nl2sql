@@ -116,7 +116,8 @@ class ScopeModule(dspy.Module):
         # -------------------------
         # 2. LLM extraction
         # -------------------------
-        prediction = self.predict(classified_query=classified_query)
+        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role == "SCOPE"]
+        prediction = self.predict(classified_terms=json.dumps(relevant_terms))
         result: ScopeResult = prediction.scope_result
 
         # -------------------------
@@ -174,8 +175,9 @@ class TimeModule(dspy.Module):
 
         context_str = json.dumps(previous_context) if previous_context else ""
 
+        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("TIME_RANGE", "TIME_GRANULARITY")]
         prediction = self.predict(
-            classified_query=classified_query,
+            classified_terms=json.dumps(relevant_terms),
             current_date=resolved_date.isoformat(),
             query_intent=intent,
             previous_context=context_str,
@@ -337,8 +339,9 @@ class MetricsModule(dspy.Module):
         # -------------------------
         # 2. LLM extraction
         # -------------------------
+        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role == "METRIC"]
         prediction = self.predict(
-            classified_query=classified_query,
+            classified_terms=json.dumps(relevant_terms),
             sales_scope=sales_scope,
             available_metrics=self._catalog_str,
         )
@@ -453,8 +456,9 @@ class DimensionsModule(dspy.Module):
         context_str = json.dumps(previous_context) if previous_context else ""
         catalog_str = self._build_dimensions_catalog(sales_scope)
 
+        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("DIMENSION", "FILTER_VALUE")]
         prediction = self.predict(
-            classified_query=classified_query,
+            classified_terms=json.dumps(relevant_terms),
             sales_scope=sales_scope,
             available_dimensions=catalog_str,
             previous_context=context_str,
@@ -649,8 +653,10 @@ class PostProcessingModule(dspy.Module):
         dimensions_result: DimensionsResult,
     ) -> PostProcessingResult:
 
+        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("RANKING", "COMPARISON", "TREND")]
         llm_output = self.predict(
-            classified_query=classified_query,
+            query_intent=classified_query.query_intent,
+            classified_terms=json.dumps(relevant_terms),
             time_result=time_result,
             dimensions_result=dimensions_result,
         ).post_processing_result

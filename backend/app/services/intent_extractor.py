@@ -16,12 +16,75 @@ import time
 from typing import Any, Optional
 
 from app.dspy_pipeline.config import get_dspy_pipeline
-from app.dspy_pipeline.clarification_tool import ClarificationRequired
+from app.dspy_pipeline.clarification_tool import ClarificationRequired, MultipleClarificationsRequired
 from app.services.intent_errors import IntentIncompleteError
 from app.models.intent import Intent
 from datetime import date
 
 from app.models.qco import QueryContextObject
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _process_clarification_overrides(overrides: dict) -> dict:
+    """
+    Process clarification overrides to handle sequential term resolution.
+
+    This converts DSPy clarification answers into term-specific mappings
+    that allow multiple terms of the same role to be resolved sequentially.
+
+    Example:
+        Input overrides might contain clarification metadata:
+        {
+            "metrics": "net_value",
+            "dspy_clarification_request_id": "abc-123",
+            "dspy_clarification_term": "sales"  # The specific term being clarified
+        }
+
+        Output adds term-specific mapping:
+        {
+            "metrics": "net_value",
+            "resolved_metric_terms": {"sales": "net_value"},
+            ...
+        }
+    """
+    if not overrides:
+        return overrides
+
+    processed = dict(overrides)
+
+    # Check for DSPy clarification metadata indicating a sequential term resolution
+    clarification_request_id = processed.get("dspy_clarification_request_id")
+    clarifying_term = processed.get("dspy_clarification_term")
+
+    if clarification_request_id and clarifying_term:
+        # This is a clarification answer - convert to term-specific mapping
+
+        # Handle metric clarifications
+        if "metrics" in processed:
+            resolved_metric_terms = processed.get("resolved_metric_terms", {})
+            resolved_metric_terms[clarifying_term] = processed["metrics"]
+            processed["resolved_metric_terms"] = resolved_metric_terms
+
+            logger.info(f" [DSPy Integration] Sequential clarification: '{clarifying_term}' -> '{processed['metrics']}'")
+            logger.info(f" [DSPy Integration] Current resolved metrics: {resolved_metric_terms}")
+
+        # Handle dimension clarifications
+        elif "group_by" in processed:
+            resolved_dimension_terms = processed.get("resolved_dimension_terms", {})
+            resolved_dimension_terms[clarifying_term] = processed["group_by"]
+            processed["resolved_dimension_terms"] = resolved_dimension_terms
+
+            logger.info(f" [DSPy Integration] Sequential clarification: '{clarifying_term}' -> '{processed['group_by']}'")
+            logger.info(f" [DSPy Integration] Current resolved dimensions: {resolved_dimension_terms}")
+
+        # Clean up clarification metadata to avoid confusing downstream
+        processed.pop("dspy_clarification_request_id", None)
+        processed.pop("dspy_clarification_term", None)
+
+    return processed
 
 
 # =============================================================================
@@ -143,15 +206,18 @@ def extract_intent(
         if previous_context:
             logger.debug(f" [DSPy Integration] Previous context length: {len(previous_context)} characters")
 
+        # Process overrides for sequential clarification handling
+        processed_overrides = _process_clarification_overrides(overrides) if overrides else None
+
         # Call DSPy pipeline
         logger.info(" [DSPy Integration] Calling DSPy pipeline...")
-        if overrides:
-            logger.info(f" [DSPy Integration] Using overrides: {overrides}")
+        if processed_overrides:
+            logger.info(f" [DSPy Integration] Using processed overrides: {processed_overrides}")
         intent_result: Intent = pipeline(
             query=query,
             previous_context=previous_context,
             current_date=date.today().isoformat(),
-            overrides=overrides,
+            overrides=processed_overrides,
         )
 
         # Convert to dict format expected by downstream code
@@ -202,6 +268,52 @@ def extract_intent(
             clarification_message=clarification_message,
             partial_intent=partial_intent,
             allowed_values=allowed_values
+        ) from e
+
+    except MultipleClarificationsRequired as e:
+        # Convert DSPy multiple clarifications exception to the format expected by orchestrator
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info(" [DSPy Integration] ======================================")
+        logger.info(f" [DSPy Integration] Multiple clarifications required after {duration_ms}ms")
+        logger.info(f" [DSPy Integration] Number of clarifications: {len(e.clarifications)}")
+        for i, clarification in enumerate(e.clarifications):
+            logger.info(f" [DSPy Integration] Clarification {i+1}: {clarification.question}")
+            logger.info(f" [DSPy Integration]   Request ID: {clarification.request_id}")
+            logger.info(f" [DSPy Integration]   Field: {clarification.field}")
+            logger.info(f" [DSPy Integration]   Options: {len(clarification.options)}")
+        logger.info(" [DSPy Integration] ======================================")
+
+        # For multiple clarifications, we need to collect all fields and create a combined message
+        missing_fields = [c.field for c in e.clarifications]
+        questions = [c.question for c in e.clarifications]
+        clarification_message = "Multiple clarifications needed: " + " | ".join(questions)
+
+        # Collect all options for first-level compatibility
+        all_options = []
+        for clarification in e.clarifications:
+            all_options.extend([str(opt) for opt in clarification.options])
+
+        partial_intent = {
+            "dspy_multiple_clarifications": True,
+            "dspy_clarifications_data": [
+                {
+                    "request_id": c.request_id,
+                    "field": c.field,
+                    "question": c.question,
+                    "options": c.options,
+                    "context": c.context,
+                    "multi_select": c.multi_select
+                }
+                for c in e.clarifications
+            ]
+        }
+
+        # Convert to IntentIncompleteError format that orchestrator expects
+        raise IntentIncompleteError(
+            missing_fields=missing_fields,
+            clarification_message=clarification_message,
+            partial_intent=partial_intent,
+            allowed_values=list(set(all_options))  # Remove duplicates
         ) from e
 
     except ImportError as e:

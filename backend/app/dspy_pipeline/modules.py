@@ -14,6 +14,7 @@ Following RULE M4: Modules are stateless; all context is passed as arguments
 
 import json
 import logging
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -40,9 +41,13 @@ from .schemas import (
 )
 from .clarification_tool import (
     ClarificationRequired,
+    MultipleClarificationsRequired,
+    Clarification,
     build_scope_clarification,
     build_metric_clarification,
+    build_individual_metric_clarifications,
     build_dimension_clarification,
+    build_individual_dimension_clarifications,
     build_time_clarification,
 )
 from .signatures import (
@@ -374,14 +379,99 @@ class MetricsModule(dspy.Module):
                 )
             )
 
-        # ❗ Multiple candidates → ambiguity
-        if len(valid_metrics) > 1:
-            raise ClarificationRequired(
-                build_metric_clarification(
-                    ambiguous_terms=metric_terms,
-                    candidate_metrics=[m.name for m in valid_metrics],
+        # ❗ Multiple candidates or multiple terms → sequential clarification
+        if len(valid_metrics) > 1 or len(metric_terms) > 1:
+
+            # For multiple terms, use term-specific field names to track individual resolutions
+            if len(metric_terms) > 1:
+                resolved_metrics = []
+                pending_terms = []
+
+                # Check which terms have been resolved using term-specific override keys
+                for term in metric_terms:
+                    term_field_key = f"metric_term_{term}"
+                    if term_field_key in overrides:
+                        resolved_metric = overrides[term_field_key]
+                        if resolved_metric in CATALOG_METRICS:
+                            resolved_metrics.append(MetricSpec(
+                                name=resolved_metric,
+                                aggregation=self._agg_map.get(resolved_metric, "sum")
+                            ))
+                    else:
+                        pending_terms.append(term)
+
+                if pending_terms:
+                    # Loop through pending terms — auto-resolve singletons, ask only when truly ambiguous
+                    for first_pending in list(pending_terms):
+                        term_field_key = f"metric_term_{first_pending}"
+
+                        # Create context message about progress
+                        total_terms = len(metric_terms)
+                        resolved_count = total_terms - len(pending_terms)
+                        context = f"Resolving metric term {resolved_count + 1} of {total_terms}: '{first_pending}'"
+
+                        # Get term-specific candidates by running LLM scoped to just this term
+                        term_classified = [t.model_dump() for t in classified_query.classified_terms if t.role == "METRIC" and t.term == first_pending]
+                        term_prediction = self.predict(
+                            classified_terms=json.dumps(term_classified),
+                            sales_scope=sales_scope,
+                            available_metrics=self._catalog_str,
+                        )
+                        term_candidates = [
+                            m.name for m in (term_prediction.metrics_result.metrics or [])
+                            if m.name in CATALOG_METRICS
+                        ]
+
+                        if len(term_candidates) == 1:
+                            # Exactly one match — auto-resolve, no question needed
+                            resolved_metrics.append(MetricSpec(
+                                name=term_candidates[0],
+                                aggregation=self._agg_map.get(term_candidates[0], "sum")
+                            ))
+                            pending_terms.remove(first_pending)
+                        else:
+                            # 0 or 2+ candidates — ask the user
+                            term_options = sorted(term_candidates) if term_candidates else sorted(CATALOG_METRICS)
+                            raise ClarificationRequired(Clarification(
+                                request_id=str(uuid.uuid4()),
+                                field=term_field_key,
+                                question=f"Which metric do you mean by '{first_pending}'?",
+                                options=term_options,
+                                multi_select=False,
+                                context=context,
+                                clarifying_term=first_pending,
+                            ))
+
+                    # All pending terms auto-resolved — return immediately
+                    return MetricsResult(
+                        metrics=resolved_metrics,
+                        aggregations=[self._agg_map.get(m.name, "sum") for m in resolved_metrics],
+                    )
+
+                else:
+                    # All terms resolved
+                    if resolved_metrics:
+                        return MetricsResult(
+                            metrics=resolved_metrics,
+                            aggregations=[self._agg_map.get(m.name, "sum") for m in resolved_metrics],
+                        )
+                    else:
+                        # Fallback if resolution failed
+                        raise ClarificationRequired(
+                            build_metric_clarification(
+                                ambiguous_terms=metric_terms,
+                                candidate_metrics=sorted(CATALOG_METRICS),
+                            )
+                        )
+
+            else:
+                # Single term, multiple candidates → standard clarification
+                raise ClarificationRequired(
+                    build_metric_clarification(
+                        ambiguous_terms=metric_terms,
+                        candidate_metrics=[m.name for m in valid_metrics],
+                    )
                 )
-            )
 
         # -------------------------
         # 5. Single metric → accept
@@ -474,6 +564,14 @@ class DimensionsModule(dspy.Module):
             if d in valid_dims and d != "invoice_date"
         ]
 
+        # Compute valid_filters early so it's available in all branches below
+        valid_filters = None
+        if result.filters:
+            valid_filters = [
+                f for f in result.filters
+                if f.dimension in valid_dims
+            ] or None
+
         # -------------------------
         # 4. Ambiguity handling (CORE)
         # -------------------------
@@ -491,29 +589,88 @@ class DimensionsModule(dspy.Module):
                 )
             )
 
-        # ❗ Multiple candidates → ambiguity
-        if len(valid_group_by) > 1:
-            raise ClarificationRequired(
-                build_dimension_clarification(
-                    ambiguous_terms=dim_terms,
-                    candidate_dimensions=valid_group_by,
+        # ❗ Multiple candidates or multiple terms → sequential clarification
+        if len(valid_group_by) > 1 or len(dim_terms) > 1:
+
+            # For multiple terms, use term-specific field names to track individual resolutions
+            if len(dim_terms) > 1:
+                resolved_dimensions = []
+                pending_terms = []
+
+                # Check which terms have been resolved using term-specific override keys
+                for term in dim_terms:
+                    term_field_key = f"dimension_term_{term}"
+                    if term_field_key in overrides:
+                        resolved_dimension = overrides[term_field_key]
+                        if resolved_dimension in valid_dims and resolved_dimension != "invoice_date":
+                            resolved_dimensions.append(resolved_dimension)
+                    else:
+                        pending_terms.append(term)
+
+                if pending_terms:
+                    # Loop through pending terms — auto-resolve singletons, ask only when truly ambiguous
+                    for first_pending in list(pending_terms):
+                        term_field_key = f"dimension_term_{first_pending}"
+
+                        # Create context message about progress
+                        total_terms = len(dim_terms)
+                        resolved_count = total_terms - len(pending_terms)
+                        context = f"Resolving dimension term {resolved_count + 1} of {total_terms}: '{first_pending}'"
+
+                        # Get term-specific candidates by running LLM scoped to just this term
+                        term_classified = [t.model_dump() for t in classified_query.classified_terms if t.role in ("DIMENSION", "FILTER_VALUE") and t.term == first_pending]
+                        term_prediction = self.predict(
+                            classified_terms=json.dumps(term_classified),
+                            sales_scope=sales_scope,
+                            available_dimensions=catalog_str,
+                            previous_context=context_str,
+                        )
+                        term_candidates = [
+                            d for d in (term_prediction.dimensions_result.group_by or [])
+                            if d in valid_dims and d != "invoice_date"
+                        ]
+
+                        if len(term_candidates) == 1:
+                            # Exactly one match — auto-resolve, no question needed
+                            resolved_dimensions.append(term_candidates[0])
+                            pending_terms.remove(first_pending)
+                        else:
+                            # 0 or 2+ candidates — ask the user
+                            term_options = sorted(term_candidates) if term_candidates else sorted(valid_dims)
+                            raise ClarificationRequired(Clarification(
+                                request_id=str(uuid.uuid4()),
+                                field=term_field_key,
+                                question=f"Which dimension do you mean by '{first_pending}'?",
+                                options=term_options,
+                                multi_select=False,
+                                context=context,
+                                clarifying_term=first_pending,
+                            ))
+
+                    # All pending terms auto-resolved — return immediately
+                    return DimensionsResult(
+                        group_by=resolved_dimensions if resolved_dimensions else None,
+                        filters=valid_filters,
+                    )
+
+                else:
+                    # All terms resolved via overrides
+                    return DimensionsResult(
+                        group_by=resolved_dimensions if resolved_dimensions else None,
+                        filters=valid_filters,
+                    )
+
+            else:
+                # Single term, multiple candidates → standard clarification
+                raise ClarificationRequired(
+                    build_dimension_clarification(
+                        ambiguous_terms=dim_terms,
+                        candidate_dimensions=valid_group_by,
+                    )
                 )
-            )
 
         # -------------------------
-        # 5. Filters validation
-        # -------------------------
-        valid_filters = None
-        if result.filters:
-            valid_filters = [
-                f for f in result.filters
-                if f.dimension in valid_dims
-            ]
-            if not valid_filters:
-                valid_filters = None
-
-        # -------------------------
-        # 6. Final result
+        # 5. Final result
         # -------------------------
         return DimensionsResult(
             group_by=valid_group_by if valid_group_by else None,

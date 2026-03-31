@@ -21,6 +21,9 @@ class Clarification(BaseModel):
     # Optional context (useful for debugging / UI)
     context: Optional[str] = Field(default=None)
 
+    # NEW: Track which specific term is being clarified for sequential resolution
+    clarifying_term: Optional[str] = Field(default=None, description="Specific term being clarified (e.g., 'sales' when asking about sales metric)")
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -32,13 +35,27 @@ class ClarificationRequired(Exception):
     """
     Raised by agents when they cannot proceed without user clarification.
 
-    This is NOT an error — it’s a control-flow interrupt.
+    This is NOT an error — it's a control-flow interrupt.
     The pipeline should catch this and return it to the user.
     """
 
     def __init__(self, clarification: Clarification):
         self.clarification = clarification
         super().__init__(clarification.question)
+
+
+class MultipleClarificationsRequired(Exception):
+    """
+    Raised by agents when they cannot proceed without multiple user clarifications.
+
+    This handles cases where multiple terms of the same role need individual resolution.
+    The pipeline should catch this and return all clarifications to the user.
+    """
+
+    def __init__(self, clarifications: List[Clarification]):
+        self.clarifications = clarifications
+        questions = [c.question for c in clarifications]
+        super().__init__(f"Multiple clarifications needed: {'; '.join(questions)}")
 
 
 # =============================================================================
@@ -52,15 +69,48 @@ def build_metric_clarification(
 
     if not ambiguous_terms:
         clarifying_question = "No metric mentioned. Choose one"
+        clarifying_term = None
     else:
         clarifying_question = f"Which metric do you mean by '{', '.join(ambiguous_terms)}'?"
+        clarifying_term = ambiguous_terms[0] if len(ambiguous_terms) == 1 else None
+
     return Clarification(
         request_id=str(uuid.uuid4()),
         field="metrics",
         question=clarifying_question,
         options=candidate_metrics,
         multi_select=False,
+        clarifying_term=clarifying_term,
     )
+
+
+def build_individual_metric_clarifications(
+    ambiguous_terms: List[str],
+    candidate_metrics: List[str],
+) -> List[Clarification]:
+    """
+    Build individual clarification requests for each ambiguous metric term.
+
+    This handles cases where multiple metric terms are classified and need
+    individual resolution (e.g., "sales and revenue" should ask separately
+    about "sales" and "revenue").
+    """
+    if not ambiguous_terms:
+        return [build_metric_clarification([], candidate_metrics)]
+
+    clarifications = []
+    for term in ambiguous_terms:
+        clarifying_question = f"Which metric do you mean by '{term}'?"
+        clarifications.append(Clarification(
+            request_id=str(uuid.uuid4()),
+            field="metrics",
+            question=clarifying_question,
+            options=candidate_metrics,
+            multi_select=False,
+            context=f"Resolving ambiguous term: '{term}'"
+        ))
+
+    return clarifications
 
 
 def build_dimension_clarification(
@@ -69,15 +119,48 @@ def build_dimension_clarification(
 ) -> Clarification:
     if not ambiguous_terms:
         clarifying_question = "No dimension mentioned. Choose one"
+        clarifying_term = None
     else:
         clarifying_question = f"Which dimension do you mean by '{', '.join(ambiguous_terms)}'?"
+        clarifying_term = ambiguous_terms[0] if len(ambiguous_terms) == 1 else None
+
     return Clarification(
         request_id=str(uuid.uuid4()),
         field="group_by",
         question=clarifying_question,
         options=candidate_dimensions,
         multi_select=False,
+        clarifying_term=clarifying_term,
     )
+
+
+def build_individual_dimension_clarifications(
+    ambiguous_terms: List[str],
+    candidate_dimensions: List[str],
+) -> List[Clarification]:
+    """
+    Build individual clarification requests for each ambiguous dimension term.
+
+    This handles cases where multiple dimension terms are classified and need
+    individual resolution (e.g., "zone and region" should ask separately
+    about "zone" and "region").
+    """
+    if not ambiguous_terms:
+        return [build_dimension_clarification([], candidate_dimensions)]
+
+    clarifications = []
+    for term in ambiguous_terms:
+        clarifying_question = f"Which dimension do you mean by '{term}'?"
+        clarifications.append(Clarification(
+            request_id=str(uuid.uuid4()),
+            field="group_by",
+            question=clarifying_question,
+            options=candidate_dimensions,
+            multi_select=False,
+            context=f"Resolving ambiguous term: '{term}'"
+        ))
+
+    return clarifications
 
 
 def build_time_clarification(
@@ -151,6 +234,48 @@ def apply_clarification_override(
     return overrides
 
 
+def apply_multiple_clarification_overrides(
+    overrides: Dict[str, Any],
+    clarifications: List[Clarification],
+    answers: List[ClarificationAnswer],
+) -> Dict[str, Any]:
+    """
+    Apply multiple clarification answers into pipeline override dict.
+
+    For multiple clarifications of the same field (e.g., multiple metrics),
+    this aggregates the answers into a list.
+    """
+    if len(clarifications) != len(answers):
+        raise ValueError("Clarifications and answers must have same length")
+
+    # Group answers by field
+    field_answers = {}
+    for clarification, answer in zip(clarifications, answers):
+        if clarification.request_id != answer.request_id:
+            raise ValueError(f"Mismatched request IDs: {clarification.request_id} != {answer.request_id}")
+
+        field = clarification.field
+        if field not in field_answers:
+            field_answers[field] = []
+
+        if clarification.multi_select:
+            if isinstance(answer.answer, list):
+                field_answers[field].extend(answer.answer)
+            else:
+                field_answers[field].append(answer.answer)
+        else:
+            field_answers[field].append(answer.answer)
+
+    # Update overrides with aggregated answers
+    for field, answers_list in field_answers.items():
+        if len(answers_list) == 1:
+            overrides[field] = answers_list[0]
+        else:
+            overrides[field] = answers_list
+
+    return overrides
+
+
 def format_clarification_response(clarification: Clarification) -> Dict[str, Any]:
     """
     Convert clarification into API-friendly response.
@@ -164,4 +289,16 @@ def format_clarification_response(clarification: Clarification) -> Dict[str, Any
         "options": clarification.options,
         "multi_select": clarification.multi_select,
         "context": clarification.context,
+    }
+
+
+def format_multiple_clarifications_response(clarifications: List[Clarification]) -> Dict[str, Any]:
+    """
+    Convert multiple clarifications into API-friendly response.
+    """
+
+    return {
+        "type": "multiple_clarifications_required",
+        "clarifications": [format_clarification_response(c) for c in clarifications],
+        "count": len(clarifications),
     }

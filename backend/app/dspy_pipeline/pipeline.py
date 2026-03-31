@@ -15,6 +15,7 @@ from .modules import (
     PostProcessingModule,
     AssemblerModule,
 )
+from .clarification_tool import ClarificationRequired, MultipleClarificationsRequired
 from .schemas import Intent
 
 

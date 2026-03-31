@@ -35,7 +35,8 @@ from app.services.intent_extractor import (
 )
 from app.services.intent_errors import IntentValidationError, IntentIncompleteError
 from app.services.intent_validator import validate_intent
-from app.services.intent_normalizer import normalize_intent, patch_trend_intent
+# from app.services.intent_normalizer import normalize_intent, patch_trend_intent
+from app.services.intent_normalizer import normalize_intent
 from app.services.intent_merger import merge_intent
 from app.services.drill_detector import detect_drill, apply_drill_mutation
 from app.services.cube_query_builder import (
@@ -139,6 +140,10 @@ class PipelineContext:
     allowed_values: Optional[List[str]] = None
     clarification_answers: Optional[Dict[str, Any]] = None
 
+    # compound query support
+    is_compound_query: bool = False
+    compound_metadata: Optional[Dict[str, Any]] = None
+
     # error
     error: Optional[OrchestratorError] = None
 
@@ -187,6 +192,8 @@ class PipelineContext:
             "clarification_message": self.clarification_message,
             "allowed_values": self.allowed_values,
             "clarification_answers": self.clarification_answers,
+            "is_compound_query": self.is_compound_query,
+            "compound_metadata": self.compound_metadata,
             "error": self.error.to_dict() if self.error else None,
         }
 
@@ -261,6 +268,79 @@ def _get_catalog() -> CatalogManager:
     return _catalog
 
 
+def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext) -> dict:
+    """
+    Handle compound query response by converting completed sub-queries into a unified response.
+
+    This function takes the compound query result and creates a response format
+    that combines all completed sub-queries into a structured format suitable
+    for the frontend.
+    """
+    completed_subqueries = compound_result.get("completed_subqueries", [])
+    pending_subqueries = compound_result.get("pending_subqueries", [])
+
+    # Build combined results from completed sub-queries
+    combined_results = []
+    combined_insights = []
+    visual_specs = []
+
+    for completed in completed_subqueries:
+        subquery_result = completed.get("result", {})
+
+        # Add section header for this sub-query
+        section_data = {
+            "subquery_index": completed["index"],
+            "subquery_text": completed["query"],
+            "data": subquery_result.get("data", []),
+            "visual_spec": subquery_result.get("visual_spec"),
+            "insights": subquery_result.get("insights")
+        }
+        combined_results.append(section_data)
+
+        # Collect insights and visual specs
+        if subquery_result.get("insights"):
+            combined_insights.append({
+                "subquery_index": completed["index"],
+                "subquery_text": completed["query"],
+                "insights": subquery_result["insights"]
+            })
+
+        if subquery_result.get("visual_spec"):
+            visual_specs.append({
+                "subquery_index": completed["index"],
+                "subquery_text": completed["query"],
+                "visual_spec": subquery_result["visual_spec"]
+            })
+
+    # Create compound visual spec that represents multiple sections
+    compound_visual_spec = {
+        "chart_type": "compound_sections",
+        "sections": visual_specs,
+        "total_sections": len(completed_subqueries),
+        "pending_sections": len(pending_subqueries)
+    }
+
+    # Create compound insights
+    compound_insights = {
+        "type": "compound_insights",
+        "sections": combined_insights,
+        "summary": f"Analysis completed for {len(completed_subqueries)} of {len(completed_subqueries) + len(pending_subqueries)} queries"
+    }
+
+    return {
+        "results": combined_results,
+        "visual_spec": compound_visual_spec,
+        "insights": compound_insights,
+        "compound_metadata": {
+            "original_query": compound_result.get("original_query"),
+            "total_subqueries": compound_result.get("total_subqueries"),
+            "completed_count": len(completed_subqueries),
+            "pending_count": len(pending_subqueries),
+            "pending_subqueries": pending_subqueries
+        }
+    }
+
+
 # =============================================================================
 # PIPELINE STEPS
 # =============================================================================
@@ -313,6 +393,38 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
             skip_reset_overrides=ctx.skip_reset_overrides,
             overrides=ctx.resolved_clarifications,
         )
+
+        # Check if this is a compound query result
+        if isinstance(raw_intent, dict) and raw_intent.get("type") == "compound_query_results":
+            logger.info("Compound query detected - handling structured response")
+            ctx.raw_intent = raw_intent
+            ctx.stage = Stage.INTENT_EXTRACTED
+            ctx.is_compound_query = True
+
+            # For compound queries, we need to create a special response format
+            # that includes all completed sub-queries and any pending ones
+            compound_response = _handle_compound_query_response(raw_intent, ctx)
+
+            # Set the compound response as the final result and mark as completed
+            ctx.data = compound_response.get("results", [])
+            ctx.visual_spec = compound_response.get("visual_spec")
+            ctx.insights = compound_response.get("insights")
+            ctx.compound_metadata = compound_response.get("compound_metadata")
+            ctx.success = True
+            ctx.stage = Stage.COMPLETED
+            ctx.duration_ms = ctx.elapsed_ms()
+
+            _span_set(span,
+                output_compound_query=True,
+                output_subqueries_count=raw_intent.get("total_subqueries", 0),
+                output_completed_count=len(raw_intent.get("completed_subqueries", [])),
+                output_pending_count=len(raw_intent.get("pending_subqueries", [])),
+                output_value=raw_intent,
+            )
+            logger.info(f"Compound query processed: {len(raw_intent.get('completed_subqueries', []))} completed, {len(raw_intent.get('pending_subqueries', []))} pending")
+            return
+
+        # Single query result - continue with normal processing
         ctx.raw_intent = raw_intent
         ctx.stage = Stage.INTENT_EXTRACTED
         _span_set(span,
@@ -324,11 +436,19 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
 
     except IntentIncompleteError as e:
         logger.warning(f"Clarification needed at extraction: {e}")
+
+        # Check if this is a compound query clarification
+        partial_intent = e.partial_intent or {}
+        if partial_intent.get("compound_query_state"):
+            logger.info("Handling compound query clarification")
+            ctx.raw_intent = partial_intent
+        else:
+            ctx.raw_intent = partial_intent
+
         ctx.clarification = True
         ctx.missing_fields = e.missing_fields
         ctx.clarification_message = e.clarification_message
         ctx.allowed_values = e.allowed_values
-        ctx.raw_intent = e.partial_intent or {}
         ctx.stage = Stage.CLARIFICATION_REQUESTED
         ctx.duration_ms = ctx.elapsed_ms()
         _span_set(span, output_clarification_requested=True, output_missing_fields=str(e.missing_fields))
@@ -391,7 +511,7 @@ def step_validate_intent(ctx: PipelineContext, span) -> None:
     try:
         logger.info("Step 3: Validating intent...")
         normalized = normalize_intent(ctx.merged_intent or ctx.raw_intent)
-        normalized = patch_trend_intent(normalized, ctx.query)
+        # normalized = patch_trend_intent(normalized, ctx.query)
         validated = validate_intent(normalized, _get_catalog(), original_query=ctx.query)
         ctx.validated_intent = validated
         ctx.stage = Stage.INTENT_VALIDATED
@@ -796,12 +916,33 @@ def resume_query(
         # DSPy clarification — resolved overrides, full re-run from step 0
         if state.intent.get("dspy_clarification_request_id"):
             logger.info(f"Handling DSPy clarification for {state.intent.get('dspy_clarification_request_id')}")
+
+            # Check if this is a compound query clarification
+            compound_state = state.intent.get("compound_query_state")
+            subquery_index = state.intent.get("dspy_clarification_subquery_index")
+
+            if compound_state and subquery_index is not None:
+                logger.info(f"Resuming compound query clarification for sub-query {subquery_index}")
+
+                # Handle compound query clarification by re-running with the specific sub-query resolved
+                # This is a complex scenario that would require partial pipeline resumption
+                # For now, we'll treat it as a regular clarification and re-run the full query
+                # TODO: Implement partial sub-query resumption for compound queries
+
             try:
                 resolved = getattr(state, "resolved_clarifications", {}) or {}
                 for f, answer in clarification_answers.items():
                     if f not in state.missing_fields:
                         continue
                     resolved[f] = [str(a).strip() for a in answer] if isinstance(answer, list) else str(answer).strip()
+
+                # Add compound query context if available
+                if compound_state:
+                    resolved["compound_query_clarification"] = {
+                        "subquery_index": subquery_index,
+                        "compound_state": compound_state
+                    }
+
                 logger.info(f"DSPy resolved overrides: {resolved}")
                 try:
                     delete_state(state.request_id)
@@ -835,20 +976,20 @@ def resume_query(
         merged_intent = merge_intent(patched_intent, previous_qco) if previous_qco else patched_intent
         logger.info(f"Resume merged intent: {merged_intent}")
 
-        try:
-            from app.rlhf.prompt_manager import get_ab_version
-            prompt_version, ab_group = get_ab_version(resolved_session_id or request_id)
-        except Exception as e:
-            logger.warning(f"RLHF version resolution failed (non-fatal): {e}")
-            prompt_version, ab_group = "v1", None
+        # try:
+        #     from app.rlhf.prompt_manager import get_ab_version
+        #     prompt_version, ab_group = get_ab_version(resolved_session_id or request_id)
+        # except Exception as e:
+        #     logger.warning(f"RLHF version resolution failed (non-fatal): {e}")
+        #     prompt_version, ab_group = "v1", None
 
         ctx = PipelineContext(
             query=state.original_query,
             session_id=resolved_session_id,
             original_query=state.original_query,
             request_id=request_id,          # preserve original so callers can correlate
-            prompt_version=prompt_version,
-            ab_group=ab_group,
+            # prompt_version=prompt_version,
+            # ab_group=ab_group,
             previous_qco=previous_qco,
             raw_intent=patched_intent,
             merged_intent=merged_intent,

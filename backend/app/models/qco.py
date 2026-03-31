@@ -134,6 +134,24 @@ class QueryContextObject(BaseModel):
         description="Set when this QCO was produced by a sub-query in a decomposed compound query"
     )
 
+    # Cached agent results for context injection
+    cached_scope_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from ScopeModule for selective re-execution"
+    )
+    cached_time_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from TimeModule for selective re-execution"
+    )
+    cached_metrics_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from MetricsModule for selective re-execution"
+    )
+    cached_dimensions_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from DimensionsModule for selective re-execution"
+    )
+
     def to_prompt_context(self) -> str:
         """
         Format QCO as a human-readable context block for LLM prompt injection.

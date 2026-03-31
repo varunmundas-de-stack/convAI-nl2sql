@@ -50,7 +50,7 @@ class ClassifyQuery(dspy.Signature):
     classified_query: ClassifiedQuery = dspy.OutputField(
         desc="JSON object with ClassifiedQuery structure containing: "
              "original_query (string), "
-             "classified_terms (array of objects with term, role, catalog_match), "
+             "classified_terms (array of objects with term, role, catalog_match, scope), "
              "query_intent (SNAPSHOT|DISTRIBUTION|RANKING|TREND|COMPARISON|DRILL_DOWN|MINIMAL_MESSAGE|STRUCTURAL), "
              "filter_hints (array of objects with dimension and value), "
              "explicit_scope (PRIMARY|SECONDARY or null). "

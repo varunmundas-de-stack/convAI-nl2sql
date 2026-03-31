@@ -21,6 +21,8 @@ from typing import Optional
 import dspy
 
 from .schemas import (
+    # Decomposition output
+    DecomposedQuery,
     # Intermediate outputs
     ClassifiedQuery,
     ScopeResult,
@@ -51,6 +53,7 @@ from .clarification_tool import (
     build_time_clarification,
 )
 from .signatures import (
+    DecomposeQuery,
     ClassifyQuery,
     ResolveScope,
     ResolveTime,
@@ -60,6 +63,46 @@ from .signatures import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# QUERY DECOMPOSER — Before Agent Pipeline
+# =============================================================================
+
+class QueryDecomposerModule(dspy.Module):
+    """
+    Decomposes compound queries into independent analytical sub-queries.
+
+    This is the first agent in the pipeline and determines if a query
+    contains multiple independent intents that should be processed separately.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.predict = dspy.Predict(DecomposeQuery)
+
+    def forward(self, query: str, previous_context=None) -> DecomposedQuery:
+        context_str = ""
+        if previous_context:
+            # Handle different context types
+            try:
+                if hasattr(previous_context, 'to_decomposer_context'):
+                    # It's a QCO object
+                    context_str = previous_context.to_decomposer_context()
+                elif isinstance(previous_context, dict):
+                    # It's a dict, convert to QCO
+                    from app.models.qco import QueryContextObject
+                    qco = QueryContextObject(**previous_context)
+                    context_str = qco.to_decomposer_context()
+                else:
+                    # It's already a string
+                    context_str = str(previous_context)
+            except Exception:
+                # Fallback to JSON if conversion fails
+                context_str = json.dumps(previous_context) if isinstance(previous_context, dict) else str(previous_context)
+
+        prediction = self.predict(query=query, session_context=context_str)
+        return prediction.decomposed_query
 
 
 # =============================================================================
@@ -77,19 +120,31 @@ class ClassifierModule(dspy.Module):
         super().__init__()
         self.predict = dspy.Predict(ClassifyQuery)
 
-    def forward(self, query: str) -> ClassifiedQuery:
+    def forward(self, query: str, session_context=None) -> ClassifiedQuery:
         """
         Run ClassifyQuery signature and return a validated ClassifiedQuery.
 
         Args:
             query: Raw natural-language query from the user.
+            session_context: Previous context from session for better intent determination.
 
         Returns:
             ClassifiedQuery with classified_terms, query_intent,
             filter_hints, and explicit_scope populated.
         """
+        # Handle different context types - convert to string for LLM
+        context_str = ""
+        if session_context:
+            if hasattr(session_context, 'to_prompt_context'):
+                # It's a QCO object
+                context_str = session_context.to_prompt_context()
+            elif isinstance(session_context, dict):
+                context_str = json.dumps(session_context)
+            else:
+                # Already a string
+                context_str = str(session_context)
 
-        prediction = self.predict(query=query)
+        prediction = self.predict(query=query, session_context=context_str)
         classified: ClassifiedQuery = prediction.classified_query
 
         # No alias resolution — downstream modules handle ambiguity
@@ -160,7 +215,7 @@ class TimeModule(dspy.Module):
         self,
         classified_query: ClassifiedQuery,
         current_date: Optional[date] = None,
-        previous_context: Optional[dict] = None,
+        previous_context=None,
         overrides: Optional[dict] = None,
     ) -> TimeResult:
 
@@ -178,7 +233,17 @@ class TimeModule(dspy.Module):
         if isinstance(resolved_date, str):
             resolved_date = date.fromisoformat(resolved_date)
 
-        context_str = json.dumps(previous_context) if previous_context else ""
+        # Handle different context types - convert to string for LLM
+        context_str = ""
+        if previous_context:
+            if hasattr(previous_context, 'to_prompt_context'):
+                # It's a QCO object
+                context_str = previous_context.to_prompt_context()
+            elif isinstance(previous_context, dict):
+                context_str = json.dumps(previous_context)
+            else:
+                # Already a string
+                context_str = str(previous_context)
 
         relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("TIME_RANGE", "TIME_GRANULARITY")]
         prediction = self.predict(
@@ -262,7 +327,17 @@ class TimeModule(dspy.Module):
             # explicit handled already
             # fallback to context
             if not has_window and previous_context:
-                prev_time = previous_context.get("time")
+                # Handle QCO object for time context
+                prev_time = None
+                if hasattr(previous_context, 'time_range') and previous_context.time_range:
+                    # Convert QCO time_range to TimeResult format
+                    prev_time = {
+                        "start_date": previous_context.time_range.start_date,
+                        "end_date": previous_context.time_range.end_date
+                    }
+                elif isinstance(previous_context, dict):
+                    prev_time = previous_context.get("time")
+
                 if prev_time:
                     return TimeResult(**prev_time)
 
@@ -522,7 +597,7 @@ class DimensionsModule(dspy.Module):
         self,
         classified_query: ClassifiedQuery,
         sales_scope: str,
-        previous_context: Optional[dict] = None,
+        previous_context=None,
         overrides: Optional[dict] = None,
     ) -> DimensionsResult:
 
@@ -543,7 +618,18 @@ class DimensionsModule(dspy.Module):
         # -------------------------
         # 2. LLM extraction
         # -------------------------
-        context_str = json.dumps(previous_context) if previous_context else ""
+        # Handle different context types - convert to string for LLM
+        context_str = ""
+        if previous_context:
+            if hasattr(previous_context, 'to_prompt_context'):
+                # It's a QCO object
+                context_str = previous_context.to_prompt_context()
+            elif isinstance(previous_context, dict):
+                context_str = json.dumps(previous_context)
+            else:
+                # Already a string
+                context_str = str(previous_context)
+
         catalog_str = self._build_dimensions_catalog(sales_scope)
 
         relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("DIMENSION", "FILTER_VALUE")]
@@ -702,7 +788,7 @@ class PostProcessingResolver:
         # =====================================================
         # HARD CONSTRAINT: ranking requires group_by
         # =====================================================
-        has_grouping = bool(dimensions_result.group_by)
+        has_grouping = bool(dimensions_result and dimensions_result.group_by)
 
         # =====================================================
         # INTENT: RANKING
@@ -747,7 +833,7 @@ class PostProcessingResolver:
             comparison_window = (
                 llm_comparison.comparison_window
                 if llm_comparison and llm_comparison.comparison_window
-                else time_result.time_window or "previous_period"
+                else (time_result.time_window if time_result else "previous_period") or "previous_period"
             )
 
             derived_metric = (
@@ -770,7 +856,7 @@ class PostProcessingResolver:
         # =====================================================
         if intent == "TREND":
 
-            window = time_result.time_window
+            window = time_result.time_window if time_result else None
 
             if window == "last_7_days":
                 metric = "wow_growth"
@@ -896,13 +982,13 @@ class AssemblerModule:
         # Metrics (already structured)
         # -------------------------
         # MetricsResult.metrics is already List[MetricSpec]
-        metrics = metrics_result.metrics
+        metrics = metrics_result.metrics if metrics_result else []
 
         # -------------------------
         # Time
         # -------------------------
         time_spec = None
-        if (
+        if time_result and (
             time_result.time_window or
             time_result.start_date or
             time_result.end_date
@@ -919,10 +1005,10 @@ class AssemblerModule:
         # Final Intent
         # -------------------------
         return Intent(
-            sales_scope=scope_result.sales_scope,
+            sales_scope=scope_result.sales_scope if scope_result else "SECONDARY",
             metrics=metrics,
-            group_by=dimensions_result.group_by,
-            filters=dimensions_result.filters,
+            group_by=dimensions_result.group_by if dimensions_result else None,
+            filters=dimensions_result.filters if dimensions_result else None,
             time=time_spec,
             post_processing=post_processing_result,
         )

@@ -168,6 +168,61 @@ class EmptyResponseError(ExtractionError):
 #     )
 
 
+def _handle_compound_query_results(compound_result: dict, start_time: float) -> dict[str, Any]:
+    """
+    Handle compound query results by converting them to a structured response.
+
+    For compound queries with partial completion, we need to decide how to handle:
+    1. Completed sub-queries: Return their results
+    2. Pending sub-queries with clarifications: Convert to IntentIncompleteError
+    3. Pending sub-queries with errors: Log and potentially fail
+
+    Current strategy: If any sub-query requires clarification, convert the first
+    clarification to IntentIncompleteError for the orchestrator to handle.
+    """
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+
+    completed = compound_result.get("completed_subqueries", [])
+    pending = compound_result.get("pending_subqueries", [])
+
+    logger.info(f" [DSPy Integration] Compound query: {len(completed)} completed, {len(pending)} pending")
+
+    # Check for clarifications in pending sub-queries
+    clarification_subquery = None
+    for subquery in pending:
+        if "clarification" in subquery:
+            clarification_subquery = subquery
+            break
+
+    if clarification_subquery:
+        # Convert first clarification to IntentIncompleteError
+        clarification = clarification_subquery["clarification"]
+
+        logger.info(f" [DSPy Integration] Sub-query {clarification_subquery['index']} requires clarification")
+        logger.info(f" [DSPy Integration] Question: {clarification['question']}")
+
+        partial_intent = {
+            "compound_query_state": compound_result,
+            "dspy_clarification_request_id": clarification["request_id"],
+            "dspy_clarification_options": clarification["options"],
+            "dspy_clarification_subquery_index": clarification_subquery["index"]
+        }
+
+        raise IntentIncompleteError(
+            missing_fields=[clarification["field"]],
+            clarification_message=clarification["question"],
+            partial_intent=partial_intent,
+            allowed_values=[str(opt) for opt in clarification["options"]]
+        )
+
+    # No clarifications needed - return compound result as-is
+    # This will be a new type of response that the orchestrator needs to handle
+    logger.info(f" [DSPy Integration] ✅ Compound query completed in {duration_ms}ms")
+    logger.info(f" [DSPy Integration] All {len(completed)} sub-queries completed successfully")
+
+    return compound_result
+
+
 # =============================================================================
 # DSPY INTEGRATION
 # =============================================================================
@@ -201,27 +256,32 @@ def extract_intent(
         logger.debug(" [DSPy Integration] Loading DSPy pipeline configuration")
         pipeline = get_dspy_pipeline()
 
-        # Format previous context from QCO
-        previous_context = previous_qco.to_prompt_context() if previous_qco else ""
-        if previous_context:
-            logger.debug(f" [DSPy Integration] Previous context length: {len(previous_context)} characters")
+        # Format previous context from QCO for LLM prompt
+        previous_context_str = previous_qco.to_prompt_context() if previous_qco else ""
+        if previous_context_str:
+            logger.debug(f" [DSPy Integration] Previous context length: {len(previous_context_str)} characters")
 
         # Process overrides for sequential clarification handling
         processed_overrides = _process_clarification_overrides(overrides) if overrides else None
 
-        # Call DSPy pipeline
+        # Call DSPy pipeline - pass both QCO object and string context
         logger.info(" [DSPy Integration] Calling DSPy pipeline...")
         if processed_overrides:
             logger.info(f" [DSPy Integration] Using processed overrides: {processed_overrides}")
-        intent_result: Intent = pipeline(
+        result = pipeline(
             query=query,
-            previous_context=previous_context,
+            previous_context=previous_qco,  # Pass the QCO object for drill detection
             current_date=date.today().isoformat(),
             overrides=processed_overrides,
         )
 
-        # Convert to dict format expected by downstream code
-        intent_dict = intent_result.model_dump()
+        # Check if this is a compound query result
+        if isinstance(result, dict) and result.get("type") == "compound_query_results":
+            logger.info(" [DSPy Integration] Compound query detected - processing results")
+            return _handle_compound_query_results(result, start_time)
+
+        # Single query result - convert to dict format expected by downstream code
+        intent_dict = result.model_dump()
 
         # Log successful extraction
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -320,6 +380,11 @@ def extract_intent(
         logger.error(" [DSPy Integration] DSPy pipeline import failed")
         logger.error(f" [DSPy Integration] Import error: {e}")
         raise ExtractionError(f"DSPy pipeline not available: {e}") from e
+
+    except IntentIncompleteError:
+        # Re-raise IntentIncompleteError as-is (including those from compound query clarifications)
+        # This ensures that clarifications from compound queries are handled correctly by the orchestrator
+        raise
 
     except Exception as e:
         duration_ms = int((time.monotonic() - start_time) * 1000)

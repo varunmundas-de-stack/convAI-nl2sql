@@ -6,7 +6,7 @@ Following RULE P4: Catalog constants in schemas.py, import everywhere
 """
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Literal, Union
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 
 # =============================================================================
 # CATALOG CONSTANTS (RULE P4)
@@ -48,7 +48,7 @@ CATALOG_METRICS = frozenset(m["name"] for m in METRICS_CATALOG)
 COMMON_DIMENSIONS = frozenset({
     "city", "state", "zone",
     "distributor_code", "distributor_name",
-    "brand", "category", "sub_category", "pack_size", "sku_code", "product_desc",
+    "brand", "category", "sub_category", "pack_size", "sku_code"
 })
 
 # Dimensions only available in SECONDARY scope
@@ -75,6 +75,29 @@ TIME_GRANULARITIES = frozenset({
 })
 
 # =============================================================================
+# QUERY DECOMPOSITION — Before Agent Pipeline
+# =============================================================================
+
+class SubQueryItem(BaseModel):
+    """Represents a decomposed sub-query."""
+    index: int = Field(description="Position in original compound query")
+    text: str = Field(description="Isolated sub-query text")
+    intent_hint: Optional[str] = Field(default=None, description="Suggested intent type")
+    dependencies: List[int] = Field(default_factory=list, description="Indices of sub-queries this depends on")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DecomposedQuery(BaseModel):
+    """Output of QueryDecomposerModule."""
+    original_query: str
+    sub_queries: List[SubQueryItem]
+    is_compound: bool = Field(description="True if query was split, False if single query")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# =============================================================================
 # AGENT 1 OUTPUT — ClassifiedQuery
 # =============================================================================
  
@@ -92,7 +115,7 @@ TermRole = Literal[
 ]
  
 QueryIntent = Literal[
-    "KPI",             # single aggregated value, no dimension breakdown
+    "SNAPSHOT",        # single aggregated value, no dimension breakdown (was KPI)
     "DISTRIBUTION",    # breakdown by one or more dimensions
     "RANKING",         # top/bottom N with a grouping dimension
     "TREND",           # metric over time requiring granularity
@@ -117,7 +140,7 @@ class ClassifiedTerm(BaseModel):
             "Resolved canonical catalog name. Apply aliases: "
             "quantity/volume → billed_qty, territory/region → zone, "
             "distributor → distributor_name, retailer → retailer_name, "
-            "product → product_desc, sales/revenue → net_value. "
+            "sales/revenue → net_value. "
             "Null for RANKING/TREND/COMPARISON/SCOPE terms with no catalog entry."
         )
     )
@@ -380,6 +403,13 @@ class DimensionsResult(BaseModel):
             "product: category/sub_category/brand/sku_code)."
         )
     )
+    
+    @field_validator("group_by", mode="before")
+    @classmethod
+    def ensure_group_by_is_list(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
  
     filters: Optional[List[FilterCondition]] = Field(
         default=None,
@@ -492,6 +522,14 @@ class Intent(BaseModel):
     sales_scope: Literal["PRIMARY", "SECONDARY"]
     metrics: List[MetricSpec] = Field(min_length=1)
     group_by: Optional[List[str]] = Field(default=None)
+    
+    @field_validator("group_by", mode="before")
+    @classmethod
+    def ensure_group_by_is_list(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+        
     filters: Optional[List[FilterCondition]] = Field(default=None)
     time: Optional[TimeSpec] = Field(default=None)
     post_processing: Optional[PostProcessingResult] = Field(default=None)

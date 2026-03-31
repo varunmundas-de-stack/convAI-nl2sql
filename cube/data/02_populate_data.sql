@@ -164,7 +164,7 @@ FROM ref_distributor d, generate_series(1,100) r;
 -- ============================================================================
 CREATE TEMP TABLE ref_dates AS
 SELECT d::DATE AS invoice_date
-FROM generate_series('2024-06-01'::DATE,'2026-02-28'::DATE,'1 day'::INTERVAL) d;
+FROM generate_series('2024-06-01'::DATE,'2026-03-31'::DATE,'1 day'::INTERVAL) d;
 
 -- ============================================================================
 -- REFERENCE: Retailer × Category eligibility matrix

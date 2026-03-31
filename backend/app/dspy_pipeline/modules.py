@@ -174,9 +174,18 @@ class ScopeModule(dspy.Module):
             return ScopeResult(sales_scope=overrides["sales_scope"])
 
         # -------------------------
+        # 1b. Classifier Explicit Scope
+        # -------------------------
+        if classified_query.explicit_scope:
+            return ScopeResult(sales_scope=classified_query.explicit_scope)
+
+        # -------------------------
         # 2. LLM extraction
         # -------------------------
-        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role == "SCOPE"]
+        relevant_terms = [
+            t.model_dump() for t in classified_query.classified_terms
+            if t.role == "SCOPE" or getattr(t, "scope", None)
+        ]
         prediction = self.predict(classified_terms=json.dumps(relevant_terms))
         result: ScopeResult = prediction.scope_result
 
@@ -186,7 +195,7 @@ class ScopeModule(dspy.Module):
 
         # If LLM couldn't determine scope → clarify
         has_scope_term = any(
-            t.role == "SCOPE"
+            t.role == "SCOPE" or getattr(t, "scope", None)
             for t in classified_query.classified_terms
         )
 

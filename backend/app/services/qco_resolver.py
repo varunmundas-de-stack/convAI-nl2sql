@@ -13,13 +13,14 @@ DESIGN PRINCIPLES:
 """
 
 import logging
-from datetime import date, timedelta
-from typing import Optional
+from datetime import date, timedelta, datetime
+from typing import Optional, Dict, Any
 
 from app.models.intent import Intent
-from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter, QCOMetric
+from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter, QCOMetric, SlotMeta
 from app.models.hierarchy import get_axis
 from app.services.cube_query_builder import resolve_time_window
+from app.dspy_pipeline.pipeline import get_stored_agent_results, clear_stored_agent_results
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,146 @@ logger = logging.getLogger(__name__)
 ALL_TIME_YEARS_BACK = 25  # For "all_time" window - go back 25 years
 
 
+def resolve_qco_with_agent_caching(
+    intent: Intent,
+    query: str,
+    agent_results: Optional[Dict[str, Any]] = None,
+    previous_qco: Optional[QueryContextObject] = None
+) -> QueryContextObject:
+    """
+    Build a QCO from a validated Intent and cache agent results for context injection.
+
+    This is an enhanced version of resolve_qco that additionally caches the agent
+    results from the DSPy pipeline for selective re-execution in future queries.
+
+    Args:
+        intent: Validated Intent object (Pydantic model)
+        query: The original NL query string
+        agent_results: Dict of agent results from context injection manager
+        previous_qco: Previous QCO for turn indexing and slot metadata
+
+    Returns:
+        QueryContextObject with all resolved parameters and cached agent results
+    """
+    # Start with the standard QCO resolution
+    qco = _resolve_qco_standard(intent, query)
+
+    # Add cached agent results for context injection
+    cached_scope_result = None
+    cached_time_result = None
+    cached_metrics_result = None
+    cached_dimensions_result = None
+
+    if agent_results:
+        # Convert agent results to dicts for caching
+        if 'scope' in agent_results:
+            cached_scope_result = agent_results['scope'].model_dump()
+
+        if 'time' in agent_results:
+            cached_time_result = agent_results['time'].model_dump()
+
+        if 'metrics' in agent_results:
+            cached_metrics_result = agent_results['metrics'].model_dump()
+
+        if 'dimensions' in agent_results:
+            cached_dimensions_result = agent_results['dimensions'].model_dump()
+
+        logger.info(f"[QCO Resolver] Cached agent results: {list(agent_results.keys())}")
+
+    # Update slot metadata with execution information
+    slot_metadata = {}
+    current_turn = (previous_qco.turn_index + 1) if previous_qco else 1
+    timestamp = datetime.now()
+
+    # Update metadata for executed agents
+    if agent_results:
+        for agent_name in agent_results:
+            slot_metadata[agent_name] = SlotMeta(
+                source="override",  # Fresh execution
+                turn=current_turn,
+                timestamp=timestamp
+            )
+
+    # Inherit metadata for cached agents
+    if previous_qco and previous_qco.slot_metadata:
+        for agent_name, meta in previous_qco.slot_metadata.items():
+            if agent_name not in slot_metadata:
+                # Mark as carry forward from previous turn
+                slot_metadata[agent_name] = SlotMeta(
+                    source="carry_forward",
+                    turn=meta.turn,  # Keep original turn
+                    timestamp=timestamp
+                )
+
+    # Create enhanced QCO
+    enhanced_qco = QueryContextObject(
+        # Copy all standard QCO fields
+        original_query=qco.original_query,
+        intent_type=qco.intent_type,
+        sales_scope=qco.sales_scope,
+        metrics=qco.metrics,
+        group_by=qco.group_by,
+        time_dimension=qco.time_dimension,
+        time_granularity=qco.time_granularity,
+        time_range=qco.time_range,
+        filters=qco.filters,
+        visualization_type=qco.visualization_type,
+        limit=qco.limit,
+        active_hierarchies=qco.active_hierarchies,
+
+        # Add context injection fields
+        cached_scope_result=cached_scope_result,
+        cached_time_result=cached_time_result,
+        cached_metrics_result=cached_metrics_result,
+        cached_dimensions_result=cached_dimensions_result,
+        slot_metadata=slot_metadata,
+        turn_index=current_turn,
+        parent_request_id=getattr(previous_qco, 'parent_request_id', None) if previous_qco else None
+    )
+
+    logger.info(f"[QCO Resolver] Enhanced QCO created with turn_index={current_turn}, "
+                f"cached_agents={list(agent_results.keys()) if agent_results else []}")
+
+    return enhanced_qco
+
+
 def resolve_qco(intent: Intent, query: str) -> QueryContextObject:
     """
     Build a QCO from a validated Intent.
+
+    This captures the resolved state of the query so follow-up queries
+    can inherit context (metric, scope, filters, time range, etc.).
+
+    If agent results are available from context injection (stored in thread-local
+    storage), this will automatically use the enhanced version with caching.
+
+    Args:
+        intent: Validated Intent object (Pydantic model)
+        query: The original NL query string
+
+    Returns:
+        QueryContextObject with all resolved parameters
+    """
+    # Check for stored agent results from context injection
+    try:
+        agent_results = get_stored_agent_results()
+
+        if agent_results:
+            logger.info("[QCO Resolver] Using enhanced QCO resolution with agent caching")
+            # Clear the stored results to avoid memory leaks
+            clear_stored_agent_results()
+            return resolve_qco_with_agent_caching(intent, query, agent_results)
+    except ImportError:
+        # Fallback if context injection is not available
+        pass
+
+    # Standard QCO resolution
+    return _resolve_qco_standard(intent, query)
+
+
+def _resolve_qco_standard(intent: Intent, query: str) -> QueryContextObject:
+    """
+    Build a QCO from a validated Intent (standard version without agent caching).
 
     This captures the resolved state of the query so follow-up queries
     can inherit context (metric, scope, filters, time range, etc.).

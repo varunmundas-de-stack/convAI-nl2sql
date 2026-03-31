@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 # TREND KEYWORD CONSTANTS
 # ---------------------------------------------------------------------------
 
-TREND_KEYWORDS: frozenset[str] = frozenset({
-    "trend", "trending", "trended", "trajectory", "progression",
-    "over time", "week by week", "month by month", "day by day",
-    "daily", "weekly", "monthly", "quarterly", "yearly",
-    "how has", "how have", "how did",                  # e.g. "how has X trended"
-})
+# TREND_KEYWORDS: frozenset[str] = frozenset({
+#     "trend", "trending", "trended", "trajectory", "progression",
+#     "over time", "week by week", "month by month", "day by day",
+#     "daily", "weekly", "monthly", "quarterly", "yearly",
+#     "how has", "how have", "how did",                  # e.g. "how has X trended"
+# })
 
 # =============================================================================
 # METRIC MAP
@@ -197,24 +197,33 @@ def normalize_intent(raw_intent: dict) -> dict:
     # Metrics — supports both string array ["net_value"] and object array [{"name": "net_value"}]
     # -------------------------------------------------------------------------
     metrics = intent.get("metrics")
-    if metrics and isinstance(metrics, list):
-        normalised = []
-        for m in metrics:
-            if isinstance(m, str):
-                # Plain string form: resolve directly, wrap in dict
-                resolved = resolve_metric(m, scope) if m in METRIC_MAP else m
-                normalised.append({"name": resolved})
-            elif isinstance(m, dict):
-                name = m.get("name")
-                if name in METRIC_MAP:
-                    m["name"] = resolve_metric(name, scope)
-                normalised.append(m)
-        intent["metrics"] = normalised
+    if metrics:
+        if isinstance(metrics, str):
+            intent["metrics"] = [{"name": metrics}]
+            metrics = intent["metrics"]
+            
+        if isinstance(metrics, list):
+            normalised = []
+            for m in metrics:
+                if isinstance(m, str):
+                    # Plain string form: resolve directly, wrap in dict
+                    resolved = resolve_metric(m, scope) if m in METRIC_MAP else m
+                    normalised.append({"name": resolved})
+                elif isinstance(m, dict):
+                    name = m.get("name")
+                    if name in METRIC_MAP:
+                        m["name"] = resolve_metric(name, scope)
+                    normalised.append(m)
+            intent["metrics"] = normalised
 
     # -------------------------------------------------------------------------
     # Group by
     # -------------------------------------------------------------------------
     if intent.get("group_by"):
+        # LLM or tests might sometimes pass a string instead of a list
+        if isinstance(intent["group_by"], str):
+            intent["group_by"] = [intent["group_by"]]
+            
         intent["group_by"] = [
             resolve_dimension(dim, scope)
             for dim in intent["group_by"]
@@ -224,15 +233,20 @@ def normalize_intent(raw_intent: dict) -> dict:
     # Filters
     # -------------------------------------------------------------------------
     if intent.get("filters"):
-        for f in intent["filters"]:
-            if isinstance(f, dict):
-                dim = f.get("dimension")
-                if dim in DIMENSION_MAP:
-                    f["dimension"] = resolve_dimension(dim, scope)
-            else:
-                dim = getattr(f, "dimension", None)
-                if dim and dim in DIMENSION_MAP:
-                    f.dimension = resolve_dimension(dim, scope)
+        # LLM might occasionally return a single dictionary instead of a list of dictionaries
+        if isinstance(intent["filters"], dict):
+            intent["filters"] = [intent["filters"]]
+            
+        if isinstance(intent["filters"], list):
+            for f in intent["filters"]:
+                if isinstance(f, dict):
+                    dim = f.get("dimension")
+                    if dim in DIMENSION_MAP:
+                        f["dimension"] = resolve_dimension(dim, scope)
+                else:
+                    dim = getattr(f, "dimension", None)
+                    if dim and dim in DIMENSION_MAP:
+                        f.dimension = resolve_dimension(dim, scope)
 
     # -------------------------------------------------------------------------
     # Time — new unified TimeSpec field {dimension, granularity, window, ...}
@@ -275,44 +289,44 @@ def normalize_intent(raw_intent: dict) -> dict:
 # TREND INTENT PATCHER
 # =============================================================================
 
-def patch_trend_intent(intent: dict, original_query: Optional[str]) -> dict:
-    """
-    Safety net: if the user's query contains trend language but the LLM
-    did not set time.granularity, inject a sensible FMCG default ("week").
+# def patch_trend_intent(intent: dict, original_query: Optional[str]) -> dict:
+#     """
+#     Safety net: if the user's query contains trend language but the LLM
+#     did not set time.granularity, inject a sensible FMCG default ("week").
 
-    Called after normalize_intent() but before validate_intent() so the
-    validator sees a fully-formed TREND intent and routes it correctly.
+#     Called after normalize_intent() but before validate_intent() so the
+#     validator sees a fully-formed TREND intent and routes it correctly.
 
-    Args:
-        intent:         The normalized intent dict (will be mutated in-place).
-        original_query: The raw NL query from the user.
+#     Args:
+#         intent:         The normalized intent dict (will be mutated in-place).
+#         original_query: The raw NL query from the user.
 
-    Returns:
-        The (possibly patched) intent dict.
-    """
-    if not original_query:
-        return intent
+#     Returns:
+#         The (possibly patched) intent dict.
+#     """
+#     if not original_query:
+#         return intent
 
-    query_lower = original_query.lower()
-    has_trend_keyword = any(kw in query_lower for kw in TREND_KEYWORDS)
+#     query_lower = original_query.lower()
+#     has_trend_keyword = any(kw in query_lower for kw in TREND_KEYWORDS)
 
-    if not has_trend_keyword:
-        return intent
+#     if not has_trend_keyword:
+#         return intent
 
-    time = intent.get("time")
-    if not isinstance(time, dict):
-        return intent
+#     time = intent.get("time")
+#     if not isinstance(time, dict):
+#         return intent
 
-    if not time.get("granularity"):
-        time["granularity"] = "week"   # sensible default for FMCG daily ops
-        intent["time"] = time
-        logger.info(
-            "[TrendPatcher] Injected granularity='week' — "
-            f"query has trend keyword but LLM omitted granularity. "
-            f"query='{original_query[:80]}'"
-        )
+#     if not time.get("granularity"):
+#         time["granularity"] = "week"   # sensible default for FMCG daily ops
+#         intent["time"] = time
+#         logger.info(
+#             "[TrendPatcher] Injected granularity='week' — "
+#             f"query has trend keyword but LLM omitted granularity. "
+#             f"query='{original_query[:80]}'"
+#         )
 
-    return intent
+#     return intent
 
 
 # =============================================================================

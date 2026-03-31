@@ -35,8 +35,7 @@ from app.services.intent_extractor import (
 )
 from app.services.intent_errors import IntentValidationError, IntentIncompleteError
 from app.services.intent_validator import validate_intent
-# from app.services.intent_normalizer import normalize_intent, patch_trend_intent
-from app.services.intent_normalizer import normalize_intent
+from app.services.intent_normalizer import normalize_intent, patch_trend_intent
 from app.services.intent_merger import merge_intent
 from app.services.drill_detector import detect_drill, apply_drill_mutation
 from app.services.cube_query_builder import (
@@ -511,7 +510,7 @@ def step_validate_intent(ctx: PipelineContext, span) -> None:
     try:
         logger.info("Step 3: Validating intent...")
         normalized = normalize_intent(ctx.merged_intent or ctx.raw_intent)
-        # normalized = patch_trend_intent(normalized, ctx.query)
+        normalized = patch_trend_intent(normalized, ctx.query)
         validated = validate_intent(normalized, _get_catalog(), original_query=ctx.query)
         ctx.validated_intent = validated
         ctx.stage = Stage.INTENT_VALIDATED
@@ -748,6 +747,25 @@ def step_resolve_qco(ctx: PipelineContext, span) -> None:
     _span_set(span, input_session_id=ctx.session_id)
     try:
         qco = resolve_qco(ctx.original_intent or ctx.validated_intent, ctx.query)
+        
+        # Populate x_axis_labels to inject into context
+        is_trend = qco.intent_type.lower() == "trend"
+        x_axis_key_val = getattr(ctx.visual_spec, "x_axis_key", "") or ""
+        is_date_key = "date" in x_axis_key_val.lower() or "time" in x_axis_key_val.lower()
+        
+        if not is_trend and not is_date_key and ctx.visual_spec:
+            x_axis_labels = None
+            if getattr(ctx.visual_spec, "x_axis", None) and getattr(ctx.visual_spec.x_axis, "values", None):
+                x_axis_labels = ctx.visual_spec.x_axis.values
+            elif getattr(ctx.visual_spec, "x_axis_key", None) and ctx.data:
+                key = ctx.visual_spec.x_axis_key
+                x_axis_labels = [r.get(key) for r in ctx.data if key in r]
+                
+            if x_axis_labels:
+                # Deduplicate and limit to prevent context window bloat
+                unique_labels = list(dict.fromkeys(str(x) for x in x_axis_labels if x is not None))
+                qco.x_axis_labels = unique_labels[:50]
+
         save_qco(ctx.session_id, qco)
         ctx.stage = Stage.QCO_RESOLVED
         _span_set(span, output_resolved=True, output_qco_metric=qco.metric or "")

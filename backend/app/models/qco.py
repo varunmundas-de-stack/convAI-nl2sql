@@ -8,7 +8,8 @@ It carries NO query results — only the resolved intent parameters.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -43,6 +44,22 @@ class QCOMetric(BaseModel):
     """A single metric captured in the QCO (semantic names, not Cube IDs)."""
     name: str = Field(..., description="Semantic metric name, e.g. 'net_value'")
     aggregation: str = Field(default="sum", description="Aggregation function, e.g. 'sum', 'count', 'avg'")
+
+
+class SlotMeta(BaseModel):
+    """Metadata for tracking slot provenance in conversational context."""
+    source: Literal["override", "carry_forward", "tombstone"] = Field(
+        ...,
+        description="How this slot value was determined in the current turn"
+    )
+    turn: int = Field(
+        ...,
+        description="Conversation turn when this slot was last set"
+    )
+    timestamp: datetime = Field(
+        ...,
+        description="When this slot metadata was created"
+    )
 
 
 class QueryContextObject(BaseModel):
@@ -103,6 +120,20 @@ class QueryContextObject(BaseModel):
         description='Axis → current active dimension, e.g. {"geography": "zone", "product": "brand"}'
     )
 
+    # New fields for agent architecture
+    slot_metadata: Dict[str, SlotMeta] = Field(
+        default_factory=dict,
+        description="Per-slot provenance tracking for merge behavior"
+    )
+    turn_index: int = Field(
+        default=0,
+        description="Current conversation turn, incremented on each successful query"
+    )
+    parent_request_id: Optional[str] = Field(
+        default=None,
+        description="Set when this QCO was produced by a sub-query in a decomposed compound query"
+    )
+
     def to_prompt_context(self) -> str:
         """
         Format QCO as a human-readable context block for LLM prompt injection.
@@ -152,3 +183,14 @@ class QueryContextObject(BaseModel):
             lines.append(f"Previous Hierarchies: {', '.join(hier_strs)}")
 
         return "\n".join(lines)
+
+    def to_decomposer_context(self) -> str:
+        """
+        Minimal context for the decomposer agent — just enough to understand
+        conversational references without overwhelming the decomposition decision.
+        """
+        return "\n".join([
+            f"Previous Query: \"{self.original_query}\"",
+            f"Previous Intent: {self.intent_type}",
+            f"Previous Metrics: {', '.join(m.name for m in self.metrics)}",
+        ])

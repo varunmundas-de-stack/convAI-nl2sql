@@ -186,40 +186,36 @@ def build_cube_query(intent: Intent) -> dict[str, Any]:
 # =============================================================================
 
 def build_comparison_query(intent: Intent) -> dict[str, Any]:
-    """
-    Build a Cube query for the COMPARISON period (Query B in dual-query strategy).
-
-    Clones the primary query but:
-    - Replaces the time dateRange with the comparison_window
-    - Removes granularity (aggregate over the whole comparison window, not buckets)
-
-    Args:
-        intent: Validated Intent with post_processing.comparison.comparison_window set
-
-    Returns:
-        Cube Query JSON for the comparison period
-    """
-    if (
-        not intent.post_processing
-        or not intent.post_processing.comparison
-        or not intent.post_processing.comparison.comparison_window
-    ):
+    if not intent.post_processing or not intent.post_processing.comparison:
         raise CubeQueryBuildError(
-            "build_comparison_query requires post_processing.comparison.comparison_window"
+            "build_comparison_query requires post_processing.comparison"
         )
 
-    comp_window = intent.post_processing.comparison.comparison_window
     query = build_cube_query(intent)
 
-    # Replace timeDimensions with comparison window (no granularity — aggregate total)
-    if intent.time is not None:
+    if intent.time is None:
+        query.pop("timeDimensions", None)
+        return query
+
+    comp = intent.post_processing.comparison
+
+    # Explicit date range — use start_date/end_date directly
+    if not comp.comparison_window and intent.time.start_date:
         query["timeDimensions"] = [{
             "dimension": intent.time.dimension,
-            "dateRange": resolve_time_window(comp_window),
+            "dateRange": [intent.time.start_date, intent.time.end_date],
         }]
-    else:
-        query.pop("timeDimensions", None)
+        return query
 
+    if not comp.comparison_window:
+        raise CubeQueryBuildError(
+            "build_comparison_query requires comparison_window or explicit date range"
+        )
+
+    query["timeDimensions"] = [{
+        "dimension": intent.time.dimension,
+        "dateRange": resolve_time_window(comp.comparison_window),
+    }]
     return query
 
 

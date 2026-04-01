@@ -245,12 +245,17 @@ def _transform_single_time_series(intent: Intent, log) -> Intent:
 
 
 def _normalize_comparison_window(intent: Intent, log) -> Intent:
-    """
-    Normalize freeform comparison_window strings in DUAL_QUERY intents.
-    e.g. 'last week' → 'last_7_days', 'last month' → 'last_month'
-    """
     pp = intent.post_processing
-    if not (pp and pp.comparison and pp.comparison.comparison_window):
+    if not (pp and pp.comparison):
+        return intent
+
+    # Explicit date comparison — start_date/end_date are the comparison period
+    # No window needed, just pass through
+    if intent.time and intent.time.start_date:
+        log.info("DUAL_QUERY: explicit date range comparison, no window normalization needed")
+        return intent
+
+    if not pp.comparison.comparison_window:
         log.warning(
             "DUAL_QUERY strategy but no comparison_window set — "
             "comparison query will fail"
@@ -258,12 +263,10 @@ def _normalize_comparison_window(intent: Intent, log) -> Intent:
         return intent
 
     raw = pp.comparison.comparison_window.strip().lower()
-    canonical = _COMPARISON_ALIASES.get(raw, raw)  # keep as-is if already canonical
+    canonical = _COMPARISON_ALIASES.get(raw, raw)
     if canonical != raw:
         object.__setattr__(pp.comparison, "comparison_window", canonical)
-        log.info(
-            f"DUAL_QUERY: normalized comparison_window {raw!r} → {canonical!r}"
-        )
+        log.info(f"DUAL_QUERY: normalized comparison_window {raw!r} → {canonical!r}")
     return intent
 
 

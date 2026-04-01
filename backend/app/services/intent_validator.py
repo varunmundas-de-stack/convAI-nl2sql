@@ -202,7 +202,7 @@ class IntentValidator:
                     intent.post_processing.comparison and
                     intent.post_processing.comparison.comparison_window
                 )
-                if not has_comparison_window:
+                if not has_comparison_window and not _is_explicit_dates:
                     missing_fields.append("post_processing.comparison.comparison_window")
                     clarification_questions.append(
                         "Growth requires a comparison period. "
@@ -216,7 +216,8 @@ class IntentValidator:
             intent.post_processing.comparison.type == "period"
         )
         if has_period_comparison:
-            if not intent.post_processing.comparison.comparison_window:
+            _is_explicit_dates = bool(intent.time and intent.time.start_date)
+            if not intent.post_processing.comparison.comparison_window and not _is_explicit_dates:
                 if "post_processing.comparison.comparison_window" not in missing_fields:
                     missing_fields.append("post_processing.comparison.comparison_window")
                     clarification_questions.append(

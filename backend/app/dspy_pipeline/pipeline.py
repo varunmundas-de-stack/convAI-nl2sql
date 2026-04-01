@@ -19,7 +19,7 @@ from .modules import (
 from .clarification_tool import ClarificationRequired, MultipleClarificationsRequired
 from .schemas import Intent, DecomposedQuery
 from app.services.drill_detector import DrillResult, detect_drill
-
+from app.dspy_pipeline.schemas import ScopeResult
 
 # =============================================================================
 # THREAD LOCAL PIPELINE STATE (FOR QCO RESOLVER)
@@ -74,11 +74,20 @@ class ContextInjectingPipelineManager:
         overrides,
         current_date=None
     ) -> Dict[str, Any]:
+        
+        results = {}
 
         agents_to_run = plan["run"]
+
+        # --- EXPLICIT SCOPE OVERRIDE ---
+        if classified_query.explicit_scope:
+            results["scope"] = ScopeResult(sales_scope=classified_query.explicit_scope)
+            agents_to_run = [a for a in agents_to_run if a != "scope"]
+            logger.info(f"[Planner] Scope resolved from explicit_scope: {classified_query.explicit_scope}")
+
         logger.info(f"[Planner] Agents to run: {agents_to_run}")
 
-        results = {}
+        
 
         # --- REUSE FROM CACHE ---
         if previous_qco:

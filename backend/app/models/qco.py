@@ -110,6 +110,7 @@ class QueryContextObject(BaseModel):
 
     # Visualization
     visualization_type: Optional[str] = Field(default=None, description="e.g. bar_chart, line_chart, table")
+    x_axis_labels: Optional[List[str]] = Field(default=None, description="Extracted X-axis labels from the retrieved data to provide context on available entities")
 
     # Limit
     limit: Optional[int] = Field(default=None)
@@ -192,6 +193,9 @@ class QueryContextObject(BaseModel):
 
         if self.visualization_type:
             lines.append(f"Previous Visualization: {self.visualization_type}")
+
+        if self.x_axis_labels:
+            lines.append(f"Previous X-Axis Labels: {', '.join(self.x_axis_labels)}")
 
         if self.limit:
             lines.append(f"Previous Limit: {self.limit}")

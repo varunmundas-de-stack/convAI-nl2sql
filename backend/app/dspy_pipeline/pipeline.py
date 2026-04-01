@@ -350,6 +350,7 @@ class ContextInjectingPipelineManager:
                 classified_query=classified_query,
                 sales_scope=current_scope or "SECONDARY",
                 previous_context=previous_qco.model_dump(mode='json') if previous_qco else None,
+                x_axis_values=previous_qco.x_axis_labels if previous_qco else None,
                 overrides=overrides,
             )
 
@@ -372,6 +373,7 @@ class ContextInjectingPipelineManager:
                 classified_query=classified_query,
                 sales_scope=results['scope'].sales_scope,
                 previous_context=None,
+                x_axis_values=None,
                 overrides=overrides,
             )
         return results

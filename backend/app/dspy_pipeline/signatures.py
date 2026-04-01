@@ -64,6 +64,7 @@ class ClassifyQuery(dspy.Signature):
 class ResolveScope(dspy.Signature):
     """Determine sales scope from classified query."""
 
+    original_query: str = dspy.InputField(desc="Original query text")
     classified_terms: str = dspy.InputField(
         desc="JSON string containing only the classified terms with role SCOPE"
     )
@@ -81,6 +82,7 @@ class ResolveScope(dspy.Signature):
 class ResolveTime(dspy.Signature):
     """Determine time constraints from classified query with decision logic and clarification rules."""
 
+    original_query: str = dspy.InputField(desc="Original query text")
     classified_terms: str = dspy.InputField(desc="JSON string containing only the classified terms with roles TIME_RANGE and TIME_GRANULARITY")
     current_date: str = dspy.InputField(desc="Current date in YYYY-MM-DD format")
     query_intent: str = dspy.InputField(desc="Query intent from classified query (KPI, DISTRIBUTION, RANKING, TREND, COMPARISON, etc.)")
@@ -104,6 +106,7 @@ class ResolveTime(dspy.Signature):
 class ExtractMetrics(dspy.Signature):
     """Extract and validate metrics from classified query."""
 
+    original_query: str = dspy.InputField(desc="Original query text")
     classified_terms: str = dspy.InputField(desc="JSON string containing only the classified terms with role METRIC")
     sales_scope: str = dspy.InputField(desc="Resolved sales scope (PRIMARY/SECONDARY)")
     available_metrics: str = dspy.InputField(desc="JSON list of available metrics with name, label, description")
@@ -125,11 +128,17 @@ class ExtractMetrics(dspy.Signature):
 
 class ResolveDimensions(dspy.Signature):
     """Resolve dimensions and filters from classified query."""
-
+    original_query: str = dspy.InputField(desc="Original query text")
     classified_terms: str = dspy.InputField(desc="JSON string containing only the classified terms with roles DIMENSION and FILTER_VALUE")
     sales_scope: str = dspy.InputField(desc="Resolved sales scope for dimension validation")
     available_dimensions: str = dspy.InputField(desc="JSON list of available dimensions with name, label, description")
     previous_context: str = dspy.InputField(desc="Previous QCO context as JSON string. empty on first turn")
+    x_axis_values: str = dspy.InputField(
+    desc="""JSON object with 'dimension' (the catalog field name) and 'values' (list of labels 
+    from the previous chart). If a classified FILTER_VALUE term matches any of these values, 
+    emit a FilterCondition with that dimension and the matched value. 
+    Example: {"dimension": "fact_secondary_sales.zone", "values": ["Central", "North", "South"]}"""
+    )
 
     # Output DimensionsResult as JSON
     dimensions_result: DimensionsResult = dspy.OutputField(
@@ -141,9 +150,15 @@ class ResolveDimensions(dspy.Signature):
       - If the user explicitly asks for a specific dimension (e.g. 'country'), return just that one ['country'].
       - If the user uses a VAGUE/GENERIC term that matches multiple specific catalog fields, you MUST return ALL matching candidate fields in the area.
       - NEVER arbitrarily choose just one field if the user's term is generic. Give every valid possibility.
+      - A term like 'region' is VAGUE — return ALL geo-related candidates e.g. ['zone', 'region', 'state'].
 
     filters:
       - array of FilterCondition objects or null
+      - If a classified term has role=FILTER_VALUE and its value appears in x_axis_values,
+        it is a filter NOT a dimension.
+        Emit: { dimension: <group_by from previous_context>, operator: "equals", value: <matched value> }
+      - Match case-insensitively. Use casing from x_axis_values.
+      - NEVER add a FILTER_VALUE term to group_by.
 
     Rules:
       - Max 2 dimensions for grouping (EXCEPT when returning >2 candidates for a generic/ambiguous term)
@@ -156,6 +171,7 @@ class ResolveDimensions(dspy.Signature):
 class ResolvePostProcessing(dspy.Signature):
     """Infer high-level post-processing intent."""
 
+    original_query: str = dspy.InputField(desc="Original query text")
     query_intent: str = dspy.InputField(
         desc="The query_intent extracted from the classified query (e.g., RANKING, COMPARISON, TREND, etc.)"
     )
@@ -176,7 +192,10 @@ class ResolvePostProcessing(dspy.Signature):
         desc=(
             "Return PostProcessingResult with: "
             "ranking (enabled/order/limit), "
-            "comparison (type/comparison_window), "
+            "comparison (type/comparison_window). comparison_window MUST exactly match one of: "
+            "'today', 'yesterday', 'last_7_days', 'last_30_days', 'last_90_days', 'month_to_date', 'quarter_to_date', "
+            "'year_to_date', 'last_month', 'last_quarter', 'last_year', 'all_time'. "
+            "DO NOT invent windows like 'previous_period'. "
             "derived_metric (none|wow_growth|mom_growth|yoy_growth|period_change|contribution_percent|avg_price). "
             "Focus only on user intent — do not enforce constraints."
         )

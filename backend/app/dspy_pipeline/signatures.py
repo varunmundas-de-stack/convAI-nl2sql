@@ -189,15 +189,16 @@ class ResolvePostProcessing(dspy.Signature):
     )
 
     post_processing_result: PostProcessingResult = dspy.OutputField(
-        desc=(
-            "Return PostProcessingResult with: "
-            "ranking (enabled/order/limit), "
-            "comparison (type/comparison_window). comparison_window MUST exactly match one of: "
-            "'today', 'yesterday', 'last_7_days', 'last_30_days', 'last_90_days', 'month_to_date', 'quarter_to_date', "
-            "'year_to_date', 'last_month', 'last_quarter', 'last_year', 'all_time'. "
-            "DO NOT invent windows like 'previous_period'. "
-            "derived_metric (none|wow_growth|mom_growth|yoy_growth|period_change|contribution_percent|avg_price). "
-            "Focus only on user intent — do not enforce constraints."
+    desc=(
+        "Return PostProcessingResult with: "
+        "ranking (enabled/order/limit), "
+        "comparison.comparison_window must be one of: "
+        "'today','yesterday','last_7_days','last_30_days','last_90_days','month_to_date',"
+        "'quarter_to_date','year_to_date','last_month','last_quarter','last_year','all_time' "
+        "or null. "
+        "If the query compares explicit dates/months like 'feb vs march', set comparison_window=null. "
+        "NEVER output 'previous_period' or any unlisted value — use null instead. "
+        "derived_metric: none|wow_growth|mom_growth|yoy_growth|period_change|contribution_percent|avg_price."
         )
     )
 

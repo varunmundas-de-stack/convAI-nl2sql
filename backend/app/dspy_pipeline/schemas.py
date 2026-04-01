@@ -441,16 +441,17 @@ class RankingConfig(BaseModel):
 class ComparisonConfig(BaseModel):
     """Comparison specification within post-processing."""
     type: Literal["period", "dimension"]
-    comparison_window: Optional[Literal[
-        "today", "yesterday",
-        "last_7_days", "last_30_days", "last_90_days",
-        "month_to_date", "quarter_to_date", "year_to_date",
-        "last_month", "last_quarter", "last_year",
-        "all_time",
-    ]] = Field(
-        default=None,
-        description="Comparison time window. Required when type='period'."
+    comparison_window: Optional[str] = Field(
+    default=None,
+    description="Relative time window for comparison. Null if comparing explicit date ranges. Must be a valid TIME_WINDOWS value if set.",
     )
+
+    @field_validator("comparison_window")
+    @classmethod
+    def validate_window(cls, v):
+        if v is not None and v not in TIME_WINDOWS:
+            return None  # coerce invalid values to null instead of crashing
+        return v
  
     model_config = ConfigDict(extra="forbid")
  

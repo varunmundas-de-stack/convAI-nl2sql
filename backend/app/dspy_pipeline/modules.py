@@ -299,25 +299,27 @@ class TimeModule(dspy.Module):
         # 6. Rule 3 — COMPARISON
         # -------------------------
         if intent == "COMPARISON":
-            # assuming comparison_window is handled in schema
-            if not result.time_window:
-                raise ClarificationRequired(
-                    build_time_clarification(
-                        ambiguous_expression="primary time period",
-                        candidate_windows=sorted(TIME_WINDOWS)
-                    )
-                )
 
-            # if comparison missing → ask
-            if not getattr(result, "comparison_window", None):
-                raise ClarificationRequired(
-                    build_time_clarification(
-                        ambiguous_expression="comparison time period",
-                        candidate_windows=sorted(TIME_WINDOWS)
-                    )
-                )
+            # For explicit date comparisons (feb vs march), window is None — dates are in TimeResult
+            comparison_window = None
+            if llm_comparison and llm_comparison.comparison_window:
+                comparison_window = llm_comparison.comparison_window
+            elif time_result and time_result.time_window:
+                comparison_window = time_result.time_window
+            # else: leave as None — explicit date ranges don't need a window
 
-            return result
+            derived_metric = (
+                llm_metric if llm_metric != "none" else "period_change"
+            )
+
+            return PostProcessingResult(
+                ranking=None,
+                comparison=ComparisonConfig(
+                    type="period",
+                    comparison_window=comparison_window,  # None is valid per your model
+                ),
+                derived_metric=derived_metric,
+            )
 
         # -------------------------
         # 7. Rule 4 — KPI / DISTRIBUTION / RANKING
@@ -848,18 +850,18 @@ class PostProcessingResolver:
         # INTENT: COMPARISON
         # =====================================================
         if intent == "COMPARISON":
-
-            comparison_window = (
-                llm_comparison.comparison_window
-                if llm_comparison and llm_comparison.comparison_window
-                else (time_result.time_window if time_result else "previous_period") or "previous_period"
-            )
-
-            derived_metric = (
-                llm_metric
-                if llm_metric != "none"
-                else "period_change"
-            )
+            # Check if explicit date ranges are present in the query
+            time_range_terms = [
+                t for t in classified_query.classified_terms 
+                if t.role == "TIME_RANGE"
+            ]
+            
+            comparison_window = None
+            if llm_comparison and llm_comparison.comparison_window:
+                comparison_window = llm_comparison.comparison_window
+            elif not time_range_terms and time_result and time_result.time_window:
+                # Only fall back to time_window if no explicit date terms exist
+                comparison_window = time_result.time_window
 
             return PostProcessingResult(
                 ranking=None,
@@ -867,7 +869,7 @@ class PostProcessingResolver:
                     type="period",
                     comparison_window=comparison_window,
                 ),
-                derived_metric=derived_metric,
+                derived_metric=llm_metric if llm_metric != "none" else "period_change",
             )
 
         # =====================================================

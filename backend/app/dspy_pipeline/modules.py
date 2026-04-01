@@ -61,7 +61,7 @@ from .signatures import (
     ResolveDimensions,
     ResolvePostProcessing,
 )
-
+from app.dspy_pipeline.schemas import FilterCondition
 logger = logging.getLogger(__name__)
 
 
@@ -174,18 +174,9 @@ class ScopeModule(dspy.Module):
             return ScopeResult(sales_scope=overrides["sales_scope"])
 
         # -------------------------
-        # 1b. Classifier Explicit Scope
-        # -------------------------
-        if classified_query.explicit_scope:
-            return ScopeResult(sales_scope=classified_query.explicit_scope)
-
-        # -------------------------
         # 2. LLM extraction
         # -------------------------
-        relevant_terms = [
-            t.model_dump() for t in classified_query.classified_terms
-            if t.role == "SCOPE" or getattr(t, "scope", None)
-        ]
+        relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role == "SCOPE"]
         prediction = self.predict(classified_terms=json.dumps(relevant_terms))
         result: ScopeResult = prediction.scope_result
 
@@ -195,7 +186,7 @@ class ScopeModule(dspy.Module):
 
         # If LLM couldn't determine scope → clarify
         has_scope_term = any(
-            t.role == "SCOPE" or getattr(t, "scope", None)
+            t.role == "SCOPE"
             for t in classified_query.classified_terms
         )
 
@@ -607,6 +598,7 @@ class DimensionsModule(dspy.Module):
         classified_query: ClassifiedQuery,
         sales_scope: str,
         previous_context=None,
+        x_axis_values: Optional[list[str]] = None,
         overrides: Optional[dict] = None,
     ) -> DimensionsResult:
 
@@ -629,15 +621,31 @@ class DimensionsModule(dspy.Module):
         # -------------------------
         # Handle different context types - convert to string for LLM
         context_str = ""
+        x_axis_labels_str = "[]"
         if previous_context:
             if hasattr(previous_context, 'to_prompt_context'):
-                # It's a QCO object
-                context_str = previous_context.to_prompt_context()
+                x_axis_list = getattr(previous_context, "x_axis_labels", [])
+                x_axis_dim = getattr(previous_context, "group_by", [None])[0]  # e.g. "zone"
+                if x_axis_list and x_axis_dim:
+                    x_axis_labels_str = json.dumps({
+                        "dimension": x_axis_dim,
+                        "values": x_axis_list
+                    })
             elif isinstance(previous_context, dict):
-                context_str = json.dumps(previous_context)
+                x_axis_list = previous_context.get("x_axis_labels", [])
+                x_axis_dim = (previous_context.get("group_by") or [None])[0]
+                if x_axis_list and x_axis_dim:
+                    x_axis_labels_str = json.dumps({
+                        "dimension": x_axis_dim,
+                        "values": x_axis_list
+                    })
             else:
                 # Already a string
                 context_str = str(previous_context)
+
+        # Override with explicit parameter if provided
+        if x_axis_values:
+            x_axis_labels_str = json.dumps(x_axis_values)
 
         catalog_str = self._build_dimensions_catalog(sales_scope)
 
@@ -647,6 +655,7 @@ class DimensionsModule(dspy.Module):
             sales_scope=sales_scope,
             available_dimensions=catalog_str,
             previous_context=context_str,
+            x_axis_values=x_axis_labels_str,
         )
 
         result: DimensionsResult = prediction.dimensions_result
@@ -719,6 +728,7 @@ class DimensionsModule(dspy.Module):
                             sales_scope=sales_scope,
                             available_dimensions=catalog_str,
                             previous_context=context_str,
+                            x_axis_values=x_axis_labels_str,
                         )
                         term_candidates = [
                             d for d in (term_prediction.dimensions_result.group_by or [])
@@ -1011,100 +1021,113 @@ class AssemblerModule:
             )
 
         # -------------------------
+        # Filters — merge dimensions filters + classifier filter_hints
+        # -------------------------
+        filters = dimensions_result.filters if dimensions_result else None
+
+        if not filters and classified_query.filter_hints:
+            filters = [
+                FilterCondition(
+                    dimension=hint.dimension,
+                    operator="equals",
+                    value=hint.value,
+                )
+                for hint in classified_query.filter_hints
+            ]
+
+        # -------------------------
         # Final Intent
         # -------------------------
         return Intent(
             sales_scope=scope_result.sales_scope if scope_result else "SECONDARY",
             metrics=metrics,
             group_by=dimensions_result.group_by if dimensions_result else None,
-            filters=dimensions_result.filters if dimensions_result else None,
+            filters=filters,  # ← use merged filters
             time=time_spec,
             post_processing=post_processing_result,
         )
 
 # =============================================================================
 # PIPELINE — IntentExtractionPipeline
-# =============================================================================
+# # =============================================================================
 
-class IntentExtractionPipeline(dspy.Module):
-    """
-    Orchestrates all six agents in sequence and returns the final Intent.
+# class IntentExtractionPipeline(dspy.Module):
+#     """
+#     Orchestrates all six agents in sequence and returns the final Intent.
 
-    Usage:
-        pipeline = IntentExtractionPipeline()
-        intent   = pipeline(query="top 5 brands by net value last month")
+#     Usage:
+#         pipeline = IntentExtractionPipeline()
+#         intent   = pipeline(query="top 5     The pipeline is stateless. Multi-turn context must be supplied via
+#     `previous_context` on each call.
+#     """
 
-    The pipeline is stateless. Multi-turn context must be supplied via
-    `previous_context` on each call.
-    """
+#     def __init__(self):
+#         super().__init__()
+#         self.classifier  = ClassifierModule()
+#         self.scope       = ScopeModule()
+#         self.time        = TimeModule()
+#         self.metrics     = MetricsModule()
+#         self.dimensions  = DimensionsModule()
+#         self.assembler   = AssemblerModule()
 
-    def __init__(self):
-        super().__init__()
-        self.classifier  = ClassifierModule()
-        self.scope       = ScopeModule()
-        self.time        = TimeModule()
-        self.metrics     = MetricsModule()
-        self.dimensions  = DimensionsModule()
-        self.assembler   = AssemblerModule()
+#     def forward(
+#         self,
+#         query: str,
+#         current_date: Optional[date] = None,
+#         previous_context: Optional[dict] = None,
+#     ) -> Intent:
+#         """
+#         Run the full intent extraction pipeline for a single query.
 
-    def forward(
-        self,
-        query: str,
-        current_date: Optional[date] = None,
-        previous_context: Optional[dict] = None,
-    ) -> Intent:
-        """
-        Run the full intent extraction pipeline for a single query.
+#         Execution order:
+#             1. ClassifierModule  — classify all terms and determine query_intent
+#             2. ScopeModule       — resolve PRIMARY / SECONDARY (parallel-safe)
+#             3. TimeModule        — resolve time window + granularity (parallel-safe)
+#             4. MetricsModule     — extract and validate metrics (parallel-safe)
+#             5. DimensionsModule  — resolve group_by and filters (parallel-safe)
+#             6. AssemblerModule   — merge outputs into final Intent
 
-        Execution order:
-            1. ClassifierModule  — classify all terms and determine query_intent
-            2. ScopeModule       — resolve PRIMARY / SECONDARY (parallel-safe)
-            3. TimeModule        — resolve time window + granularity (parallel-safe)
-            4. MetricsModule     — extract and validate metrics (parallel-safe)
-            5. DimensionsModule  — resolve group_by and filters (parallel-safe)
-            6. AssemblerModule   — merge outputs into final Intent
+#         Steps 2–5 are data-independent after step 1 and can be parallelised if
+#         the execution framework supports it (e.g. dspy.Parallel or asyncio).
 
-        Steps 2–5 are data-independent after step 1 and can be parallelised if
-        the execution framework supports it (e.g. dspy.Parallel or asyncio).
+#         Args:
+#             query            : Raw natural-language query from the user.
+#             current_date     : Today's date; defaults to date.today().
+#             previous_context : Prior QCO result dict for multi-turn conversations.
 
-        Args:
-            query            : Raw natural-language query from the user.
-            current_date     : Today's date; defaults to date.today().
-            previous_context : Prior QCO result dict for multi-turn conversations.
+#         Returns:
+#             Intent object ready for downstream query construction.
+#         """
+#         # Step 1: Classify
+#         classified_query = self.classifier(query=query)
 
-        Returns:
-            Intent object ready for downstream query construction.
-        """
-        # Step 1: Classify
-        classified_query = self.classifier(query=query)
+#         # Steps 2-5: Resolve independently (sequential for now)
+#         scope_result = self.scope(classified_query=classified_query)
 
-        # Steps 2-5: Resolve independently (sequential for now)
-        scope_result = self.scope(classified_query=classified_query)
+#         time_result = self.time(
+#             classified_query=classified_query,
+#             current_date=current_date,
+#             previous_context=previous_context,
+#         )
 
-        time_result = self.time(
-            classified_query=classified_query,
-            current_date=current_date,
-            previous_context=previous_context,
-        )
+#         metrics_result = self.metrics(
+#             classified_query=classified_query,
+#             sales_scope=scope_result.sales_scope,
+#         )
 
-        metrics_result = self.metrics(
-            classified_query=classified_query,
-            sales_scope=scope_result.sales_scope,
-        )
+#         dimensions_result = self.dimensions(
+#             classified_query=classified_query,
+#             sales_scope=scope_result.sales_scope,
+#             previous_context=previous_context,
+#         )
 
-        dimensions_result = self.dimensions(
-            classified_query=classified_query,
-            sales_scope=scope_result.sales_scope,
-            previous_context=previous_context,
-        )
+#         # Step 6: Assemble
+#         intent = self.assembler(
+#             classified_query=classified_query,
+#             scope_result=scope_result,
+#             time_result=time_result,
+#             metrics_result=metrics_result,
+#             dimensions_result=dimensions_result,
+#         )
 
-        # Step 6: Assemble
-        intent = self.assembler(
-            classified_query=classified_query,
-            scope_result=scope_result,
-            time_result=time_result,
-            metrics_result=metrics_result,
-            dimensions_result=dimensions_result,
-        )
-
-        return intent
+#         return intent

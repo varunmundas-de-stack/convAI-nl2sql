@@ -14,14 +14,18 @@ def strip_cube_prefix(field: str | None) -> str:
         return field.split(".", 1)[1]
     return field
 
-def pivot_rows(rows: list[dict[str, Any]], index: str, columns: str, values: str) -> Tuple[list[dict], list[str]]:
+def pivot_rows(rows: list[dict[str, Any]], index: str, columns: str | list[str], values: str) -> Tuple[list[dict], list[str]]:
     """
     Group rows by index dimension (X axis).
     For each X value, map column values -> metric values.
     Return (pivoted_rows, stack_keys).
     """
     idx_clean = strip_cube_prefix(index)
-    col_clean = strip_cube_prefix(columns)
+    
+    if isinstance(columns, str):
+        columns = [columns]
+        
+    cols_clean = [strip_cube_prefix(c) for c in columns]
     val_clean = strip_cube_prefix(values)
     
     pivot_map = {}
@@ -33,8 +37,14 @@ def pivot_rows(rows: list[dict[str, Any]], index: str, columns: str, values: str
             continue
             
         str_idx = str(idx_val)
-        col_val = row.get(columns, row.get(col_clean))
-        str_col = str(col_val) if col_val is not None else "unknown"
+        
+        # Build compound stack key
+        col_vals = []
+        for c, c_clean in zip(columns, cols_clean):
+            v = row.get(c, row.get(c_clean))
+            col_vals.append(str(v) if v is not None else "unknown")
+            
+        str_col = " - ".join(col_vals)
         
         val_metric = row.get(values, row.get(val_clean, 0))
         
@@ -90,6 +100,13 @@ def merge_dual_query(primary: list[dict[str, Any]], comparison: list[dict[str, A
         except (ValueError, TypeError):
             prev_float = 0.0
             
+        # Ensure clean dimension keys exist for frontend mapping
+        for g in group_by:
+            g_clean = strip_cube_prefix(g)
+            new_row[g_clean] = row.get(g, row.get(g_clean))
+            
+        # Ensure clean metric keys exist for SeriesConfig mapping
+        new_row[metric_clean] = curr_float
         new_row[f"{metric_clean}_comparison"] = prev_float
         
         if prev_float != 0.0:

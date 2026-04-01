@@ -62,6 +62,7 @@ class SeriesConfig(BaseModel):
 class PivotConfig(BaseModel):
     index_dimension: str
     stack_dimension: str
+    stack_dimensions: Optional[list[str]] = None
     stack_keys: list[str]
 
 

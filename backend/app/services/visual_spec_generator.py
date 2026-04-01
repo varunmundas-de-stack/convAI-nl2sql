@@ -123,10 +123,11 @@ def generate_visual_spec(
         elif len(group_by) >= 2:
             chart_type = ChartType.STACKED_BAR
             x_axis_key = group_by[0]
-            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
+            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1:], values=metric)
             pivot_config = PivotConfig(
                 index_dimension=strip_cube_prefix(group_by[0]),
                 stack_dimension=strip_cube_prefix(group_by[1]),
+                stack_dimensions=[strip_cube_prefix(d) for d in group_by[1:]],
                 stack_keys=stack_keys
             )
             out_data = pivoted
@@ -151,10 +152,11 @@ def generate_visual_spec(
             x_axis_key = time_dim
         else:
             chart_type = ChartType.MULTI_LINE
-            pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by[0], values=metric)
+            pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by, values=metric)
             pivot_config = PivotConfig(
                 index_dimension=strip_cube_prefix(time_dim),
                 stack_dimension=strip_cube_prefix(group_by[0]),
+                stack_dimensions=[strip_cube_prefix(d) for d in group_by],
                 stack_keys=stack_keys
             )
             out_data = pivoted
@@ -181,10 +183,11 @@ def generate_visual_spec(
             # Also detect time-series with a group breakdown
             if time_dim and time_dim not in group_by and len(data) >= 2:
                 chart_type = ChartType.MULTI_LINE
-                pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by[0], values=metric)
+                pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by, values=metric)
                 pivot_config = PivotConfig(
                     index_dimension=strip_cube_prefix(time_dim),
                     stack_dimension=strip_cube_prefix(group_by[0]),
+                    stack_dimensions=[strip_cube_prefix(d) for d in group_by],
                     stack_keys=stack_keys
                 )
                 out_data = pivoted
@@ -198,10 +201,11 @@ def generate_visual_spec(
                 x_axis_key = group_by[0]
         else:
             chart_type = ChartType.STACKED_BAR
-            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1], values=metric)
+            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1:], values=metric)
             pivot_config = PivotConfig(
                 index_dimension=strip_cube_prefix(group_by[0]),
                 stack_dimension=strip_cube_prefix(group_by[1]),
+                stack_dimensions=[strip_cube_prefix(d) for d in group_by[1:]],
                 stack_keys=stack_keys
             )
             out_data = pivoted

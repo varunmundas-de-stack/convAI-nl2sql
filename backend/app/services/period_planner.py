@@ -160,7 +160,7 @@ _DERIVED_TO_GRANULARITY: dict[str, str] = {
     "wow_growth":    "week",
     "mom_growth":    "month",
     "yoy_growth":    "year",
-    "period_change": "day",    # generic fallback
+    "period_change": None,    # generic fallback
 }
 
 # ---------------------------------------------------------------------------
@@ -208,12 +208,26 @@ def _transform_single_time_series(intent: Intent, log) -> Intent:
     # ---- 2. Inject granularity --------------------------------------------
     if intent.time:
         if not intent.time.granularity:
-            granularity = _DERIVED_TO_GRANULARITY.get(derived or "", "week")
+            granularity = _DERIVED_TO_GRANULARITY.get(derived or "", None)
+            
+            if granularity is None and derived == "period_change":
+                # Infer from comparison_window
+                comp_window = getattr(
+                    getattr(intent.post_processing, "comparison", None),
+                    "comparison_window", None
+                )
+                if comp_window in ("last_7_days",):
+                    granularity = "day"
+                elif comp_window in ("last_month", "last_30_days"):
+                    granularity = "week"
+                elif comp_window in ("last_quarter", "last_90_days"):
+                    granularity = "month"
+                elif comp_window in ("last_year",):
+                    granularity = "quarter"
+                else:
+                    granularity = "week"  # safe default
+            
             object.__setattr__(intent.time, "granularity", granularity)
-            log.info(
-                f"SINGLE_TIME_SERIES: injected granularity={granularity!r} "
-                f"from derived_metric={derived!r}"
-            )
         else:
             log.info(
                 f"SINGLE_TIME_SERIES: granularity already set to {intent.time.granularity!r}"
@@ -295,6 +309,7 @@ def _periods_contiguous_and_equal(intent: Intent) -> bool:
 
     if primary_window in NON_CONTIGUOUS_WINDOWS:
         return False
+    
 
     # Check comparison window if present
     pp = intent.post_processing

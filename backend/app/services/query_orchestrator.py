@@ -611,16 +611,50 @@ def step_execute_query(ctx: PipelineContext, span) -> None:
         if strategy == QueryStrategy.DUAL_QUERY.value:
             with tracer.start_as_current_span("cube.comparison_query") as s:
                 try:
-                    q = build_comparison_query(ctx.validated_intent)
+                    intent_for_comparison = ctx.validated_intent
+
+                    # For explicit date comparisons (e.g. "compare with feb"),
+                    # the intent's start_date/end_date IS the comparison period (feb).
+                    # The "current period" comes from the previous QCO.
+                    comp = getattr(getattr(intent_for_comparison.post_processing, "comparison", None), "comparison_window", None)
+                    if not comp and intent_for_comparison.time and intent_for_comparison.time.start_date:
+                        prev_qco = getattr(ctx, "previous_qco", None)
+                        logger.info(f"DUAL_QUERY debug: prev_qco={prev_qco}, time_range={getattr(prev_qco, 'time_range', None)}")
+                        if prev_qco and prev_qco.time_range:
+                            # Swap: make current period the primary date range for comparison query
+                            from app.models.intent import Intent, TimeSpec
+                            intent_for_comparison = intent_for_comparison.model_copy(deep=True)
+                            object.__setattr__(
+                                intent_for_comparison.time,
+                                "start_date",
+                                prev_qco.time_range.start_date,
+                            )
+                            object.__setattr__(
+                                intent_for_comparison.time,
+                                "end_date",
+                                prev_qco.time_range.end_date,
+                            )
+                            object.__setattr__(
+                                intent_for_comparison.time,
+                                "window",
+                                None,
+                            )
+                            logger.info(
+                                f"DUAL_QUERY: explicit date comparison — "
+                                f"comparison period set to QCO range "
+                                f"{prev_qco.time_range.start_date} → {prev_qco.time_range.end_date}"
+                            )
+
+                    q = build_comparison_query(intent_for_comparison)
                     client.get_sql(q)
                     ctx.comparison_data = client.load(q).data
+                    logger.info(f"Comparison raw data sample: {ctx.comparison_data[:2]}")
                     _span_set(s, output_row_count=len(ctx.comparison_data))
                     logger.info(f"Comparison query: {len(ctx.comparison_data)} rows")
                 except Exception as e:
                     s.set_status(Status(StatusCode.ERROR, str(e)))
                     s.record_exception(e)
                     logger.warning(f"Comparison query failed (non-fatal): {e}")
-
         elif strategy == QueryStrategy.CONTRIBUTION.value:
             with tracer.start_as_current_span("cube.total_query") as s:
                 try:

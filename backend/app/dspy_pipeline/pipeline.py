@@ -4,7 +4,11 @@ import time
 from datetime import date
 from typing import Optional, Union, Dict, Any, List, Tuple
 
+from opentelemetry.trace import Status, StatusCode
+from app.utils.tracer import get_tracer
+
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 from .modules import (
     QueryDecomposerModule,
@@ -20,6 +24,30 @@ from .clarification_tool import ClarificationRequired, MultipleClarificationsReq
 from .schemas import Intent, DecomposedQuery
 from app.services.drill_detector import DrillResult, detect_drill
 from app.dspy_pipeline.schemas import ScopeResult
+
+def _span_set(span, **kwargs) -> None:
+    """
+    Write key/value pairs onto an OTel span in one call.
+
+    Key convention: first underscore → dot  (input_query → "input.query").
+    Values are auto-serialized:
+      dict/list → json.dumps (≤ 2000 chars)
+      str       → truncated to 1000 chars
+      None      → ""
+      other     → str()
+    """
+    import json
+
+    for raw_key, value in kwargs.items():
+        key = raw_key.replace("_", ".", 1)
+        if isinstance(value, (dict, list)):
+            span.set_attribute(key, json.dumps(value, default=str)[:2000])
+        elif isinstance(value, str):
+            span.set_attribute(key, value[:1000])
+        elif value is None:
+            span.set_attribute(key, "")
+        else:
+            span.set_attribute(key, str(value))
 
 # =============================================================================
 # THREAD LOCAL PIPELINE STATE (FOR QCO RESOLVER)
@@ -323,47 +351,72 @@ class ContextInjectingPipelineManager:
         current_date
     ) -> Dict[str, Any]:
         """Execute only the specified agents sequentially and return results."""
-        results = {}
-
-        # Determine current scope: use previous QCO scope if scope isn't being re-run
-        current_scope = None
-        if previous_qco and 'scope' not in agents_to_run:
-            current_scope = previous_qco.sales_scope
-
-        if 'scope' in agents_to_run:
-            logger.info("[Context Injection] Executing ScopeModule")
-            scope_result = self.scope(classified_query=classified_query, overrides=overrides)
-            results['scope'] = scope_result
-            current_scope = scope_result.sales_scope
-
-        if 'time' in agents_to_run:
-            logger.info("[Context Injection] Executing TimeModule")
-            results['time'] = self.time(
-                classified_query=classified_query,
-                current_date=current_date or date.today(),
-                previous_context=previous_qco.model_dump(mode='json') if previous_qco else None,
-                overrides=overrides,
+        with tracer.start_as_current_span("dspy.selective_execution") as span:
+            _span_set(span,
+                input_agents_to_run=str(agents_to_run),
+                input_intent=classified_query.query_intent,
+                input_has_previous_qco=previous_qco is not None,
+                input_has_overrides=bool(overrides)
             )
 
-        if 'metrics' in agents_to_run:
-            logger.info("[Context Injection] Executing MetricsModule")
-            results['metrics'] = self.metrics(
-                classified_query=classified_query,
-                sales_scope=current_scope or "SECONDARY",
-                overrides=overrides,
-            )
+            try:
+                start_time = time.monotonic()
+                results = {}
 
-        if 'dimensions' in agents_to_run:
-            logger.info("[Context Injection] Executing DimensionsModule")
-            results['dimensions'] = self.dimensions(
-                classified_query=classified_query,
-                sales_scope=current_scope or "SECONDARY",
-                previous_context=previous_qco.model_dump(mode='json') if previous_qco else None,
-                x_axis_values=previous_qco.x_axis_labels if previous_qco else None,
-                overrides=overrides,
-            )
+                # Determine current scope: use previous QCO scope if scope isn't being re-run
+                current_scope = None
+                if previous_qco and 'scope' not in agents_to_run:
+                    current_scope = previous_qco.sales_scope
 
-        return results
+                if 'scope' in agents_to_run:
+                    logger.info("[Context Injection] Executing ScopeModule")
+                    scope_result = self.scope(classified_query=classified_query, overrides=overrides)
+                    results['scope'] = scope_result
+                    current_scope = scope_result.sales_scope
+
+                if 'time' in agents_to_run:
+                    logger.info("[Context Injection] Executing TimeModule")
+                    results['time'] = self.time(
+                        classified_query=classified_query,
+                        current_date=current_date or date.today(),
+                        previous_context=previous_qco.model_dump(mode='json') if previous_qco else None,
+                        overrides=overrides,
+                    )
+
+                if 'metrics' in agents_to_run:
+                    logger.info("[Context Injection] Executing MetricsModule")
+                    results['metrics'] = self.metrics(
+                        classified_query=classified_query,
+                        sales_scope=current_scope or "SECONDARY",
+                        overrides=overrides,
+                    )
+
+                if 'dimensions' in agents_to_run:
+                    logger.info("[Context Injection] Executing DimensionsModule")
+                    results['dimensions'] = self.dimensions(
+                        classified_query=classified_query,
+                        sales_scope=current_scope or "SECONDARY",
+                        previous_context=previous_qco.model_dump(mode='json') if previous_qco else None,
+                        x_axis_values=previous_qco.x_axis_labels if previous_qco else None,
+                        overrides=overrides,
+                    )
+
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                _span_set(span,
+                    output_agents_executed=str(list(results.keys())),
+                    output_scope=results.get('scope', {}).sales_scope if 'scope' in results else current_scope or "",
+                    output_duration_ms=duration_ms
+                )
+
+                logger.debug(f"[Context Injection] Selective execution completed in {duration_ms}ms | agents={list(results.keys())}")
+                return results
+
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                _span_set(span, error_type=type(e).__name__, error_message=str(e))
+                logger.error(f"[Context Injection] Error during selective execution: {e}")
+                raise
 
     def _handle_scope_change_propagation(
         self,
@@ -600,105 +653,142 @@ class IntentExtractionPipeline(dspy.Module):
         Raises:
             ClarificationRequired: propagated directly from any agent.
         """
+        with tracer.start_as_current_span("dspy.extraction_stages") as span:
+            _span_set(span,
+                input_query=query_text[:500],
+                input_has_previous_qco=previous_qco is not None,
+                input_has_overrides=bool(overrides)
+            )
 
-        # -------------------------
-        # 1. Classify
-        # -------------------------
-        logger.info("[DSPy Pipeline] [1/5] Executing Classifier")
-        step_start = time.monotonic()
-        classified_query = self.classifier(query=query_text, session_context=previous_qco)
-        logger.info(
-            "[DSPy Pipeline] [1/5] Classifier completed in %dms | intent=%s",
-            int((time.monotonic() - step_start) * 1000),
-            classified_query,
-        )
+            try:
+                full_start_time = time.monotonic()
 
-        # -------------------------
-        # 2. Change Planning
-        # -------------------------
+                # -------------------------
+                # 1. Classify
+                # -------------------------
+                logger.info("[DSPy Pipeline] [1/5] Executing Classifier")
+                step_start = time.monotonic()
+                classified_query = self.classifier(query=query_text, session_context=previous_qco)
+                classify_duration = int((time.monotonic() - step_start) * 1000)
+                logger.info(
+                    "[DSPy Pipeline] [1/5] Classifier completed in %dms | intent=%s",
+                    classify_duration,
+                    classified_query,
+                )
 
-        plan = self.plan_changes(classified_query, previous_qco)
-        
-        logger.info(
-            "[DSPy Pipeline] [2/5] Context injection completed in %dms",
-            int((time.monotonic() - step_start) * 1000),
-        )
+                # -------------------------
+                # 2. Change Planning
+                # -------------------------
 
-        # -------------------------
-        # 3. Selective Extraction
-        # -------------------------
-        agent_results = self.context_manager.execute_with_plan(
-            classified_query,
-            previous_qco,
-            plan,
-            overrides,
-            current_date
-        )
-        
-        # Store agent results for QCO integration later
-        store_agent_results(agent_results)
+                plan = self.plan_changes(classified_query, previous_qco)
 
-        # -------------------------
-        # 4. Build Normalized Intent
-        # -------------------------
-        normalized_intent = self._build_normalized_intent(agent_results)
+                logger.info(
+                    "[DSPy Pipeline] [2/5] Context injection completed in %dms",
+                    int((time.monotonic() - step_start) * 1000),
+                )
 
-        # -------------------------
-        # 5. Drill Detection (NOW CORRECT)
-        # -------------------------
-        drill_result = self._detect_drill(normalized_intent, previous_qco)
+                # -------------------------
+                # 3. Selective Extraction
+                # -------------------------
+                agent_results = self.context_manager.execute_with_plan(
+                    classified_query,
+                    previous_qco,
+                    plan,
+                    overrides,
+                    current_date
+                )
 
-        logger.info(f"[DSPy Pipeline] Drill detected: {drill_result.case}")
+                # Store agent results for QCO integration later
+                store_agent_results(agent_results)
 
-        # -------------------------
-        # 3. Post Processing
-        # -------------------------
-        logger.info("[DSPy Pipeline] [3/5] Executing Post Processing")
-        step_start = time.monotonic()
-        post_processing_result = self.post_processing(
-            classified_query=classified_query,
-            time_result=agent_results.get('time'),
-            dimensions_result=agent_results.get('dimensions'),
-        )
-        logger.info(
-            "[DSPy Pipeline] [3/5] Post Processing completed in %dms | output=%s",
-            int((time.monotonic() - step_start) * 1000),
-            post_processing_result.model_dump_json()
-            if hasattr(post_processing_result, "model_dump_json") else str(post_processing_result),
-        )
+                # -------------------------
+                # 4. Build Normalized Intent
+                # -------------------------
+                normalized_intent = self._build_normalized_intent(agent_results)
 
-        # -------------------------
-        # 4. Assembly
-        # -------------------------
-        logger.info("[DSPy Pipeline] [4/5] Executing Assembler")
-        step_start = time.monotonic()
-        intent = self.assembler.forward(
-            classified_query=classified_query,
-            scope_result=agent_results.get('scope'),
-            time_result=agent_results.get('time'),
-            metrics_result=agent_results.get('metrics'),
-            dimensions_result=agent_results.get('dimensions'),
-            post_processing_result=post_processing_result,
-        )
-        logger.info(
-            "[DSPy Pipeline] [4/5] Assembly completed in %dms | output=%s",
-            int((time.monotonic() - step_start) * 1000),
-            intent.model_dump_json() if hasattr(intent, "model_dump_json") else str(intent),
-        )
+                # -------------------------
+                # 5. Drill Detection (NOW CORRECT)
+                # -------------------------
+                drill_result = self._detect_drill(normalized_intent, previous_qco)
 
-        # -------------------------
-        # 5. Final Validation
-        # -------------------------
-        logger.info("[DSPy Pipeline] [5/5] Executing Final Validation")
-        step_start = time.monotonic()
-        intent = Intent.model_validate(intent)
-        logger.info(
-            "[DSPy Pipeline] [5/5] Validation completed in %dms | output=%s",
-            int((time.monotonic() - step_start) * 1000),
-            intent.model_dump_json() if hasattr(intent, "model_dump_json") else str(intent),
-        )
+                logger.info(f"[DSPy Pipeline] Drill detected: {drill_result.case}")
 
-        return intent
+                # -------------------------
+                # 3. Post Processing
+                # -------------------------
+                logger.info("[DSPy Pipeline] [3/5] Executing Post Processing")
+                step_start = time.monotonic()
+                post_processing_result = self.post_processing(
+                    classified_query=classified_query,
+                    time_result=agent_results.get('time'),
+                    dimensions_result=agent_results.get('dimensions'),
+                )
+                post_processing_duration = int((time.monotonic() - step_start) * 1000)
+                logger.info(
+                    "[DSPy Pipeline] [3/5] Post Processing completed in %dms | output=%s",
+                    post_processing_duration,
+                    post_processing_result.model_dump_json()
+                    if hasattr(post_processing_result, "model_dump_json") else str(post_processing_result),
+                )
+
+                # -------------------------
+                # 4. Assembly
+                # -------------------------
+                logger.info("[DSPy Pipeline] [4/5] Executing Assembler")
+                step_start = time.monotonic()
+                intent = self.assembler.forward(
+                    classified_query=classified_query,
+                    scope_result=agent_results.get('scope'),
+                    time_result=agent_results.get('time'),
+                    metrics_result=agent_results.get('metrics'),
+                    dimensions_result=agent_results.get('dimensions'),
+                    post_processing_result=post_processing_result,
+                )
+                assembly_duration = int((time.monotonic() - step_start) * 1000)
+                logger.info(
+                    "[DSPy Pipeline] [4/5] Assembly completed in %dms | output=%s",
+                    assembly_duration,
+                    intent.model_dump_json() if hasattr(intent, "model_dump_json") else str(intent),
+                )
+
+                # -------------------------
+                # 5. Final Validation
+                # -------------------------
+                logger.info("[DSPy Pipeline] [5/5] Executing Final Validation")
+                step_start = time.monotonic()
+                intent = Intent.model_validate(intent)
+                validation_duration = int((time.monotonic() - step_start) * 1000)
+                logger.info(
+                    "[DSPy Pipeline] [5/5] Validation completed in %dms | output=%s",
+                    validation_duration,
+                    intent.model_dump_json() if hasattr(intent, "model_dump_json") else str(intent),
+                )
+
+                total_duration = int((time.monotonic() - full_start_time) * 1000)
+                _span_set(span,
+                    output_intent_type=str(getattr(intent, "intent_type", "")),
+                    output_sales_scope=getattr(intent, "sales_scope", ""),
+                    output_metrics_count=len(getattr(intent, "metrics", [])),
+                    output_group_by_count=len(getattr(intent, "group_by", []) or []),
+                    output_filters_count=len(getattr(intent, "filters", []) or []),
+                    output_has_time=getattr(intent, "time", None) is not None,
+                    output_classify_duration_ms=classify_duration,
+                    output_post_processing_duration_ms=post_processing_duration,
+                    output_assembly_duration_ms=assembly_duration,
+                    output_validation_duration_ms=validation_duration,
+                    output_total_duration_ms=total_duration,
+                    output_value=intent.model_dump() if hasattr(intent, "model_dump") else str(intent)
+                )
+
+                logger.debug(f"[DSPy Pipeline] Extraction stages completed in {total_duration}ms")
+                return intent
+
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                _span_set(span, error_type=type(e).__name__, error_message=str(e))
+                logger.error(f"[DSPy Pipeline] Error in extraction stages: {e}")
+                raise
 
     def _detect_drill(self, intent_dict, previous_qco):
         """

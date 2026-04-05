@@ -397,14 +397,10 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
         if isinstance(raw_intent, dict) and raw_intent.get("type") == "compound_query_results":
             logger.info("Compound query detected - handling structured response")
             ctx.raw_intent = raw_intent
-            ctx.stage = Stage.INTENT_EXTRACTED
             ctx.is_compound_query = True
 
-            # For compound queries, we need to create a special response format
-            # that includes all completed sub-queries and any pending ones
             compound_response = _handle_compound_query_response(raw_intent, ctx)
 
-            # Set the compound response as the final result and mark as completed
             ctx.data = compound_response.get("results", [])
             ctx.visual_spec = compound_response.get("visual_spec")
             ctx.insights = compound_response.get("insights")
@@ -412,6 +408,7 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
             ctx.success = True
             ctx.stage = Stage.COMPLETED
             ctx.duration_ms = ctx.elapsed_ms()
+            raise _Halt  # ← stop pipeline here, skip validate/build/execute steps
 
             _span_set(span,
                 output_compound_query=True,
@@ -866,6 +863,9 @@ def run_pipeline(ctx: PipelineContext, start_step: int = 0) -> PipelineContext:
             try:
                 step_fn(ctx)
             except _Halt:
+                if ctx.stage == Stage.COMPLETED:
+                    # Compound query completed successfully — not a clarification halt
+                    return ctx
                 _span_set(root_span,
                     output_clarification_requested=True,
                     output_missing_fields=str(ctx.missing_fields or []),

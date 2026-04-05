@@ -9,16 +9,19 @@ Following RULE O4: Python validator runs after every LLM call
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 import json
 
 import dspy
 from dspy.teleprompt import BootstrapFewShotWithRandomSearch
+from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
+from dspy import Example, Prediction
 
 from .pipeline import IntentExtractionPipeline
 from .training_examples import get_training_examples, get_validation_examples
 from ..models.intent import Intent
+from .gepa_feedback import FEEDBACK_FUNCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,205 @@ def intent_extraction_metric(gold: Intent, pred: Intent, trace=None) -> float:
     except Exception as e:
         logger.warning(f"Metric evaluation failed: {e}")
         return 0.0
+
+
+def gepa_intent_extraction_metric(
+    gold: Example,
+    pred: Prediction,
+    trace: Optional[Any] = None,
+    pred_name: Optional[str] = None,
+    pred_trace: Optional[Any] = None,
+) -> Union[float, ScoreWithFeedback]:
+    """
+    GEPA-compatible metric for intent extraction evaluation.
+
+    This metric supports both module-level and predictor-level scoring with feedback.
+    When pred_name is provided, it returns component-specific feedback using the
+    specialized feedback functions. Otherwise, it returns the overall intent score.
+
+    Args:
+        gold: Gold example with expected outputs
+        pred: Predicted output from the pipeline
+        trace: Optional trace of program execution
+        pred_name: Optional name of specific predictor being evaluated
+        pred_trace: Optional trace of specific predictor execution
+
+    Returns:
+        float: Overall pipeline score (when pred_name is None)
+        ScoreWithFeedback: Component-specific score and feedback (when pred_name provided)
+    """
+    try:
+        # If this is a predictor-level request, use component-specific feedback
+        if pred_name and pred_trace:
+            return _generate_component_feedback(gold, pred, trace, pred_name, pred_trace)
+
+        # Otherwise, return overall intent extraction score
+        return _calculate_overall_intent_score(gold, pred)
+
+    except Exception as e:
+        logger.warning(f"GEPA metric evaluation failed: {e}")
+        return 0.0
+
+
+def _generate_component_feedback(
+    gold: Example,
+    pred: Prediction,
+    trace: Optional[Any],
+    pred_name: str,
+    pred_trace: Optional[Any],
+) -> ScoreWithFeedback:
+    """Generate component-specific feedback using specialized feedback functions."""
+
+    # Map predictor names to feedback function keys
+    predictor_name_mapping = {
+        'classifier': 'classifier',
+        'scope': 'scope',
+        'time': 'time',
+        'metrics': 'metrics',
+        'dimensions': 'dimensions',
+    }
+
+    # Find the component name from the predictor name
+    component_name = None
+    for key in predictor_name_mapping:
+        if key in pred_name.lower():
+            component_name = predictor_name_mapping[key]
+            break
+
+    if not component_name or component_name not in FEEDBACK_FUNCTIONS:
+        return ScoreWithFeedback(
+            score=0.0,
+            feedback=f"No feedback function available for predictor: {pred_name}"
+        )
+
+    # Get the feedback function
+    feedback_fn = FEEDBACK_FUNCTIONS[component_name]
+
+    # Extract predictor-specific inputs and outputs from trace
+    if pred_trace and len(pred_trace) > 0:
+        # Extract the last prediction from the trace (most recent)
+        predictor_instance, predictor_inputs, predictor_output = pred_trace[-1]
+
+        # Convert predictor output to dict if needed
+        if hasattr(predictor_output, 'model_dump'):
+            predictor_output_dict = predictor_output.model_dump()
+        elif hasattr(predictor_output, '__dict__'):
+            predictor_output_dict = predictor_output.__dict__
+        else:
+            predictor_output_dict = {}
+
+        # Call the specialized feedback function
+        return feedback_fn(
+            predictor_output=predictor_output_dict,
+            predictor_inputs=predictor_inputs,
+            module_inputs=gold,
+            module_outputs=pred,
+            captured_trace=trace or [],
+        )
+
+    return ScoreWithFeedback(
+        score=0.0,
+        feedback=f"No trace data available for predictor: {pred_name}"
+    )
+
+
+def _calculate_overall_intent_score(gold: Example, pred: Prediction) -> float:
+    """Calculate overall intent extraction score using existing metric."""
+
+    # Extract expected outputs from gold example
+    gold_outputs = getattr(gold, 'outputs', {})
+    if not gold_outputs:
+        return 0.0
+
+    # Convert prediction to intent format
+    if hasattr(pred, 'model_dump'):
+        pred_intent = pred.model_dump()
+    elif isinstance(pred, dict):
+        pred_intent = pred
+    else:
+        # Try to extract intent from prediction attributes
+        pred_intent = {}
+        for attr in ['sales_scope', 'metrics', 'group_by', 'time', 'filters', 'post_processing']:
+            if hasattr(pred, attr):
+                pred_intent[attr] = getattr(pred, attr)
+
+    # Use the existing intent extraction metric
+    return intent_extraction_metric(gold_outputs, pred_intent)
+
+
+def get_component_performance_breakdown(
+    pipeline: IntentExtractionPipeline,
+    test_examples: List[Example],
+) -> Dict[str, Dict[str, float]]:
+    """
+    Evaluate pipeline components individually to identify performance bottlenecks.
+
+    Returns a breakdown of performance scores for each component.
+    This helps identify which components need the most optimization attention.
+    """
+    component_scores = {
+        'classifier': {'total_score': 0.0, 'count': 0, 'scores': []},
+        'scope': {'total_score': 0.0, 'count': 0, 'scores': []},
+        'time': {'total_score': 0.0, 'count': 0, 'scores': []},
+        'metrics': {'total_score': 0.0, 'count': 0, 'scores': []},
+        'dimensions': {'total_score': 0.0, 'count': 0, 'scores': []},
+    }
+
+    for example in test_examples:
+        try:
+            # Run pipeline with trace capture to get component-level outputs
+            prediction = pipeline(
+                query=example.query,
+                previous_context=getattr(example, 'previous_context', None),
+                current_date=getattr(example, 'current_date', None)
+            )
+
+            # For each component, calculate its individual score
+            for component_name in component_scores.keys():
+                if component_name in FEEDBACK_FUNCTIONS:
+                    # Use GEPA metric in component mode
+                    feedback = gepa_intent_extraction_metric(
+                        gold=example,
+                        pred=prediction,
+                        pred_name=component_name,
+                        pred_trace=[],  # Simplified for now
+                    )
+
+                    if isinstance(feedback, ScoreWithFeedback):
+                        score = feedback.score
+                    else:
+                        score = feedback if isinstance(feedback, (int, float)) else 0.0
+
+                    component_scores[component_name]['scores'].append(score)
+                    component_scores[component_name]['total_score'] += score
+                    component_scores[component_name]['count'] += 1
+
+        except Exception as e:
+            logger.warning(f"Component evaluation failed for example: {e}")
+            continue
+
+    # Calculate average scores
+    results = {}
+    for component, data in component_scores.items():
+        if data['count'] > 0:
+            avg_score = data['total_score'] / data['count']
+            results[component] = {
+                'avg_score': avg_score,
+                'count': data['count'],
+                'scores': data['scores'],
+                'min_score': min(data['scores']) if data['scores'] else 0.0,
+                'max_score': max(data['scores']) if data['scores'] else 0.0,
+            }
+        else:
+            results[component] = {
+                'avg_score': 0.0,
+                'count': 0,
+                'scores': [],
+                'min_score': 0.0,
+                'max_score': 0.0,
+            }
+
+    return results
 
 
 def _score_metrics(gold_metrics: List[Dict], pred_metrics: List[Dict]) -> float:
@@ -240,11 +442,14 @@ class IntentExtractionOptimizer:
     Following RULE O1: Compile pipeline module, never individual agents
     Following RULE O2: BootstrapFewShot first
     Following RULE O3: Save and load compiled state
+
+    Supports both BootstrapFewShot and GEPA optimization methods.
     """
 
     def __init__(self, pipeline: IntentExtractionPipeline):
         self.pipeline = pipeline
         self.compiled_pipeline = None
+        self.optimization_method = None
 
     def bootstrap_optimize(self,
                           max_bootstrapped_demos: int = 4,
@@ -284,8 +489,199 @@ class IntentExtractionOptimizer:
             trainset=trainset
         )
 
+        self.optimization_method = "BootstrapFewShot"
         logger.info("Pipeline optimization completed")
         return self.compiled_pipeline
+
+    def gepa_optimize(self,
+                     reflection_lm,
+                     auto: str = "medium",
+                     max_metric_calls: Optional[int] = None,
+                     component_selector: str = "round_robin",
+                     use_merge: bool = True,
+                     track_stats: bool = True) -> IntentExtractionPipeline:
+        """
+        Optimize pipeline using GEPA (Generate, Evaluate, Propose, Apply).
+
+        GEPA uses evolutionary optimization with reflection to improve
+        individual pipeline components through textual feedback.
+
+        Args:
+            reflection_lm: Language model for reflection (e.g., dspy.LM('claude-3-5-sonnet'))
+            auto: Budget setting ('light', 'medium', 'heavy')
+            max_metric_calls: Override auto budget with specific metric call limit
+            component_selector: Strategy for selecting components to optimize
+            use_merge: Enable merging of successful program variants
+            track_stats: Enable detailed result tracking
+
+        Returns:
+            GEPA-optimized pipeline
+        """
+        try:
+            from dspy.teleprompt import GEPA
+        except ImportError:
+            raise ImportError("GEPA not available. Ensure GEPA library is installed.")
+
+        logger.info("Starting GEPA optimization")
+
+        # Get training and validation data
+        trainset = get_training_examples()
+        valset = get_validation_examples()
+        logger.info(f"Training with {len(trainset)} examples, validating with {len(valset)} examples")
+
+        # Configure GEPA optimizer
+        gepa_config = {
+            'metric': gepa_intent_extraction_metric,
+            'reflection_lm': reflection_lm,
+            'component_selector': component_selector,
+            'use_merge': use_merge,
+            'track_stats': track_stats,
+            'failure_score': 0.0,
+            'perfect_score': 1.0,
+        }
+
+        if max_metric_calls:
+            gepa_config['max_metric_calls'] = max_metric_calls
+        else:
+            gepa_config['auto'] = auto
+
+        optimizer = GEPA(**gepa_config)
+
+        # Compile pipeline with GEPA
+        logger.info("Compiling pipeline with GEPA...")
+        self.compiled_pipeline = optimizer.compile(
+            self.pipeline,
+            trainset=trainset,
+            valset=valset
+        )
+
+        self.optimization_method = "GEPA"
+        logger.info("GEPA optimization completed")
+
+        # Log optimization results if available
+        if hasattr(self.compiled_pipeline, 'detailed_results'):
+            results = self.compiled_pipeline.detailed_results
+            logger.info(f"GEPA found {len(results.candidates)} candidates")
+            logger.info(f"Best score: {results.val_aggregate_scores[results.best_idx]:.3f}")
+
+        return self.compiled_pipeline
+
+    def hybrid_optimize(self,
+                       reflection_lm,
+                       bootstrap_first: bool = True,
+                       **gepa_kwargs) -> IntentExtractionPipeline:
+        """
+        Hybrid optimization: BootstrapFewShot followed by GEPA refinement.
+
+        This approach first uses BootstrapFewShot to establish a good baseline,
+        then applies GEPA for fine-grained component optimization.
+
+        Args:
+            reflection_lm: Language model for GEPA reflection
+            bootstrap_first: Whether to run BootstrapFewShot first
+            **gepa_kwargs: Additional arguments for GEPA optimization
+
+        Returns:
+            Hybrid-optimized pipeline
+        """
+        logger.info("Starting hybrid optimization (BootstrapFewShot + GEPA)")
+
+        if bootstrap_first:
+            logger.info("Phase 1: BootstrapFewShot optimization")
+            self.bootstrap_optimize()
+
+            # Use the bootstrap-optimized pipeline as input to GEPA
+            pipeline_for_gepa = self.compiled_pipeline
+        else:
+            pipeline_for_gepa = self.pipeline
+
+        logger.info("Phase 2: GEPA refinement")
+        # Temporarily store the bootstrap result
+        bootstrap_pipeline = self.compiled_pipeline
+
+        # Reset pipeline for GEPA
+        self.pipeline = pipeline_for_gepa
+        self.compiled_pipeline = None
+
+        # Run GEPA optimization
+        gepa_pipeline = self.gepa_optimize(reflection_lm, **gepa_kwargs)
+
+        self.optimization_method = "Hybrid (BootstrapFewShot + GEPA)"
+        logger.info("Hybrid optimization completed")
+
+        return gepa_pipeline
+
+    def evaluate_optimization_methods(self,
+                                    reflection_lm,
+                                    test_examples: Optional[List[dspy.Example]] = None) -> Dict[str, Any]:
+        """
+        Compare different optimization methods on the same pipeline.
+
+        Evaluates unoptimized, BootstrapFewShot, GEPA, and hybrid approaches.
+
+        Returns:
+            Comparison results with scores for each method
+        """
+        if test_examples is None:
+            test_examples = get_validation_examples()
+
+        logger.info(f"Comparing optimization methods on {len(test_examples)} test examples")
+
+        results = {}
+
+        # 1. Evaluate unoptimized pipeline
+        logger.info("Evaluating unoptimized pipeline...")
+        results['unoptimized'] = self.evaluate(test_examples)
+
+        # Store original pipeline
+        original_pipeline = self.pipeline
+        original_compiled = self.compiled_pipeline
+
+        # 2. Evaluate BootstrapFewShot
+        logger.info("Evaluating BootstrapFewShot optimization...")
+        self.compiled_pipeline = None
+        bootstrap_pipeline = self.bootstrap_optimize()
+        results['bootstrap'] = self.evaluate(test_examples)
+
+        # 3. Evaluate GEPA
+        logger.info("Evaluating GEPA optimization...")
+        self.pipeline = original_pipeline
+        self.compiled_pipeline = None
+        gepa_pipeline = self.gepa_optimize(reflection_lm)
+        results['gepa'] = self.evaluate(test_examples)
+
+        # 4. Evaluate Hybrid
+        logger.info("Evaluating hybrid optimization...")
+        self.pipeline = original_pipeline
+        self.compiled_pipeline = None
+        hybrid_pipeline = self.hybrid_optimize(reflection_lm)
+        results['hybrid'] = self.evaluate(test_examples)
+
+        # Component-level analysis
+        logger.info("Analyzing component-level performance...")
+        results['component_breakdown'] = {
+            'unoptimized': get_component_performance_breakdown(original_pipeline, test_examples[:10]),
+            'bootstrap': get_component_performance_breakdown(bootstrap_pipeline, test_examples[:10]),
+            'gepa': get_component_performance_breakdown(gepa_pipeline, test_examples[:10]),
+            'hybrid': get_component_performance_breakdown(hybrid_pipeline, test_examples[:10]),
+        }
+
+        # Calculate improvements
+        baseline_score = results['unoptimized']['mean_score']
+        results['improvements'] = {
+            'bootstrap': results['bootstrap']['mean_score'] - baseline_score,
+            'gepa': results['gepa']['mean_score'] - baseline_score,
+            'hybrid': results['hybrid']['mean_score'] - baseline_score,
+        }
+
+        logger.info("Optimization method comparison completed")
+        logger.info(f"Improvements over baseline: {results['improvements']}")
+
+        # Restore state
+        self.pipeline = original_pipeline
+        self.compiled_pipeline = original_compiled
+
+        return results
 
     def evaluate(self, test_examples: Optional[List[dspy.Example]] = None) -> Dict[str, float]:
         """Evaluate pipeline on test set."""
@@ -358,25 +754,50 @@ class IntentExtractionOptimizer:
 # UTILITY FUNCTIONS
 # =============================================================================
 
-def run_optimization_experiment(save_path: str = "optimized_intent_pipeline.json") -> Dict[str, Any]:
+def run_optimization_experiment(method: str = "bootstrap",
+                              save_path: str = "optimized_intent_pipeline.json",
+                              reflection_lm = None,
+                              **kwargs) -> Dict[str, Any]:
     """
-    Run full optimization experiment.
+    Run optimization experiment with specified method.
 
-    Returns experiment results including before/after metrics.
+    Args:
+        method: Optimization method ('bootstrap', 'gepa', 'hybrid', 'compare')
+        save_path: Path to save optimized pipeline
+        reflection_lm: Language model for GEPA (required for gepa/hybrid methods)
+        **kwargs: Additional arguments for optimization method
+
+    Returns:
+        Experiment results including before/after metrics
     """
-    logger.info("Starting intent extraction optimization experiment")
+    logger.info(f"Starting {method} optimization experiment")
 
     # Initialize pipeline
     pipeline = IntentExtractionPipeline()
     optimizer = IntentExtractionOptimizer(pipeline)
 
+    if method == "compare":
+        if not reflection_lm:
+            raise ValueError("reflection_lm required for comparison experiment")
+        return optimizer.evaluate_optimization_methods(reflection_lm)
+
     # Evaluate before optimization
     logger.info("Evaluating unoptimized pipeline...")
     before_metrics = optimizer.evaluate()
 
-    # Optimize
-    logger.info("Running optimization...")
-    optimized_pipeline = optimizer.bootstrap_optimize()
+    # Run specified optimization
+    if method == "bootstrap":
+        optimized_pipeline = optimizer.bootstrap_optimize(**kwargs)
+    elif method == "gepa":
+        if not reflection_lm:
+            raise ValueError("reflection_lm required for GEPA optimization")
+        optimized_pipeline = optimizer.gepa_optimize(reflection_lm, **kwargs)
+    elif method == "hybrid":
+        if not reflection_lm:
+            raise ValueError("reflection_lm required for hybrid optimization")
+        optimized_pipeline = optimizer.hybrid_optimize(reflection_lm, **kwargs)
+    else:
+        raise ValueError(f"Unknown optimization method: {method}")
 
     # Evaluate after optimization
     logger.info("Evaluating optimized pipeline...")
@@ -386,13 +807,80 @@ def run_optimization_experiment(save_path: str = "optimized_intent_pipeline.json
     optimizer.save(save_path)
 
     results = {
+        "method": method,
         "before_optimization": before_metrics,
         "after_optimization": after_metrics,
         "improvement": after_metrics["mean_score"] - before_metrics["mean_score"],
         "training_examples": len(get_training_examples()),
         "validation_examples": len(get_validation_examples()),
-        "saved_to": save_path
+        "saved_to": save_path,
+        "optimization_method_used": optimizer.optimization_method
     }
 
-    logger.info(f"Optimization complete. Improvement: {results['improvement']:.3f}")
+    if method in ["gepa", "hybrid"] and hasattr(optimized_pipeline, 'detailed_results'):
+        # Include GEPA-specific results
+        gepa_results = optimized_pipeline.detailed_results
+        results["gepa_details"] = {
+            "candidates_explored": len(gepa_results.candidates),
+            "best_score_achieved": gepa_results.val_aggregate_scores[gepa_results.best_idx],
+            "total_metric_calls": gepa_results.total_metric_calls,
+            "best_candidate_index": gepa_results.best_idx
+        }
+
+    logger.info(f"{method.title()} optimization complete. Improvement: {results['improvement']:.3f}")
+    return results
+
+
+def run_gepa_ablation_study(reflection_lm,
+                           save_dir: str = "gepa_ablation_results") -> Dict[str, Any]:
+    """
+    Run ablation study to understand GEPA's component-level impact.
+
+    Tests different component selector strategies and optimization settings.
+    """
+    logger.info("Starting GEPA ablation study")
+
+    results = {}
+    pipeline = IntentExtractionPipeline()
+
+    # Test different component selectors
+    selectors = ['round_robin', 'all']
+    for selector in selectors:
+        logger.info(f"Testing component selector: {selector}")
+        optimizer = IntentExtractionOptimizer(pipeline)
+
+        try:
+            optimized = optimizer.gepa_optimize(
+                reflection_lm=reflection_lm,
+                auto="light",  # Use light budget for ablation
+                component_selector=selector
+            )
+            results[f"selector_{selector}"] = optimizer.evaluate()
+
+            # Save this variant
+            save_path = f"{save_dir}/gepa_{selector}.json"
+            optimizer.save(save_path)
+
+        except Exception as e:
+            logger.error(f"Failed to test selector {selector}: {e}")
+            results[f"selector_{selector}"] = {"error": str(e)}
+
+    # Test different budgets
+    budgets = ['light', 'medium']
+    for budget in budgets:
+        logger.info(f"Testing budget: {budget}")
+        optimizer = IntentExtractionOptimizer(pipeline)
+
+        try:
+            optimized = optimizer.gepa_optimize(
+                reflection_lm=reflection_lm,
+                auto=budget
+            )
+            results[f"budget_{budget}"] = optimizer.evaluate()
+
+        except Exception as e:
+            logger.error(f"Failed to test budget {budget}: {e}")
+            results[f"budget_{budget}"] = {"error": str(e)}
+
+    logger.info("GEPA ablation study completed")
     return results

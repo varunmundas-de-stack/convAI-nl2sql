@@ -39,6 +39,7 @@ from .schemas import (
     Intent,
     CATALOG_METRICS,
     METRICS_CATALOG,
+    ALL_DIMENSIONS,
     TIME_WINDOWS,
     TimeSpec,
     MetricSpec,
@@ -109,9 +110,13 @@ class QueryDecomposerModule(dspy.Module):
         super().__init__()
         self.predict = dspy.Predict(DecomposeQuery)
 
-    def forward(self, query: str, previous_context=None) -> DecomposedQuery:
+    def forward(self, query: str, previous_context=None, overrides=None) -> DecomposedQuery:
         with tracer.start_as_current_span("dspy.decomposer") as span:
-            _span_set(span, input_query=query, input_has_context=previous_context is not None)
+            _span_set(span,
+                input_query=query,
+                input_has_context=previous_context is not None,
+                input_has_overrides=bool(overrides)
+            )
 
             try:
                 start_time = time.monotonic()
@@ -134,6 +139,21 @@ class QueryDecomposerModule(dspy.Module):
                     except Exception:
                         # Fallback to JSON if conversion fails
                         context_str = json.dumps(previous_context) if isinstance(previous_context, dict) else str(previous_context)
+
+                # Inject resolved terms into context to prevent re-asking clarifications
+                if overrides:
+                    resolved_terms_context = ""
+                    for key, value in overrides.items():
+                        if "resolved_" in key and "terms" in key:
+                            # Extract term mappings from resolved terms
+                            if isinstance(value, dict):
+                                term_type = key.replace("resolved_", "").replace("_terms", "")
+                                for original_term, resolved_value in value.items():
+                                    resolved_terms_context += f"\nPreviously resolved: '{original_term}' means '{resolved_value}'"
+
+                    if resolved_terms_context:
+                        context_str += f"\n\nResolved Terms:{resolved_terms_context}"
+                        logger.debug(f"[DSPy Decomposer] Added resolved terms context: {resolved_terms_context}")
 
                 prediction = self.predict(query=query, session_context=context_str)
                 result = prediction.decomposed_query
@@ -216,6 +236,9 @@ class ClassifierModule(dspy.Module):
 
                 logger.debug(f"[DSPy Classifier] Completed in {duration_ms}ms | intent={classified.query_intent} | terms={len(classified.classified_terms or [])}")
 
+                # Validate catalog matches and retry if invalid ones are found
+                classified = self._validate_and_retry_catalog_matches(classified, query, context_str, span)
+
                 # No alias resolution — downstream modules handle ambiguity
                 return classified
 
@@ -225,6 +248,85 @@ class ClassifierModule(dspy.Module):
                 _span_set(span, error_type=type(e).__name__, error_message=str(e))
                 logger.error(f"[DSPy Classifier] Error: {e}")
                 raise
+
+    def _validate_and_retry_catalog_matches(self, classified: ClassifiedQuery, query: str, context_str: str, span) -> ClassifiedQuery:
+        """Validate catalog matches and retry classifier if invalid matches are found."""
+        invalid_matches = []
+
+        for term in classified.classified_terms or []:
+            if term.catalog_match:
+                # Validate metric matches
+                if term.role == "METRIC" and term.catalog_match not in CATALOG_METRICS:
+                    invalid_matches.append(f"'{term.term}' -> '{term.catalog_match}' (invalid metric)")
+                # Validate dimension matches
+                elif term.role == "DIMENSION" and term.catalog_match not in ALL_DIMENSIONS:
+                    invalid_matches.append(f"'{term.term}' -> '{term.catalog_match}' (invalid dimension)")
+
+        if invalid_matches:
+            logger.warning(f"[DSPy Classifier] Invalid catalog matches found: {invalid_matches}")
+
+            # Build feedback for retry
+            feedback = (
+                f"VALIDATION ERROR: Invalid catalog matches detected:\n"
+                + "\n".join(f"- {match}" for match in invalid_matches) +
+                f"\n\nValid metrics: {sorted(CATALOG_METRICS)}\n"
+                f"Valid dimensions: {sorted(ALL_DIMENSIONS)}\n\n"
+                f"Instructions:\n"
+                f"- DO NOT guess catalog_match for terms not in the valid lists\n"
+                f"- Set catalog_match=null for ambiguous terms like 'product', 'sales', 'region'\n"
+                f"- Only use exact matches from the valid lists above\n\n"
+                f"Please reclassify with correct catalog matches:"
+            )
+
+            try:
+                logger.info(f"[DSPy Classifier] Retrying classification with validation feedback")
+
+                # Add feedback to context
+                retry_context = f"{context_str}\n\nFEEDBACK FROM PREVIOUS ATTEMPT:\n{feedback}"
+
+                # Retry the prediction
+                retry_prediction = self.predict(query=query, session_context=retry_context)
+                retry_classified: ClassifiedQuery = retry_prediction.classified_query
+
+                # Log the retry attempt
+                logger.info(f"[DSPy Classifier] Retry completed | intent={retry_classified.query_intent}")
+
+                # Validate the retry result
+                retry_invalid = []
+                for term in retry_classified.classified_terms or []:
+                    if term.catalog_match:
+                        if term.role == "METRIC" and term.catalog_match not in CATALOG_METRICS:
+                            retry_invalid.append(f"'{term.term}' -> '{term.catalog_match}' (invalid metric)")
+                        elif term.role == "DIMENSION" and term.catalog_match not in ALL_DIMENSIONS:
+                            retry_invalid.append(f"'{term.term}' -> '{term.catalog_match}' (invalid dimension)")
+
+                if retry_invalid:
+                    logger.error(f"[DSPy Classifier] Retry still has invalid matches: {retry_invalid}, using original result with corrections")
+                    # Fix invalid matches by setting them to null
+                    for term in classified.classified_terms or []:
+                        if term.catalog_match:
+                            if ((term.role == "METRIC" and term.catalog_match not in CATALOG_METRICS) or
+                                (term.role == "DIMENSION" and term.catalog_match not in ALL_DIMENSIONS)):
+                                logger.info(f"[DSPy Classifier] Correcting invalid catalog_match: {term.term}.catalog_match = null")
+                                term.catalog_match = None
+                    return classified
+                else:
+                    logger.info(f"[DSPy Classifier] Retry successful, using retry result")
+                    _span_set(span, retry_successful=True)
+                    return retry_classified
+
+            except Exception as retry_error:
+                logger.error(f"[DSPy Classifier] Retry failed: {retry_error}, fixing original result")
+                # Fix invalid matches by setting them to null
+                for term in classified.classified_terms or []:
+                    if term.catalog_match:
+                        if ((term.role == "METRIC" and term.catalog_match not in CATALOG_METRICS) or
+                            (term.role == "DIMENSION" and term.catalog_match not in ALL_DIMENSIONS)):
+                            logger.info(f"[DSPy Classifier] Correcting invalid catalog_match: {term.term}.catalog_match = null")
+                            term.catalog_match = None
+                return classified
+
+        return classified
 
 # =============================================================================
 # AGENT 2 — ScopeModule

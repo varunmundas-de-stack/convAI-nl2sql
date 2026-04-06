@@ -348,11 +348,19 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
 def step_load_qco(ctx: PipelineContext, span) -> None:
     """Step 0 — reset clarification tool, load QCO."""
 
-    # Reset clarification tool for brand-new sessions
-    if not ctx.skip_reset_overrides and not ctx.session_id:
+    # Reset clarification tool for fresh queries (start_step=0)
+    # This ensures clarification state is cleared for both new sessions AND follow-up queries
+    if not ctx.skip_reset_overrides:
         try:
             from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
-            _ct.reset_for_new_request()
+            if ctx.session_id:
+                # For existing sessions, reset clarification state to prevent stale clarifications
+                _ct.reset_for_new_request(session_id=ctx.session_id)
+                logger.debug(f"Reset clarification state for existing session {ctx.session_id}")
+            else:
+                # For brand-new sessions, global reset
+                _ct.reset_for_new_request()
+                logger.debug("Reset clarification state for new session")
         except Exception as e:
             logger.warning(f"Failed to reset clarification tool: {e}")
 
@@ -386,12 +394,49 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
     )
     try:
         logger.info("Step 1: Extracting intent...")
+
+        # Prepare overrides, including session-level resolved terms
+        overrides = dict(ctx.resolved_clarifications or {})
+
+        # Inject session-level resolved terms to prevent re-asking same clarifications
+        if ctx.session_id and not ctx.skip_reset_overrides:
+            try:
+                from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+                session_resolved_terms = _ct.get_resolved_terms(ctx.session_id)
+                if session_resolved_terms:
+                    overrides.update(session_resolved_terms)
+                    logger.info(f"Injected session resolved terms for {ctx.session_id}: {session_resolved_terms}")
+                else:
+                    logger.debug(f"No session resolved terms found for {ctx.session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to inject session resolved terms: {e}")
+
         raw_intent = extract_intent(
             ctx.query,
             previous_qco=ctx.previous_qco,
             skip_reset_overrides=ctx.skip_reset_overrides,
-            overrides=ctx.resolved_clarifications,
+            overrides=overrides,
         )
+
+        # Capture and store any newly created resolved terms for future queries
+        if ctx.session_id and isinstance(raw_intent, dict):
+            try:
+                from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+
+                # Store resolved metric terms
+                if "resolved_metric_terms" in raw_intent:
+                    for term, value in raw_intent["resolved_metric_terms"].items():
+                        _ct.store_resolved_term(ctx.session_id, "metric", term, value)
+                        logger.info(f"Captured resolved metric term: {term} -> {value}")
+
+                # Store resolved dimension terms
+                if "resolved_dimension_terms" in raw_intent:
+                    for term, value in raw_intent["resolved_dimension_terms"].items():
+                        _ct.store_resolved_term(ctx.session_id, "dimension", term, value)
+                        logger.info(f"Captured resolved dimension term: {term} -> {value}")
+
+            except Exception as e:
+                logger.warning(f"Failed to capture resolved terms: {e}")
 
         # Check if this is a compound query result
         if isinstance(raw_intent, dict) and raw_intent.get("type") == "compound_query_results":
@@ -813,9 +858,16 @@ def step_complete(ctx: PipelineContext, span) -> None:
     """Step 8 — mark success, cleanup clarification tool state."""
     try:
         from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+        # Clean up by request ID
         cleaned = _ct.cleanup_request_state(request_id_prefix=ctx.request_id, max_entries=100)
         if cleaned > 0:
             logger.debug(f"Cleaned up {cleaned} clarification entries for {ctx.request_id}")
+
+        # Also clean up any remaining state for this session to prevent stale clarifications
+        # But preserve resolved term mappings for future queries in the same session
+        if ctx.session_id:
+            _ct.reset_for_new_request(session_id=ctx.session_id)
+            logger.debug(f"Final clarification cleanup for session {ctx.session_id}")
     except Exception as e:
         logger.warning(f"Failed to cleanup clarification tool: {e}")
 
@@ -983,6 +1035,27 @@ def resume_query(
 
             try:
                 resolved = getattr(state, "resolved_clarifications", {}) or {}
+
+                # Store resolved terms in session-level clarification tool for DSPy clarifications
+                if resolved_session_id:
+                    try:
+                        from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+                        for f, answer in clarification_answers.items():
+                            if f in state.missing_fields:
+                                # Determine term type from field name
+                                if "metric" in f.lower():
+                                    term_type = "metric"
+                                elif "dimension" in f.lower() or "group_by" in f.lower():
+                                    term_type = "dimension"
+                                else:
+                                    term_type = f  # Use field name as term type
+
+                                resolved_value = str(answer).strip() if not isinstance(answer, list) else str(answer[0]).strip()
+                                _ct.store_resolved_term(resolved_session_id, term_type, f, resolved_value)
+                                logger.debug(f"Stored DSPy resolved term: {f} -> {resolved_value}")
+                    except Exception as e:
+                        logger.warning(f"Failed to store DSPy resolved clarification terms: {e}")
+
                 for f, answer in clarification_answers.items():
                     if f not in state.missing_fields:
                         continue
@@ -1019,6 +1092,28 @@ def resume_query(
                 previous_qco = load_qco(resolved_session_id)
             except Exception as e:
                 logger.warning(f"Could not load QCO on resume: {e}")
+
+        # Store resolved terms in session-level clarification tool
+        if resolved_session_id:
+            try:
+                from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+                for field, answer in clarification_answers.items():
+                    if field in state.missing_fields:
+                        # Determine term type from field name
+                        if "metric" in field.lower():
+                            term_type = "metric"
+                        elif "dimension" in field.lower() or "group_by" in field.lower():
+                            term_type = "dimension"
+                        else:
+                            term_type = field  # Use field name as term type
+
+                        # For now, store the field mapping (this could be enhanced to extract original terms)
+                        # The resolved answer becomes the resolved value
+                        resolved_value = answer if isinstance(answer, str) else str(answer)
+                        _ct.store_resolved_term(resolved_session_id, term_type, field, resolved_value)
+                        logger.debug(f"Stored resolved term: {field} -> {resolved_value}")
+            except Exception as e:
+                logger.warning(f"Failed to store resolved clarification terms: {e}")
 
         patched_intent = {
             **state.intent,

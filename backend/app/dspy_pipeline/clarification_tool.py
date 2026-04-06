@@ -1,6 +1,9 @@
 import uuid
+import logging
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -302,3 +305,186 @@ def format_multiple_clarifications_response(clarifications: List[Clarification])
         "clarifications": [format_clarification_response(c) for c in clarifications],
         "count": len(clarifications),
     }
+
+
+# =============================================================================
+# CLARIFICATION TOOL - STATE MANAGEMENT
+# =============================================================================
+
+class ClarificationTool:
+    """
+    Manages clarification state across pipeline executions.
+
+    This tool tracks active clarifications by session and request,
+    providing cleanup methods to prevent stale clarifications from
+    persisting across queries in the same session.
+    """
+
+    def __init__(self):
+        # In-memory stores for clarification state
+        # Format: {"session_id:request_id": {...}, ...}
+        self._active_clarifications: Dict[str, Dict] = {}
+
+        # Session-level resolved term mappings that persist across queries
+        # Format: {"session_id": {"resolved_metric_terms": {"sales": "net_value"}, ...}}
+        self._session_resolved_terms: Dict[str, Dict[str, Dict[str, str]]] = {}
+
+    def reset_for_new_request(self, session_id: Optional[str] = None) -> None:
+        """
+        Reset clarification tool for a new request.
+
+        Args:
+            session_id: Optional session ID to reset. If None, resets all state.
+        """
+        if session_id is None:
+            # Global reset for brand-new sessions
+            self._active_clarifications.clear()
+            self._session_resolved_terms.clear()
+            logger.debug("Reset all clarification state")
+        else:
+            # Session-specific reset for follow-up queries
+            # Remove all active clarifications for this session (clear pending state)
+            keys_to_remove = [
+                key for key in self._active_clarifications.keys()
+                if key.startswith(f"{session_id}:")
+            ]
+            for key in keys_to_remove:
+                del self._active_clarifications[key]
+
+            # Keep session-level resolved terms (they should persist across queries)
+            # Only clear if this is explicitly a reset of resolved state too
+            # (for now, preserve resolved terms)
+
+            logger.debug(f"Reset active clarifications for session {session_id}, kept resolved terms")
+
+    def reset_session_completely(self, session_id: str) -> None:
+        """
+        Completely reset all clarification state for a session, including resolved terms.
+        Use this for session termination or when user explicitly wants fresh state.
+        """
+        # Remove all active clarifications for this session
+        keys_to_remove = [
+            key for key in self._active_clarifications.keys()
+            if key.startswith(f"{session_id}:")
+        ]
+        for key in keys_to_remove:
+            del self._active_clarifications[key]
+
+        # Clear session-level resolved terms
+        if session_id in self._session_resolved_terms:
+            del self._session_resolved_terms[session_id]
+
+        logger.debug(f"Completely reset all clarification state for session {session_id}")
+
+    def cleanup_request_state(self, request_id_prefix: str, max_entries: int = 100) -> int:
+        """
+        Clean up clarification state for completed requests.
+
+        Args:
+            request_id_prefix: Prefix to match request IDs for cleanup
+            max_entries: Maximum entries to clean (for safety)
+
+        Returns:
+            Number of entries cleaned up
+        """
+        cleaned_count = 0
+
+        # Clean up active clarifications
+        keys_to_remove = []
+        for key in self._active_clarifications.keys():
+            if request_id_prefix in key and cleaned_count < max_entries:
+                keys_to_remove.append(key)
+                cleaned_count += 1
+
+        for key in keys_to_remove:
+            del self._active_clarifications[key]
+
+        logger.debug(f"Cleaned up {cleaned_count} clarification entries for prefix {request_id_prefix}")
+        return cleaned_count
+
+    def store_clarification(self, session_id: str, request_id: str, clarification: Dict) -> None:
+        """Store a clarification request."""
+        key = f"{session_id}:{request_id}"
+        self._active_clarifications[key] = clarification
+
+    def get_clarification(self, session_id: str, request_id: str) -> Optional[Dict]:
+        """Retrieve a clarification request."""
+        key = f"{session_id}:{request_id}"
+        return self._active_clarifications.get(key)
+
+    def has_active_clarifications(self, session_id: str) -> bool:
+        """Check if a session has any active clarifications."""
+        return any(
+            key.startswith(f"{session_id}:")
+            for key in self._active_clarifications.keys()
+        )
+
+    def store_resolved_term(self, session_id: str, term_type: str, original_term: str, resolved_value: str) -> None:
+        """
+        Store a resolved term mapping for future queries in the same session.
+
+        Args:
+            session_id: Session identifier
+            term_type: Type of term ('metric', 'dimension', etc.)
+            original_term: Original ambiguous term (e.g., 'sales')
+            resolved_value: Resolved value (e.g., 'net_value')
+        """
+        if session_id not in self._session_resolved_terms:
+            self._session_resolved_terms[session_id] = {}
+
+        term_key = f"resolved_{term_type}_terms"
+        if term_key not in self._session_resolved_terms[session_id]:
+            self._session_resolved_terms[session_id][term_key] = {}
+
+        self._session_resolved_terms[session_id][term_key][original_term] = resolved_value
+        logger.debug(f"Stored resolved term mapping for session {session_id}: {original_term} -> {resolved_value}")
+
+    def get_resolved_terms(self, session_id: str) -> Dict[str, Dict[str, str]]:
+        """
+        Get all resolved term mappings for a session.
+
+        Returns:
+            Dictionary of term mappings like {'resolved_metric_terms': {'sales': 'net_value'}}
+        """
+        return self._session_resolved_terms.get(session_id, {})
+
+
+# Singleton instance for use by the pipeline
+clarification_tool = ClarificationTool()
+
+
+# =============================================================================
+# TESTING (for development)
+# =============================================================================
+
+if __name__ == "__main__":
+    # Simple test to verify functionality
+    print("Testing ClarificationTool...")
+
+    # Test basic functionality
+    tool = ClarificationTool()
+    tool.store_resolved_term("session1", "metric", "sales", "net_value")
+    tool.store_resolved_term("session1", "dimension", "region", "zone")
+
+    resolved_terms = tool.get_resolved_terms("session1")
+    assert "resolved_metric_terms" in resolved_terms
+    assert resolved_terms["resolved_metric_terms"]["sales"] == "net_value"
+    print("Store and retrieve resolved terms works")
+
+    # Test session reset preserves resolved terms
+    tool.store_clarification("session1", "req1", {"field": "metrics", "question": "test"})
+    assert tool.has_active_clarifications("session1")
+
+    tool.reset_for_new_request(session_id="session1")
+    assert not tool.has_active_clarifications("session1")
+    resolved_terms = tool.get_resolved_terms("session1")
+    assert resolved_terms["resolved_metric_terms"]["sales"] == "net_value"
+    print("Session reset preserves resolved terms")
+
+    # Test complete reset
+    tool.reset_session_completely("session1")
+    assert not tool.has_active_clarifications("session1")
+    assert tool.get_resolved_terms("session1") == {}
+    print("Complete session reset works")
+
+    print("All tests passed! ClarificationTool is working correctly.")

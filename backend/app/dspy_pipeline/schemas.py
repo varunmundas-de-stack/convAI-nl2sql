@@ -154,18 +154,6 @@ class ClassifiedTerm(BaseModel):
 class FilterHint(BaseModel):
     """
     A specific filter value paired with the dimension it qualifies.
- 
-    WHY SEPARATE FROM ClassifiedTerm:
-        A FILTER_VALUE term like 'Gold Flake' needs its dimension ('brand')
-        stored alongside it. ClassifiedTerm carries one catalog_match for the
-        term itself — FilterHint carries the dimension the value belongs to.
-        DimensionsAgent consumes these to build FilterCondition objects.
- 
-    WHY NO OPERATOR:
-        Operator (equals/in/contains) is resolved by DimensionsAgent based on
-        value cardinality and query phrasing. Classifying operators is not the
-        Classifier's job — it only identifies what the value is and which
-        dimension it belongs to.
     """
     dimension: str = Field(
         description=(
@@ -184,13 +172,7 @@ class FilterHint(BaseModel):
 class ClassifiedQuery(BaseModel):
     """
     Output of ClassifierAgent. Passed to all 5 downstream agents.
- 
-    This replaces the old flat-list model (metric_terms, dimension_terms,
-    filter_terms, time_expressions, ranking_indicators, scope_indicators,
-    comparison_indicators). Those fields had three problems:
-      1. Lost the term↔role pairing needed by downstream agents.
-      2. Had no query_intent — forcing _infer_intent_category() in the pipeline.
-      3. Mixed operators with values in filter_terms.
+
     """
  
     original_query: str = Field(
@@ -258,18 +240,6 @@ class ScopeResult(BaseModel):
 class TimeResult(BaseModel):
     """
     Output of TimeAgent.
- 
-    WHY has_time_constraint IS REMOVED:
-        It was a derived field stored as data. Whether time is present is
-        already expressed by time_window/start_date being non-null. Storing
-        a redundant bool creates consistency bugs (bool says True, all fields
-        are None). Downstream agents check `time_result.time_window is not None`
-        or `time_result.start_date is not None` directly.
- 
-    WHY window XOR dates IS A model_validator:
-        This is a binary constraint — either satisfied or not. It belongs in
-        Python, not in agent prompts. If the LLM sets both, the validator
-        clears start_date/end_date silently and keeps the window.
     """
  
     time_window: Optional[Literal[
@@ -327,15 +297,7 @@ class TimeResult(BaseModel):
 class MetricsResult(BaseModel):
     """
     Output of MetricsAgent.
- 
-    WHY metric_confidence IS REMOVED:
-        It had no downstream consumer in the pipeline. Storing it forced the
-        LLM to produce a float per metric on every call, adding prompt noise
-        and output tokens with zero benefit to assembly or validation.
- 
-    WHY aggregations IS KEPT:
-        The Assembler needs aggregation per metric to build the final Intent.
-        It is parallel to metrics (same index = same metric).
+
     """
  
     metrics: List[MetricSpec] = Field(
@@ -363,11 +325,6 @@ class MetricsResult(BaseModel):
 class FilterCondition(BaseModel):
     """
     A single filter condition on a dimension.
- 
-    WHY operator HAS NO DEFAULT:
-        A default of 'equals' silently masks operator resolution failures.
-        DimensionsAgent must explicitly choose the operator — it has the
-        context to make that decision (single value → equals, list → in).
     """
  
     dimension: str = Field(
@@ -389,12 +346,6 @@ class FilterCondition(BaseModel):
 class DimensionsResult(BaseModel):
     """
     Output of DimensionsAgent.
- 
-    WHY context_operation AND hierarchy_level ARE REMOVED:
-        These were internal bookkeeping fields the Assembler never consumed.
-        The Assembler needs group_by and filters — not metadata about how the
-        DimensionsAgent arrived at them. Internal state belongs inside the
-        agent's forward() method, not on its output model.
     """
  
     group_by: Optional[List[str]] = Field(
@@ -459,16 +410,6 @@ class ComparisonConfig(BaseModel):
 class PostProcessingResult(BaseModel):
     """
     Post-processing specification.
- 
-    WHY NESTED CONFIGS (not flat fields like ranking_enabled, ranking_order):
-        Flat fields require the Assembler to reconstruct the nested final schema
-        from separate fields, adding unnecessary translation logic. Nested configs
-        map directly to the final Intent schema with no reconstruction needed.
- 
-    WHY derived_metric IS NOT Optional:
-        It must always be present when post_processing is non-null so the
-        Assembler never has to guess whether it was omitted or intentionally absent.
-        Use "none" as the explicit no-op value.
     """
  
     ranking: Optional[RankingConfig] = Field(
@@ -551,63 +492,3 @@ def get_valid_dimensions_for_scope(scope: str) -> frozenset[str]:
   
 def is_valid_time_window(window: str) -> bool:
     return window in TIME_WINDOWS
-
- 
-# def resolve_metric_alias(term: str) -> str:
-#     """Resolves a metric alias to its canonical name. Returns term unchanged if not an alias."""
-#     return METRIC_ALIASES.get(term.lower(), term)
- 
- 
-# def resolve_dimension_alias(term: str) -> str:
-#     """Resolves a dimension alias to its canonical name. Returns term unchanged if not an alias."""
-#     return DIMENSION_ALIASES.get(term.lower(), term)
- 
-# def get_hierarchy_next_level(current_dim: str) -> Optional[str]:
-#     """Returns the next level down in the hierarchy for drill-down operations."""
-#     for hierarchy in (GEO_HIERARCHY, PRODUCT_HIERARCHY):
-#         if current_dim in hierarchy:
-#             idx = hierarchy.index(current_dim)
-#             return hierarchy[idx + 1] if idx < len(hierarchy) - 1 else None
-#     return None
- 
- 
-# def find_ambiguous_dimension_candidates(term: str, valid_dims: frozenset) -> list:
-#     """
-#     Returns candidate catalog dimensions when a term is ambiguous (2+ matches).
-#     Returns empty list if the term resolves cleanly to one dimension.
-#     """
-#     t = term.strip().lower()
- 
-#     # Direct alias or catalog match → unambiguous
-#     if resolve_dimension_alias(t) in valid_dims:
-#         return []
- 
-#     # Semantic group match
-#     group = DIMENSION_SEMANTIC_GROUPS.get(t)
-#     if group:
-#         candidates = [d for d in group if d in valid_dims]
-#         if len(candidates) >= 2:
-#             return candidates
- 
-#     # Substring fallback
-#     matches = [d for d in valid_dims if t in d.replace("_", " ") or d.replace("_", " ") in t]
-#     return matches if len(matches) >= 2 else []
- 
- 
-# def find_ambiguous_metric_candidates(term: str) -> list:
-#     """
-#     Returns candidate metrics when a term is ambiguous (2+ matches).
-#     Returns empty list if the term resolves cleanly to one metric.
-#     """
-#     t = term.strip().lower()
- 
-#     if resolve_metric_alias(t) in CATALOG_METRICS:
-#         return []
- 
-#     group = METRIC_SEMANTIC_GROUPS.get(t)
-#     if group:
-#         candidates = [m for m in group if m in CATALOG_METRICS]
-#         if len(candidates) >= 2:
-#             return candidates
- 
-#     return []

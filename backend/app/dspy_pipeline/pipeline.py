@@ -415,7 +415,7 @@ class ContextInjectingPipelineManager:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 span.record_exception(e)
                 _span_set(span, error_type=type(e).__name__, error_message=str(e))
-                logger.error(f"[Context Injection] Error during selective execution: {e}")
+                # logger.error(f"[Context Injection] Error during selective execution: {e}")
                 raise
 
     def _handle_scope_change_propagation(
@@ -522,7 +522,7 @@ class IntentExtractionPipeline(dspy.Module):
         # -------------------------
         logger.info("[DSPy Pipeline] [0/5] Executing Query Decomposer")
         step_start = time.monotonic()
-        decomposed = self.decomposer(query=query, previous_context=previous_context)
+        decomposed = self.decomposer(query=query, previous_context=previous_context, overrides=overrides)
         logger.info(
             "[DSPy Pipeline] [0/5] Decomposer completed in %dms | compound=%s | sub_queries=%d",
             int((time.monotonic() - step_start) * 1000),
@@ -787,7 +787,7 @@ class IntentExtractionPipeline(dspy.Module):
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 span.record_exception(e)
                 _span_set(span, error_type=type(e).__name__, error_message=str(e))
-                logger.error(f"[DSPy Pipeline] Error in extraction stages: {e}")
+                # logger.error(f"[DSPy Pipeline] Error in extraction stages: {e}")
                 raise
 
     def _detect_drill(self, intent_dict, previous_qco):

@@ -20,7 +20,14 @@ from .modules import (
     PostProcessingModule,
     AssemblerModule,
 )
-from .clarification_tool import ClarificationRequired, MultipleClarificationsRequired
+from .clarification_tool import (
+    ClarificationRequired,
+    MultipleClarificationsRequired,
+    CompoundClarificationRequired,
+    CompoundClarificationState,
+    create_compound_state,
+    build_compound_clarification
+)
 from .schemas import Intent, DecomposedQuery
 from app.services.drill_detector import DrillResult, detect_drill
 from app.dspy_pipeline.schemas import ScopeResult
@@ -493,9 +500,21 @@ class IntentExtractionPipeline(dspy.Module):
         current_date: Optional[date] = None,
         previous_context: Optional[Union[dict, Any]] = None,
         overrides: Optional[dict] = None,
+        request_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        compound_state: Optional[CompoundClarificationState] = None,
     ) -> Union[Intent, Dict[str, Any]]:
         """
         Process a query through the full pipeline.
+
+        Args:
+            query: The query string to process
+            current_date: Current date for time processing
+            previous_context: Previous QCO context
+            overrides: Override dict for pipeline
+            request_id: Request ID for state tracking
+            session_id: Session ID for state tracking
+            compound_state: Existing compound state for resumption
 
         Returns:
             Intent: for single queries
@@ -508,10 +527,15 @@ class IntentExtractionPipeline(dspy.Module):
                             "pending_subqueries": [...],
                             "dependencies": {...}
                         }
+                    OR for partial results:
+                        {
+                            "type": "compound_partial_results",
+                            ...
+                        }
 
         Raises:
-            ClarificationRequired: for both single and compound queries
-                that require user clarification before proceeding.
+            ClarificationRequired: for single query clarifications
+            CompoundClarificationRequired: for compound query clarifications
         """
         overrides = overrides or {}
         logger.info("[DSPy Pipeline] Starting intent extraction pipeline")
@@ -543,7 +567,15 @@ class IntentExtractionPipeline(dspy.Module):
             "[DSPy Pipeline] Compound query path — %d sub-queries",
             len(decomposed.sub_queries),
         )
-        return self._process_compound_query(decomposed, current_date, previous_context, overrides)
+        return self._process_compound_query(
+            decomposed,
+            current_date,
+            previous_context,
+            overrides,
+            request_id=request_id,
+            session_id=session_id,
+            compound_state=compound_state
+        )
 
     # -------------------------------------------------------------------------
     # SHARED HELPERS
@@ -790,6 +822,78 @@ class IntentExtractionPipeline(dspy.Module):
                 # logger.error(f"[DSPy Pipeline] Error in extraction stages: {e}")
                 raise
 
+    def resume_compound_query_from_clarification(
+        self,
+        compound_state: CompoundClarificationState,
+        clarification_answer: Any,
+        current_date: Optional[date] = None,
+        overrides: Optional[dict] = None,
+    ) -> Union[Intent, Dict[str, Any]]:
+        """
+        Resume compound query processing after clarification is provided.
+
+        Args:
+            compound_state: The compound clarification state from when the query was suspended
+            clarification_answer: The user's answer to the clarification
+            current_date: Current date for processing
+            overrides: Override dict for pipeline
+
+        Returns:
+            Final compound query results or another clarification if needed
+        """
+        from .clarification_tool import ClarificationAnswer, apply_clarification_override
+
+        overrides = overrides or {}
+        logger.info(f"[DSPy Pipeline] Resuming compound query from clarification for request {compound_state.request_id}")
+
+        if not compound_state.pending_clarification:
+            raise ValueError("No pending clarification in compound state")
+
+        # Apply the clarification answer to overrides
+        clarification = compound_state.pending_clarification.clarification
+        answer = ClarificationAnswer(
+            request_id=clarification.request_id,
+            answer=clarification_answer
+        )
+
+        updated_overrides = apply_clarification_override(overrides, clarification, answer)
+
+        # Clear the pending clarification
+        compound_state.pending_clarification = None
+
+        # Reconstruct the decomposed query structure
+        from .schemas import SubQuery, DecomposedQuery
+
+        sub_queries = [
+            SubQuery(
+                index=i,
+                text=query_text,
+                dependencies=compound_state.dependencies.get(i, [])
+            )
+            for i, query_text in enumerate(compound_state.decomposed_queries)
+        ]
+
+        decomposed = DecomposedQuery(
+            original_query=" AND ".join(compound_state.decomposed_queries),
+            is_compound=True,
+            sub_queries=sub_queries
+        )
+
+        # Continue processing with the updated overrides
+        try:
+            return self._process_compound_query(
+                decomposed=decomposed,
+                current_date=current_date,
+                previous_context=None,  # We're resuming, don't need previous context
+                overrides=updated_overrides,
+                request_id=compound_state.request_id,
+                session_id=compound_state.session_id,
+                compound_state=compound_state
+            )
+        except CompoundClarificationRequired as e:
+            # Another clarification needed - return the new state
+            return e.compound_state
+
     def _detect_drill(self, intent_dict, previous_qco):
         """
         Detect drill patterns against the previous QCO.
@@ -878,90 +982,140 @@ class IntentExtractionPipeline(dspy.Module):
         current_date: Optional[date],
         previous_context,
         overrides: dict,
-    ) -> Dict[str, Any]:
+        request_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        compound_state: Optional[CompoundClarificationState] = None,
+    ) -> Union[Dict[str, Any], CompoundClarificationState]:
         """
-        Process compound queries by running each sub-query sequentially.
+        Process compound queries with progressive processing and clarification resumption.
 
-        FIX (Problem 3): ClarificationRequired from any sub-query is now
-        re-raised immediately rather than being silently swallowed into
-        pending_subqueries. The caller (intent_extractor.py) expects either
-        a completed result or a raised ClarificationRequired — it does not
-        inspect the pending_subqueries dict for buried clarification requests.
+        Enhanced to support:
+        - Progressive results display (return partial results immediately)
+        - Independent sub-query processing with dependency resolution
+        - Resumption from clarification point with persistent state
+        - Graceful handling of clarifications without losing completed sub-queries
 
-        FIX (Problem 4): Uses shared _resolve_previous_context helper.
+        Args:
+            decomposed: Decomposed query object
+            current_date: Current date for time processing
+            previous_context: Previous QCO context
+            overrides: Override dict for pipeline
+            request_id: Request ID for state tracking
+            session_id: Session ID for state tracking
+            compound_state: Existing compound state for resumption
+
+        Returns:
+            - CompoundClarificationState: when a clarification is needed
+            - Dict: completed compound results when all sub-queries are done
+
+        Raises:
+            ClarificationRequired: when a sub-query needs clarification (converted to CompoundClarificationRequired)
         """
         overrides = overrides or {}
 
-        # FIX (Problem 4): Single shared helper, no duplication
+        # Resolve previous context
         previous_qco, _ = self._resolve_previous_context(previous_context)
 
-        completed_subqueries = []
-        pending_subqueries = []
-        dependencies = {}
+        # Initialize or resume compound state
+        if compound_state:
+            logger.info(f"[DSPy Pipeline] Resuming compound query with {len(compound_state.completed_indices)} completed sub-queries")
+            completed_subqueries = [
+                {
+                    "index": idx,
+                    "query": compound_state.decomposed_queries[idx],
+                    "result": compound_state.completed_results[idx] if idx < len(compound_state.completed_results) else None
+                }
+                for idx in compound_state.completed_indices
+            ]
+        else:
+            # Create new compound state
+            decomposed_queries = [sq.text for sq in decomposed.sub_queries]
+            dependencies = {}
 
-        # Build dependency map
-        for sub_query in decomposed.sub_queries:
-            if sub_query.dependencies:
-                dependencies[sub_query.index] = sub_query.dependencies
+            # Build dependency map
+            for sub_query in decomposed.sub_queries:
+                if sub_query.dependencies:
+                    dependencies[sub_query.index] = sub_query.dependencies
 
-        for sub_query in decomposed.sub_queries:
-            logger.info(
-                f"[DSPy Pipeline] Processing sub-query {sub_query.index}: '{sub_query.text}'"
+            compound_state = create_compound_state(
+                request_id=request_id or "unknown",
+                session_id=session_id or "unknown",
+                decomposed_queries=decomposed_queries,
+                dependencies=dependencies
             )
+            completed_subqueries = []
 
-            # Check if all dependencies have completed
+        pending_subqueries = []
+
+        # Process each sub-query that's ready to be processed
+        for sub_query in decomposed.sub_queries:
+            # Skip if already completed
+            if sub_query.index in compound_state.completed_indices:
+                logger.info(f"[DSPy Pipeline] Sub-query {sub_query.index} already completed, skipping")
+                continue
+
+            logger.info(f"[DSPy Pipeline] Processing sub-query {sub_query.index}: '{sub_query.text}'")
+
+            # Check dependencies
             if sub_query.dependencies:
-                completed_indices = {c['index'] for c in completed_subqueries}
                 unsatisfied = [
                     dep for dep in sub_query.dependencies
-                    if dep not in completed_indices
+                    if dep not in compound_state.completed_indices
                 ]
                 if unsatisfied:
-                    logger.info(
-                        f"[DSPy Pipeline] Sub-query {sub_query.index} "
-                        f"blocked by unsatisfied dependencies: {unsatisfied}"
-                    )
+                    logger.info(f"[DSPy Pipeline] Sub-query {sub_query.index} blocked by dependencies: {unsatisfied}")
                     pending_subqueries.append({
                         "index": sub_query.index,
                         "query": sub_query.text,
                         "blocked_by": unsatisfied,
                         "reason": f"Waiting for sub-queries {unsatisfied} to complete",
+                        "status": "pending_dependencies"
                     })
                     continue
 
             try:
+                # Process this sub-query
                 intent = self._run_extraction_stages(
                     query_text=sub_query.text,
                     current_date=current_date,
                     previous_qco=previous_qco,
                     overrides=overrides,
                 )
+
+                # Mark as completed in compound state
+                result_data = intent.model_dump()
+                compound_state.completed_indices.append(sub_query.index)
+
+                # Ensure completed_results list is large enough
+                while len(compound_state.completed_results) <= sub_query.index:
+                    compound_state.completed_results.append({})
+                compound_state.completed_results[sub_query.index] = result_data
+
                 completed_subqueries.append({
                     "index": sub_query.index,
                     "query": sub_query.text,
-                    "result": intent.model_dump(),
+                    "result": result_data,
                 })
+
                 logger.info(f"[DSPy Pipeline] Sub-query {sub_query.index} completed")
 
-            except ClarificationRequired:
-                # FIX (Problem 3): Re-raise immediately. Do not swallow into
-                # pending_subqueries. The orchestrator's clarification flow
-                # handles suspension and resumption — it expects a raised
-                # exception, not a dict with a buried clarification field.
-                logger.info(
-                    f"[DSPy Pipeline] Sub-query {sub_query.index} requires clarification "
-                    f"— suspending compound query pipeline"
+            except ClarificationRequired as clarification_needed:
+                # Handle clarification for this sub-query
+                logger.info(f"[DSPy Pipeline] Sub-query {sub_query.index} requires clarification - creating compound clarification state")
+
+                # Build compound clarification state
+                compound_clarification_state = build_compound_clarification(
+                    compound_state=compound_state,
+                    subquery_index=sub_query.index,
+                    clarification=clarification_needed.clarification
                 )
-                raise
+
+                # Raise compound clarification instead of regular clarification
+                raise CompoundClarificationRequired(compound_clarification_state)
 
             except Exception as e:
-                # Non-clarification errors: record and continue to next sub-query.
-                # This allows partial results to be returned for independent
-                # sub-queries when one fails with a hard error.
-                logger.error(
-                    f"[DSPy Pipeline] Sub-query {sub_query.index} failed: "
-                    f"{type(e).__name__}: {e}"
-                )
+                # Non-clarification errors: record and continue
+                logger.error(f"[DSPy Pipeline] Sub-query {sub_query.index} failed: {type(e).__name__}: {e}")
                 pending_subqueries.append({
                     "index": sub_query.index,
                     "query": sub_query.text,
@@ -969,13 +1123,62 @@ class IntentExtractionPipeline(dspy.Module):
                         "type": type(e).__name__,
                         "message": str(e),
                     },
+                    "status": "error"
                 })
 
-        return {
-            "type": "compound_query_results",
-            "original_query": decomposed.original_query,
-            "total_subqueries": len(decomposed.sub_queries),
-            "completed_subqueries": completed_subqueries,
-            "pending_subqueries": pending_subqueries,
-            "dependencies": dependencies,
-        }
+        # Check if compound query is complete
+        total_subqueries = len(decomposed.sub_queries)
+        completed_count = len(compound_state.completed_indices)
+
+        if completed_count == total_subqueries:
+            # All sub-queries completed - return final results
+            logger.info(f"[DSPy Pipeline] Compound query completed - {completed_count}/{total_subqueries} sub-queries done")
+            return {
+                "type": "compound_query_results",
+                "original_query": decomposed.original_query,
+                "total_subqueries": total_subqueries,
+                "completed_subqueries": completed_subqueries,
+                "pending_subqueries": pending_subqueries,
+                "dependencies": compound_state.dependencies,
+            }
+
+        # Check for remaining processable sub-queries after dependency resolution
+        remaining_processable = []
+        for sq in decomposed.sub_queries:
+            if sq.index not in compound_state.completed_indices:
+                # Check if dependencies are satisfied
+                if not sq.dependencies or all(dep in compound_state.completed_indices for dep in sq.dependencies):
+                    remaining_processable.append(sq)
+
+        if remaining_processable:
+            # Recursively process remaining sub-queries
+            logger.info(f"[DSPy Pipeline] Processing {len(remaining_processable)} additional sub-queries")
+            try:
+                return self._process_compound_query(
+                    decomposed=decomposed,
+                    current_date=current_date,
+                    previous_context=previous_context,
+                    overrides=overrides,
+                    request_id=request_id,
+                    session_id=session_id,
+                    compound_state=compound_state
+                )
+            except CompoundClarificationRequired:
+                # Let compound clarifications bubble up
+                raise
+        else:
+            # All remaining sub-queries are blocked - return partial results
+            logger.info(f"[DSPy Pipeline] Partial compound results - {completed_count}/{total_subqueries} completed, remaining blocked by dependencies")
+            return {
+                "type": "compound_partial_results",
+                "original_query": decomposed.original_query,
+                "total_subqueries": total_subqueries,
+                "completed_subqueries": completed_subqueries,
+                "pending_subqueries": pending_subqueries,
+                "dependencies": compound_state.dependencies,
+                "compound_state": {
+                    "request_id": compound_state.request_id,
+                    "session_id": compound_state.session_id,
+                    "completed_count": len(compound_state.completed_indices),
+                }
+            }

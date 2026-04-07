@@ -40,6 +40,44 @@ export async function healthCheck() {
  * Transform backend response to frontend ChatResponse format
  */
 function transformBackendResponse(backendResponse: any): ChatResponse {
+    // ADD DEBUG LINE
+    console.log("🔍 Raw backend response:", JSON.stringify(backendResponse, null, 2));
+
+    // Handle compound clarification request
+    if (backendResponse.type === "compound_clarification_required") {
+        return {
+            type: "compound_clarification_required",
+            original_query: backendResponse.original_query,
+            completed_subqueries: backendResponse.completed_subqueries,
+            pending_clarification: backendResponse.pending_clarification,
+            compound_state: backendResponse.compound_state,
+        };
+    }
+
+    // Handle compound partial results
+    if (backendResponse.type === "compound_partial_results") {
+        return {
+            type: "compound_partial_results",
+            original_query: backendResponse.original_query,
+            completed_subqueries: backendResponse.completed_subqueries,
+            pending_subqueries: backendResponse.pending_subqueries,
+            visual_spec: backendResponse.visual_spec,
+            compound_metadata: backendResponse.compound_metadata,
+        };
+    }
+
+    // Handle complete compound results
+    if (backendResponse.type === "compound_query_results") {
+        return {
+            type: "chart",
+            chartType: "compound_sections",
+            data: {
+                visual_spec: backendResponse.visual_spec,
+                refined_insights: backendResponse.refined_insights || null,
+            },
+        };
+    }
+
     // Handle clarification request
     if (backendResponse.clarification === true) {
         const questions = Array.isArray(backendResponse.clarification_message)
@@ -208,13 +246,51 @@ export async function retryQuery(
 }
 
 export async function clarify(payload: {
-    request_id: string;
-    answers: Record<string, any>;
+    request_id?: string;
+    answers?: Record<string, any>;
+    compound_state?: any;
+    clarification_answer?: any;
 }): Promise<{
     response: ChatResponse;
     raw: any;
     sessionId: string;
 }> {
+    // Handle compound clarifications
+    if (payload.compound_state && payload.clarification_answer !== undefined) {
+        console.log(`[Session] Sending compound clarification for request_id: ${payload.compound_state.request_id}`);
+
+        const res = await fetch(`${API_BASE}/clarify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                compound_state: payload.compound_state,
+                clarification_answer: payload.clarification_answer,
+            }),
+        });
+
+        const backendResponse = await res.json();
+
+        if (!res.ok) {
+            throw new Error(backendResponse.error || "Clarification failed");
+        }
+
+        // Update session ID if provided
+        if (backendResponse.session_id) {
+            setSessionId(backendResponse.session_id);
+        }
+
+        return {
+            response: transformBackendResponse(backendResponse),
+            raw: backendResponse,
+            sessionId: backendResponse.session_id || currentSessionId || "unknown",
+        };
+    }
+
+    // Handle regular clarifications
+    if (!payload.request_id || !payload.answers) {
+        throw new Error("Invalid clarification payload");
+    }
+
     console.log(`[Session] Sending clarification for request_id: ${payload.request_id}`);
 
     const res = await fetch(`${API_BASE}/clarify`, {

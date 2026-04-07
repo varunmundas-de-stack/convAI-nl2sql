@@ -18,6 +18,8 @@ class ChartType(str, Enum):
     HORIZONTAL_BAR = "horizontal_bar"
     GROUPED_BAR = "grouped_bar"
     MULTI_LINE = "multi_line"
+    COMPOUND_SECTIONS = "compound_sections"
+    COMPOUND_SECTIONS_PARTIAL = "compound_sections_partial"
 
 
 class EmphasisLevel(str, Enum):
@@ -115,3 +117,10 @@ class VisualSpec(BaseModel):
     metric: Optional[str] = None
     empty: bool = False
     trend_slope: Optional[float] = None
+
+    # Compound query specific fields
+    sections: Optional[list[dict[str, Any]]] = None
+    total_sections: Optional[int] = None
+    completed_sections: Optional[int] = None
+    pending_sections: Optional[int] = None
+    is_partial: Optional[bool] = None

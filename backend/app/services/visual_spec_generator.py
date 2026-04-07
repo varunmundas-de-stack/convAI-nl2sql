@@ -30,10 +30,87 @@ AXIS_TICK_COUNT = 5  # Target number of ticks for numeric axes
 
 
 from app.models.visual_spec import (
-    ChartType, EmphasisLevel, MarkerType, ColorPalette, 
-    DataSeries, SeriesConfig, PivotConfig, Axis, Marker, 
+    ChartType, EmphasisLevel, MarkerType, ColorPalette,
+    DataSeries, SeriesConfig, PivotConfig, Axis, Marker,
     InsightAnnotation, VisualSpec
 )
+
+# =============================================================================
+# COMPOUND VISUAL SPEC GENERATION
+# =============================================================================
+
+def generate_compound_visual_spec(
+    sections: list[dict[str, Any]],
+    chart_type: ChartType,
+    total_sections: int,
+    completed_sections: int,
+    pending_sections: int,
+    is_partial: bool = False,
+    title: str = "",
+) -> VisualSpec:
+    """
+    Generate a visual specification for compound queries (both complete and partial).
+
+    Args:
+        sections: List of section specs with visual_spec and status info
+        chart_type: Either COMPOUND_SECTIONS or COMPOUND_SECTIONS_PARTIAL
+        total_sections: Total number of sections (completed + pending)
+        completed_sections: Number of completed sections
+        pending_sections: Number of pending sections
+        is_partial: Whether this is a partial result
+        title: Overall title for the compound visualization
+
+    Returns:
+        VisualSpec for compound query visualization
+    """
+    logger.info(f"Generating compound visual spec: {chart_type}, {completed_sections}/{total_sections} sections")
+
+    annotations = []
+
+    if is_partial:
+        annotations.append(InsightAnnotation(
+            text=f"Showing {completed_sections} of {total_sections} results (partial)",
+            severity=Severity.MEDIUM,
+            position="header"
+        ))
+    else:
+        annotations.append(InsightAnnotation(
+            text=f"Completed analysis of {completed_sections} queries",
+            severity=Severity.LOW,
+            position="header"
+        ))
+
+    # Add annotations for pending sections if any
+    if pending_sections > 0:
+        pending_info = []
+        for section in sections:
+            if section.get("status") == "pending_dependencies":
+                pending_info.append(f"Section {section['subquery_index'] + 1} waiting for dependencies")
+            elif section.get("status") == "clarifying":
+                pending_info.append(f"Section {section['subquery_index'] + 1} needs clarification")
+            elif section.get("status") == "error":
+                pending_info.append(f"Section {section['subquery_index'] + 1} failed")
+
+        if pending_info:
+            annotations.append(InsightAnnotation(
+                text="; ".join(pending_info),
+                severity=Severity.MEDIUM,
+                position="footer"
+            ))
+
+    return VisualSpec(
+        chart_type=chart_type,
+        title=title or f"Compound Analysis ({completed_sections}/{total_sections} sections)",
+        sections=sections,
+        total_sections=total_sections,
+        completed_sections=completed_sections,
+        pending_sections=pending_sections,
+        is_partial=is_partial,
+        annotations=annotations,
+        total_rows=sum(len(section.get("data", [])) for section in sections if section.get("status") == "completed"),
+        empty=completed_sections == 0
+    )
+
 
 # =============================================================================
 # GENERATOR
@@ -49,12 +126,32 @@ def generate_visual_spec(
     comparison_data: Optional[list[dict[str, Any]]] = None,
     strategy: Optional[str] = None,
     intent: Optional[Any] = None,
+    sections: Optional[list[dict[str, Any]]] = None,
+    total_sections: Optional[int] = None,
+    completed_sections: Optional[int] = None,
+    pending_sections: Optional[int] = None,
+    is_partial: Optional[bool] = None,
 ) -> VisualSpec:
     """
     Generate a declarative visual specification based on query strategy.
+
+    Enhanced to support compound query visualization with progressive display.
     """
-    logger.info(f"Generating visual spec: {len(data)} rows, strategy={strategy}")
-    
+    logger.info(f"Generating visual spec: {len(data)} rows, strategy={strategy}, chart_type_hint={chart_type_hint}")
+
+    # Handle compound chart types
+    if chart_type_hint in ["compound_sections", "compound_sections_partial"]:
+        chart_type = ChartType.COMPOUND_SECTIONS_PARTIAL if chart_type_hint == "compound_sections_partial" else ChartType.COMPOUND_SECTIONS
+        return generate_compound_visual_spec(
+            sections=sections or [],
+            chart_type=chart_type,
+            total_sections=total_sections or 0,
+            completed_sections=completed_sections or 0,
+            pending_sections=pending_sections or 0,
+            is_partial=is_partial or False,
+            title=_make_title(query, insights)
+        )
+
     if not data:
         return VisualSpec(
             chart_type=ChartType.NUMBER_CARD,

@@ -16,7 +16,12 @@ import time
 from typing import Any, Optional
 
 from app.dspy_pipeline.config import get_dspy_pipeline
-from app.dspy_pipeline.clarification_tool import ClarificationRequired, MultipleClarificationsRequired
+from app.dspy_pipeline.clarification_tool import (
+    ClarificationRequired,
+    MultipleClarificationsRequired,
+    CompoundClarificationRequired,
+    CompoundClarificationState
+)
 from app.services.intent_errors import IntentIncompleteError
 from app.models.intent import Intent
 from datetime import date
@@ -172,53 +177,32 @@ def _handle_compound_query_results(compound_result: dict, start_time: float) -> 
     """
     Handle compound query results by converting them to a structured response.
 
+    Enhanced to support:
+    - compound_partial_results: Progressive display of completed sub-queries with pending ones
+    - compound_query_results: Complete results when all sub-queries are done
+
     For compound queries with partial completion, we need to decide how to handle:
     1. Completed sub-queries: Return their results
     2. Pending sub-queries with clarifications: Convert to IntentIncompleteError
-    3. Pending sub-queries with errors: Log and potentially fail
+    3. Pending sub-queries with errors or dependencies: Include in partial results
 
-    Current strategy: If any sub-query requires clarification, convert the first
-    clarification to IntentIncompleteError for the orchestrator to handle.
+    Current strategy: For partial results, return them immediately to show progress.
+    For clarifications, they're handled by CompoundClarificationRequired exception.
     """
     duration_ms = int((time.monotonic() - start_time) * 1000)
 
+    result_type = compound_result.get("type", "compound_query_results")
     completed = compound_result.get("completed_subqueries", [])
     pending = compound_result.get("pending_subqueries", [])
 
-    logger.info(f" [DSPy Integration] Compound query: {len(completed)} completed, {len(pending)} pending")
+    logger.info(f" [DSPy Integration] {result_type.replace('_', ' ').title()}: {len(completed)} completed, {len(pending)} pending")
 
-    # Check for clarifications in pending sub-queries
-    clarification_subquery = None
-    for subquery in pending:
-        if "clarification" in subquery:
-            clarification_subquery = subquery
-            break
-
-    if clarification_subquery:
-        # Convert first clarification to IntentIncompleteError
-        clarification = clarification_subquery["clarification"]
-
-        logger.info(f" [DSPy Integration] Sub-query {clarification_subquery['index']} requires clarification")
-        logger.info(f" [DSPy Integration] Question: {clarification['question']}")
-
-        partial_intent = {
-            "compound_query_state": compound_result,
-            "dspy_clarification_request_id": clarification["request_id"],
-            "dspy_clarification_options": clarification["options"],
-            "dspy_clarification_subquery_index": clarification_subquery["index"]
-        }
-
-        raise IntentIncompleteError(
-            missing_fields=[clarification["field"]],
-            clarification_message=clarification["question"],
-            partial_intent=partial_intent,
-            allowed_values=[str(opt) for opt in clarification["options"]]
-        )
-
-    # No clarifications needed - return compound result as-is
-    # This will be a new type of response that the orchestrator needs to handle
-    logger.info(f" [DSPy Integration] ✅ Compound query completed in {duration_ms}ms")
-    logger.info(f" [DSPy Integration] All {len(completed)} sub-queries completed successfully")
+    # For partial results, we return them immediately to show progressive display
+    # The orchestrator will handle them appropriately
+    if result_type == "compound_partial_results":
+        logger.info(" [DSPy Integration] Returning partial compound results for progressive display")
+    else:
+        logger.info(" [DSPy Integration] Returning complete compound results")
 
     return compound_result
 
@@ -275,9 +259,10 @@ def extract_intent(
             overrides=processed_overrides,
         )
 
-        # Check if this is a compound query result
-        if isinstance(result, dict) and result.get("type") == "compound_query_results":
-            logger.info(" [DSPy Integration] Compound query detected - processing results")
+        # Check if this is a compound query result (including partial results)
+        if isinstance(result, dict) and result.get("type") in ["compound_query_results", "compound_partial_results"]:
+            result_type = result.get("type")
+            logger.info(f" [DSPy Integration] {result_type.replace('_', ' ').title()} detected - processing results")
             return _handle_compound_query_results(result, start_time)
 
         # Single query result - convert to dict format expected by downstream code
@@ -321,6 +306,51 @@ def extract_intent(
             "dspy_clarification_request_id": e.clarification.request_id,
             "dspy_clarification_options": e.clarification.options
         }
+
+        # Convert to IntentIncompleteError format that orchestrator expects
+        raise IntentIncompleteError(
+            missing_fields=missing_fields,
+            clarification_message=clarification_message,
+            partial_intent=partial_intent,
+            allowed_values=allowed_values
+        ) from e
+
+    except CompoundClarificationRequired as e:
+        # Convert DSPy compound clarification exception to the format expected by orchestrator
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info(" [DSPy Integration] ======================================")
+        logger.info(f" [DSPy Integration] Compound clarification required after {duration_ms}ms")
+        logger.info(f" [DSPy Integration] Compound Request ID: {e.compound_state.request_id}")
+        logger.info(f" [DSPy Integration] Completed sub-queries: {len(e.compound_state.completed_indices)}")
+        logger.info(f" [DSPy Integration] Total sub-queries: {len(e.compound_state.decomposed_queries)}")
+        if e.compound_state.pending_clarification:
+            pending_clarification = e.compound_state.pending_clarification
+            logger.info(f" [DSPy Integration] Sub-query {pending_clarification.subquery_index} needs clarification")
+            logger.info(f" [DSPy Integration] Question: {pending_clarification.clarification.question}")
+            logger.info(f" [DSPy Integration] Field: {pending_clarification.clarification.field}")
+        logger.info(" [DSPy Integration] ======================================")
+
+        # Create partial intent with compound state
+        partial_intent = {
+            "compound_query_state": e.compound_state.model_dump(),
+            "dspy_compound_clarification": True
+        }
+
+        # Extract clarification details for compatibility
+        if e.compound_state.pending_clarification:
+            clarification = e.compound_state.pending_clarification.clarification
+            missing_fields = [clarification.field]
+            clarification_message = f"For sub-query {e.compound_state.pending_clarification.subquery_index + 1}: {clarification.question}"
+            allowed_values = [str(opt) for opt in clarification.options]
+
+            partial_intent.update({
+                "dspy_clarification_request_id": clarification.request_id,
+                "dspy_clarification_options": clarification.options
+            })
+        else:
+            missing_fields = ["unknown"]
+            clarification_message = "Compound query requires clarification"
+            allowed_values = []
 
         # Convert to IntentIncompleteError format that orchestrator expects
         raise IntentIncompleteError(

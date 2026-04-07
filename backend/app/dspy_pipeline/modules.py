@@ -866,9 +866,11 @@ class MetricsModule(dspy.Module):
                                 context = f"Resolving metric term {resolved_count + 1} of {total_terms}: '{first_pending}'"
 
                                 # Get term-specific candidates by running LLM scoped to just this term
+                                # Create a focused query context for this specific term to avoid confusion
+                                focused_query = f"Show {first_pending} data"
                                 term_classified = [t.model_dump() for t in classified_query.classified_terms if t.role == "METRIC" and t.term == first_pending]
                                 term_prediction = self.predict(
-                                    original_query=classified_query.original_query,
+                                    original_query=focused_query,  # Use focused query instead of full query
                                     classified_terms=json.dumps(term_classified),
                                     sales_scope=sales_scope,
                                     available_metrics=self._catalog_str,
@@ -1196,9 +1198,11 @@ class DimensionsModule(dspy.Module):
                                 context = f"Resolving dimension term {resolved_count + 1} of {total_terms}: '{first_pending}'"
 
                                 # Get term-specific candidates by running LLM scoped to just this term
+                                # Create a focused query context for this specific term to avoid confusion
+                                focused_query = f"Show data by {first_pending}"
                                 term_classified = [t.model_dump() for t in classified_query.classified_terms if t.role in ("DIMENSION", "FILTER_VALUE") and t.term == first_pending]
                                 term_prediction = self.predict(
-                                    original_query=classified_query.original_query,
+                                    original_query=focused_query,  # Use focused query instead of full query
                                     classified_terms=json.dumps(term_classified),
                                     sales_scope=sales_scope,
                                     available_dimensions=catalog_str,

@@ -10,6 +10,7 @@ export function useConversation() {
     const [messages, setMessages] = useState<ConversationMessage[]>([]);
     const [pendingClarification, setPendingClarification] = useState<any>(null);
     const [backendResponse, setBackendResponse] = useState<any>(null);
+    const [compoundState, setCompoundState] = useState<any>(null);
 
     function addUserMessage(content: string) {
         setMessages((m) => [
@@ -26,20 +27,51 @@ export function useConversation() {
     }
 
     function handleResponse(response: ChatResponse, rawBackendResponse?: any) {
+        // ADD DEBUG LINE
+        console.log("💬 Conversation handling response:", response.type, response);
+
         // Store the raw backend response for clarification
         if (rawBackendResponse) {
             setBackendResponse(rawBackendResponse);
         }
 
+        // Handle compound clarifications
+        if (response.type === "compound_clarification_required") {
+            setPendingClarification(response);
+            setCompoundState(response.compound_state);
+
+            const clarificationText = `For "${response.pending_clarification.subquery_text}": ${response.pending_clarification.clarification.question}`;
+            addAssistantMessage(clarificationText, response, rawBackendResponse);
+            return;
+        }
+
+        // Handle regular clarifications
         if (response.type === "clarification_required") {
             setPendingClarification(response);
             addAssistantMessage(response.question, response, rawBackendResponse);
             return;
         }
 
+        // Handle compound partial results
+        if (response.type === "compound_partial_results") {
+            // Don't reset clarification state for partial results - more may be coming
+            const completedCount = response.completed_subqueries.length;
+            const totalCount = response.compound_metadata.total_subqueries;
+            const pendingCount = response.pending_subqueries.length;
+
+            let content = `Showing partial results (${completedCount}/${totalCount} sections completed)`;
+            if (pendingCount > 0) {
+                content += `. ${pendingCount} section${pendingCount !== 1 ? 's' : ''} still processing...`;
+            }
+
+            addAssistantMessage(content, response, rawBackendResponse);
+            return;
+        }
+
         // Reset clarification mode after successful answer
         setPendingClarification(null);
         setBackendResponse(null);
+        setCompoundState(null);
 
         if (response.type === "text") {
             addAssistantMessage(response.content, response, rawBackendResponse);
@@ -58,12 +90,14 @@ export function useConversation() {
         setMessages([]);
         setPendingClarification(null);
         setBackendResponse(null);
+        setCompoundState(null);
     }
 
     return {
         messages,
         pendingClarification,
         backendResponse,
+        compoundState,
         addUserMessage,
         handleResponse,
         clearMessages,

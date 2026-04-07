@@ -19,6 +19,7 @@ export default function ChatWindow() {
         messages,
         pendingClarification,
         backendResponse,
+        compoundState,
         addUserMessage,
         handleResponse,
         clearMessages,
@@ -68,16 +69,27 @@ export default function ChatWindow() {
         try {
             let result;
 
-            if (pendingClarification && backendResponse) {
-                // In clarification mode - parse user input into structured format
-                const missingFields = backendResponse.missing_fields || [];
-                const answers = parseClarificationAnswers(userInput, missingFields);
+            if (pendingClarification) {
+                // Handle compound clarifications
+                if (pendingClarification.type === "compound_clarification_required" && compoundState) {
+                    result = await clarify({
+                        compound_state: compoundState,
+                        clarification_answer: userInput,
+                    });
+                } else if (backendResponse) {
+                    // Regular clarifications
+                    const missingFields = backendResponse.missing_fields || [];
+                    const answers = parseClarificationAnswers(userInput, missingFields);
 
-                result = await clarify({
-                    request_id: backendResponse.request_id,
-                    answers: answers,
-                });
+                    result = await clarify({
+                        request_id: backendResponse.request_id,
+                        answers: answers,
+                    });
+                } else {
+                    throw new Error("Missing backend response for clarification");
+                }
             } else {
+                // Regular query
                 result = await sendQuery(userInput);
                 // Update session ID from response
                 if (result.sessionId) {
@@ -98,7 +110,7 @@ export default function ChatWindow() {
     }
 
     async function submitClarification(answerValue: string) {
-        if (isLoading || !isBackendAvailable || !pendingClarification || !backendResponse) return;
+        if (isLoading || !isBackendAvailable || !pendingClarification) return;
 
         // Show friendly message to user
         const displayValue = answerValue.replace(/_/g, " ");
@@ -107,13 +119,28 @@ export default function ChatWindow() {
         setIsLoading(true);
 
         try {
-            const missingFields = backendResponse.missing_fields || [];
-            const answers = parseClarificationAnswers(answerValue, missingFields);
+            let result;
 
-            const result = await clarify({
-                request_id: backendResponse.request_id,
-                answers: answers,
-            });
+            // Handle compound clarifications
+            if (pendingClarification.type === "compound_clarification_required" && compoundState) {
+                result = await clarify({
+                    compound_state: compoundState,
+                    clarification_answer: answerValue,
+                });
+            } else {
+                // Regular clarification handling
+                if (!backendResponse) {
+                    throw new Error("Missing backend response for clarification");
+                }
+
+                const missingFields = backendResponse.missing_fields || [];
+                const answers = parseClarificationAnswers(answerValue, missingFields);
+
+                result = await clarify({
+                    request_id: backendResponse.request_id,
+                    answers: answers,
+                });
+            }
 
             handleResponse(result.response, result.raw);
         } catch (error) {

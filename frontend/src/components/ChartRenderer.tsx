@@ -31,6 +31,11 @@ interface VisualSpec {
     };
     data?: any[];
     x_axis_key?: string;
+    sections?: any[];
+    total_sections?: number;
+    completed_sections?: number;
+    pending_sections?: number;
+    is_partial?: boolean;
 }
 
 interface Axis {
@@ -85,6 +90,13 @@ interface ChartRendererProps {
 export default function ChartRenderer({ visual_spec, refined_insights }: ChartRendererProps) {
     const [isClient, setIsClient] = useState(false);
     const [viewMode, setViewMode] = useState<"chart" | "table">("chart");
+
+    // ADD DEBUG LINE
+    console.log("📊 ChartRenderer received:", {
+        chart_type: visual_spec?.chart_type,
+        sections: visual_spec?.sections?.length,
+        visual_spec: visual_spec
+    });
 
     useEffect(() => {
         setIsClient(true);
@@ -160,7 +172,10 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
         );
     }
 
-    const isChartType = visual_spec.chart_type !== "number_card" && visual_spec.chart_type !== "table";
+    const isChartType = visual_spec.chart_type !== "number_card" &&
+                      visual_spec.chart_type !== "table" &&
+                      visual_spec.chart_type !== "compound_sections" &&
+                      visual_spec.chart_type !== "compound_sections_partial";
     const { chart_type, title, subtitle, primary_value, primary_label, secondary_value, secondary_label, direction, trend_slope } = visual_spec;
 
     const keyRisksEntries = Object.entries(refined_insights?.key_risks || {});
@@ -361,12 +376,151 @@ export default function ChartRenderer({ visual_spec, refined_insights }: ChartRe
                         <LineChartRenderer spec={visual_spec} />
                     ) : chart_type === "pie" ? (
                         <PieChartRenderer spec={visual_spec} />
+                    ) : chart_type === "compound_sections" || chart_type === "compound_sections_partial" ? (
+                        <CompoundSectionsRenderer spec={visual_spec} />
                     ) : chart_type !== "number_card" ? (
                         <div className="bg-white p-2 rounded-lg border border-gray-200">
                             <p className="text-gray-500">Unsupported chart type: {chart_type}</p>
                         </div>
                     ) : null}
                 </>
+            )}
+        </div>
+    );
+}
+
+// ─── Compound Sections Renderer ─────────────────────────────────────────────
+
+interface CompoundSectionsRendererProps {
+    spec: VisualSpec;
+}
+
+function CompoundSectionsRenderer({ spec }: CompoundSectionsRendererProps) {
+    const isPartial = spec.chart_type === "compound_sections_partial";
+    const { sections = [], completed_sections = 0, pending_sections = 0, total_sections = 0 } = spec;
+
+    return (
+        <div className="flex flex-col gap-6 mt-4">
+            {/* Progress indicator for partial results */}
+            {isPartial && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-medium text-blue-900">
+                            Progress: {completed_sections} of {total_sections} sections complete
+                        </h4>
+                        <div className="text-xs text-blue-600">
+                            {pending_sections} pending
+                        </div>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-2">
+                        <div
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${(completed_sections / total_sections) * 100}%` }}
+                        ></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Render each section */}
+            {sections.map((section: any, idx: number) => {
+                const status = section.status || "completed";
+                const isCompleted = status === "completed";
+                const isPending = !isCompleted;
+
+                return (
+                    <div
+                        key={idx}
+                        className={`border rounded-xl overflow-hidden shadow-sm bg-white ${
+                            isPending ? "border-yellow-200 bg-yellow-50" : "border-gray-200"
+                        }`}
+                    >
+                        <div className={`border-b px-4 py-3 ${
+                            isPending ? "bg-yellow-100 border-yellow-200" : "bg-gray-50 border-gray-200"
+                        }`}>
+                            <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                                <span className={`flex items-center justify-center w-5 h-5 rounded-full text-[10px] ${
+                                    isCompleted ? "bg-green-100 text-green-700" :
+                                    status === "clarifying" ? "bg-yellow-100 text-yellow-700" :
+                                    status === "error" ? "bg-red-100 text-red-700" :
+                                    "bg-gray-100 text-gray-700"
+                                }`}>
+                                    {isCompleted ? "✓" : status === "clarifying" ? "?" :
+                                     status === "error" ? "✗" : idx + 1}
+                                </span>
+                                {section.subquery_text}
+                            </h4>
+                            {/* Status indicator */}
+                            {isPending && (
+                                <div className="mt-2 text-xs text-gray-600">
+                                    {status === "clarifying" && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-200 text-yellow-800 rounded-full">
+                                            <div className="w-2 h-2 bg-yellow-600 rounded-full animate-pulse"></div>
+                                            Needs clarification
+                                        </span>
+                                    )}
+                                    {status === "pending_dependencies" && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-200 text-gray-700 rounded-full">
+                                            <div className="w-2 h-2 bg-gray-500 rounded-full animate-pulse"></div>
+                                            Waiting for dependencies
+                                        </span>
+                                    )}
+                                    {status === "error" && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-200 text-red-800 rounded-full">
+                                            <div className="w-2 h-2 bg-red-600 rounded-full"></div>
+                                            Error occurred
+                                        </span>
+                                    )}
+                                    {section.reason && (
+                                        <div className="mt-1 text-xs text-gray-500">{section.reason}</div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-4">
+                            {isCompleted && section.visual_spec ? (
+                                <ChartRenderer visual_spec={section.visual_spec} />
+                            ) : isPending ? (
+                                <div className="flex items-center justify-center h-32 text-gray-400">
+                                    {status === "clarifying" ? (
+                                        <div className="text-center">
+                                            <div className="w-8 h-8 border-2 border-yellow-300 border-t-yellow-600 rounded-full animate-spin mx-auto mb-2"></div>
+                                            <p className="text-sm">Waiting for clarification...</p>
+                                        </div>
+                                    ) : status === "pending_dependencies" ? (
+                                        <div className="text-center">
+                                            <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mx-auto mb-2"></div>
+                                            <p className="text-sm">Processing dependencies...</p>
+                                        </div>
+                                    ) : status === "error" ? (
+                                        <div className="text-center text-red-600">
+                                            <div className="text-2xl mb-2">⚠️</div>
+                                            <p className="text-sm">Failed to process</p>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center">
+                                            <div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
+                                            <p className="text-sm">Processing...</p>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-center h-32 text-gray-400">
+                                    <p className="text-sm">No data available</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+
+            {/* Summary footer for partial results */}
+            {isPartial && pending_sections > 0 && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                    <p className="text-sm text-gray-600">
+                        {completed_sections > 0 && "Partial results shown above. "}
+                        {pending_sections} section{pending_sections !== 1 ? "s" : ""} still processing...
+                    </p>
+                </div>
             )}
         </div>
     );

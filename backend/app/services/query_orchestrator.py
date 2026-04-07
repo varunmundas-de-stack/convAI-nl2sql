@@ -33,6 +33,11 @@ from app.utils.tracer import get_tracer
 from app.services.intent_extractor import (
     extract_intent, ExtractionError, LLMCallError, LLMTimeoutError,
 )
+from app.dspy_pipeline.clarification_tool import (
+    CompoundClarificationRequired,
+    CompoundClarificationState,
+    format_compound_clarification_response
+)
 from app.services.intent_errors import IntentValidationError, IntentIncompleteError
 from app.services.intent_validator import validate_intent
 from app.services.intent_normalizer import normalize_intent, patch_trend_intent
@@ -142,6 +147,8 @@ class PipelineContext:
     # compound query support
     is_compound_query: bool = False
     compound_metadata: Optional[Dict[str, Any]] = None
+    compound_clarification_state: Optional[CompoundClarificationState] = None
+    is_compound_partial: bool = False
 
     # error
     error: Optional[OrchestratorError] = None
@@ -193,6 +200,8 @@ class PipelineContext:
             "clarification_answers": self.clarification_answers,
             "is_compound_query": self.is_compound_query,
             "compound_metadata": self.compound_metadata,
+            "is_compound_partial": self.is_compound_partial,
+            "has_compound_clarification_state": self.compound_clarification_state is not None,
             "error": self.error.to_dict() if self.error else None,
         }
 
@@ -269,14 +278,25 @@ def _get_catalog() -> CatalogManager:
 
 def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext) -> dict:
     """
-    Handle compound query response by converting completed sub-queries into a unified response.
+    Handle compound query response by processing each sub-query through the full pipeline.
 
-    This function takes the compound query result and creates a response format
-    that combines all completed sub-queries into a structured format suitable
-    for the frontend.
+    Enhanced to support:
+    - compound_partial_results: Progressive display of completed sub-queries
+    - compound_clarification_required: Clarifications that preserve partial state
+
+    This function takes compound query results and runs each completed sub-query
+    through the full pipeline (validation, cube query, execution, insights) to
+    generate complete results for the frontend.
     """
+    result_type = compound_result.get("type", "compound_query_results")
     completed_subqueries = compound_result.get("completed_subqueries", [])
     pending_subqueries = compound_result.get("pending_subqueries", [])
+
+    logger.info(f"Processing {len(completed_subqueries)} completed sub-queries through full pipeline")
+
+    # Mark if this is a partial result
+    if result_type == "compound_partial_results":
+        ctx.is_compound_partial = True
 
     # Build combined results from completed sub-queries
     combined_results = []
@@ -285,46 +305,210 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
 
     for completed in completed_subqueries:
         subquery_result = completed.get("result", {})
+        subquery_index = completed["index"]
+        subquery_text = completed["query"]
 
-        # Add section header for this sub-query
-        section_data = {
-            "subquery_index": completed["index"],
-            "subquery_text": completed["query"],
-            "data": subquery_result.get("data", []),
-            "visual_spec": subquery_result.get("visual_spec"),
-            "insights": subquery_result.get("insights")
-        }
+        logger.info(f"Processing sub-query {subquery_index}: '{subquery_text}'")
+
+        try:
+            # Create a new pipeline context for this sub-query
+            subquery_ctx = PipelineContext(
+                query=subquery_text,
+                session_id=ctx.session_id,
+                original_query=ctx.original_query,
+                skip_reset_overrides=True  # Don't reset clarification state
+            )
+
+            # Set the extracted intent from the compound query
+            subquery_ctx.raw_intent = subquery_result
+            subquery_ctx.stage = Stage.INTENT_EXTRACTED
+
+            # Run the sub-query through the remaining pipeline steps (2-8)
+            # Skip step 0 (load_qco) and step 1 (extract_intent) since we already have the intent
+
+            try:
+                # Step 2: Drill merge
+                step_drill_merge(subquery_ctx)
+                logger.info(f"Sub-query {subquery_index}: Drill merge completed")
+
+                # Step 3: Validate intent
+                step_validate_intent(subquery_ctx)
+                logger.info(f"Sub-query {subquery_index}: Intent validation completed")
+
+                # Step 4: Build query
+                step_build_query(subquery_ctx)
+                logger.info(f"Sub-query {subquery_index}: Query building completed")
+
+                # Step 5: Execute query
+                step_execute_query(subquery_ctx)
+                logger.info(f"Sub-query {subquery_index}: Query execution completed")
+
+                # Step 6: Generate insights and visual spec
+                step_gen_insights(subquery_ctx)
+                logger.info(f"Sub-query {subquery_index}: Insights generation completed")
+
+                # Mark as successful if we made it this far without errors
+                if not subquery_ctx.error:
+                    subquery_ctx.success = True
+                    subquery_ctx.stage = Stage.COMPLETED
+                    logger.info(f"Sub-query {subquery_index}: Pipeline completed successfully")
+
+            except Exception as step_error:
+                logger.error(f"Sub-query {subquery_index} failed at pipeline step: {type(step_error).__name__}: {step_error}")
+
+                # Check which step failed by examining the context
+                if subquery_ctx.error:
+                    logger.error(f"Sub-query {subquery_index} context error: {subquery_ctx.error.error_type}: {subquery_ctx.error.message}")
+
+                raise step_error
+
+            # Check if the pipeline succeeded
+            if subquery_ctx.error:
+                logger.error(f"Sub-query {subquery_index} has error: {subquery_ctx.error.error_type}: {subquery_ctx.error.message}")
+                raise Exception(f"{subquery_ctx.error.error_type}: {subquery_ctx.error.message}")
+
+            # Check if we have the minimum required outputs for a successful sub-query
+            if subquery_ctx.visual_spec and subquery_ctx.data is not None:
+                # Force success flag if we have visual spec and data, regardless of what pipeline steps did
+                subquery_ctx.success = True
+                logger.info(f"Sub-query {subquery_index}: Verified success with visual_spec and data")
+
+            if subquery_ctx.success and subquery_ctx.visual_spec:
+                # Convert Pydantic models to dictionaries for JSON serialization
+                visual_spec_dict = subquery_ctx.visual_spec.model_dump() if hasattr(subquery_ctx.visual_spec, 'model_dump') else subquery_ctx.visual_spec
+                insights_dict = None
+                if subquery_ctx.refined_insights:
+                    insights_dict = subquery_ctx.refined_insights.model_dump() if hasattr(subquery_ctx.refined_insights, 'model_dump') else subquery_ctx.refined_insights
+                elif subquery_ctx.insights:
+                    insights_dict = subquery_ctx.insights.model_dump() if hasattr(subquery_ctx.insights, 'model_dump') else subquery_ctx.insights
+
+                section_data = {
+                    "subquery_index": subquery_index,
+                    "subquery_text": subquery_text,
+                    "data": subquery_ctx.data or [],
+                    "visual_spec": visual_spec_dict,
+                    "insights": insights_dict,
+                    "status": "completed"
+                }
+
+                logger.info(f"Sub-query {subquery_index} completed successfully with {len(subquery_ctx.data or [])} rows")
+            else:
+                # Pipeline failed but didn't raise exception
+                error_msg = "Pipeline processing failed"
+                if subquery_ctx.error:
+                    error_msg = f"{subquery_ctx.error.error_type}: {subquery_ctx.error.message}"
+                else:
+                    # No explicit error, check what's missing
+                    missing_parts = []
+                    if not subquery_ctx.success:
+                        missing_parts.append("success=False")
+                    if not subquery_ctx.visual_spec:
+                        missing_parts.append("no visual_spec")
+                    if not subquery_ctx.data:
+                        missing_parts.append("no data")
+
+                    error_msg = f"Pipeline incomplete: {', '.join(missing_parts)}"
+                    logger.error(f"Sub-query {subquery_index} pipeline incomplete: success={subquery_ctx.success}, stage={subquery_ctx.stage}, visual_spec={subquery_ctx.visual_spec is not None}, data_rows={len(subquery_ctx.data or [])}")
+
+                section_data = {
+                    "subquery_index": subquery_index,
+                    "subquery_text": subquery_text,
+                    "data": [],
+                    "visual_spec": {
+                        "chart_type": "bar",
+                        "title": f"Error: {subquery_text}",
+                        "empty": True,
+                        "annotations": [{
+                            "text": error_msg,
+                            "severity": "high",
+                            "position": "header"
+                        }]
+                    },
+                    "insights": None,
+                    "status": "error"
+                }
+
+                logger.warning(f"Sub-query {subquery_index} failed: {error_msg}")
+
+        except Exception as e:
+            logger.error(f"Failed to process sub-query {subquery_index}: {e}")
+
+            # Create error section
+            section_data = {
+                "subquery_index": subquery_index,
+                "subquery_text": subquery_text,
+                "data": [],
+                "visual_spec": {
+                    "chart_type": "bar",
+                    "title": f"Error: {subquery_text}",
+                    "empty": True,
+                    "annotations": [{
+                        "text": f"Processing failed: {str(e)}",
+                        "severity": "high",
+                        "position": "header"
+                    }]
+                },
+                "insights": None,
+                "status": "error"
+            }
+
         combined_results.append(section_data)
 
         # Collect insights and visual specs
-        if subquery_result.get("insights"):
+        if section_data.get("insights"):
             combined_insights.append({
-                "subquery_index": completed["index"],
-                "subquery_text": completed["query"],
-                "insights": subquery_result["insights"]
+                "subquery_index": subquery_index,
+                "subquery_text": subquery_text,
+                "insights": section_data["insights"]
             })
 
-        if subquery_result.get("visual_spec"):
+        if section_data.get("visual_spec"):
             visual_specs.append({
-                "subquery_index": completed["index"],
-                "subquery_text": completed["query"],
-                "visual_spec": subquery_result["visual_spec"]
+                "subquery_index": subquery_index,
+                "subquery_text": subquery_text,
+                "visual_spec": section_data["visual_spec"],
+                "status": section_data["status"]
             })
+
+    # Add pending sub-queries to visual specs for progress display
+    for pending in pending_subqueries:
+        pending_status = pending.get("status", "pending")
+        visual_specs.append({
+            "subquery_index": pending["index"],
+            "subquery_text": pending["query"],
+            "visual_spec": None,
+            "status": pending_status,
+            "reason": pending.get("reason", "Pending processing"),
+            "blocked_by": pending.get("blocked_by", [])
+        })
+
+    # Determine chart type based on result type
+    if result_type == "compound_partial_results":
+        chart_type = "compound_sections_partial"
+        status_summary = f"Showing {len(completed_subqueries)} of {len(completed_subqueries) + len(pending_subqueries)} results (partial)"
+    else:
+        chart_type = "compound_sections"
+        status_summary = f"Analysis completed for {len(completed_subqueries)} of {len(completed_subqueries) + len(pending_subqueries)} queries"
 
     # Create compound visual spec that represents multiple sections
     compound_visual_spec = {
-        "chart_type": "compound_sections",
+        "chart_type": chart_type,
         "sections": visual_specs,
-        "total_sections": len(completed_subqueries),
-        "pending_sections": len(pending_subqueries)
+        "total_sections": len(completed_subqueries) + len(pending_subqueries),
+        "completed_sections": len(completed_subqueries),
+        "pending_sections": len(pending_subqueries),
+        "is_partial": result_type == "compound_partial_results"
     }
 
     # Create compound insights
     compound_insights = {
         "type": "compound_insights",
         "sections": combined_insights,
-        "summary": f"Analysis completed for {len(completed_subqueries)} of {len(completed_subqueries) + len(pending_subqueries)} queries"
+        "summary": status_summary,
+        "is_partial": result_type == "compound_partial_results"
     }
+
+    logger.info(f"Compound query processing complete: {len(combined_results)} sections with data")
 
     return {
         "results": combined_results,
@@ -338,6 +522,75 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
             "pending_subqueries": pending_subqueries
         }
     }
+
+
+def resume_compound_clarification(
+    compound_state: CompoundClarificationState,
+    clarification_answer: Any,
+    session_id: Optional[str] = None
+) -> PipelineContext:
+    """
+    Resume compound query processing after clarification is provided.
+
+    Args:
+        compound_state: The compound clarification state from when the query was suspended
+        clarification_answer: The user's answer to the clarification
+        session_id: Session ID for the request
+
+    Returns:
+        PipelineContext with the resumed compound query results
+    """
+    from app.dspy_pipeline.pipeline import IntentExtractionPipeline
+
+    try:
+        # Create pipeline and resume from clarification
+        pipeline = IntentExtractionPipeline()
+        result = pipeline.resume_compound_query_from_clarification(
+            compound_state=compound_state,
+            clarification_answer=clarification_answer,
+            current_date=None,
+            overrides={}
+        )
+
+        # Create context to wrap the result
+        ctx = PipelineContext(
+            query=compound_state.pending_clarification.subquery_text if compound_state.pending_clarification else "",
+            session_id=session_id,
+            request_id=compound_state.request_id
+        )
+
+        if isinstance(result, CompoundClarificationState):
+            # Another clarification is needed
+            ctx.compound_clarification_state = result
+            ctx.is_compound_query = True
+            ctx.clarification = True
+            ctx.compound_metadata = format_compound_clarification_response(result)
+            ctx.stage = Stage.CLARIFICATION_REQUESTED
+        elif isinstance(result, dict):
+            # Compound results are ready
+            ctx.is_compound_query = True
+            ctx.raw_intent = result
+
+            compound_response = _handle_compound_query_response(result, ctx)
+            ctx.data = compound_response.get("results", [])
+            ctx.visual_spec = compound_response.get("visual_spec")
+            ctx.insights = compound_response.get("insights")
+            ctx.compound_metadata = compound_response.get("compound_metadata")
+            ctx.success = True
+            ctx.stage = Stage.COMPLETED
+
+        ctx.duration_ms = ctx.elapsed_ms()
+        return ctx
+
+    except Exception as e:
+        logger.error(f"Error resuming compound clarification: {e}")
+        ctx = PipelineContext(
+            query=compound_state.pending_clarification.subquery_text if compound_state.pending_clarification else "",
+            session_id=session_id,
+            request_id=compound_state.request_id
+        )
+        ctx.fail(Stage.INTENT_EXTRACTED, "CompoundResumptionError", str(e))
+        return ctx
 
 
 # =============================================================================
@@ -439,8 +692,10 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
                 logger.warning(f"Failed to capture resolved terms: {e}")
 
         # Check if this is a compound query result
-        if isinstance(raw_intent, dict) and raw_intent.get("type") == "compound_query_results":
-            logger.info("Compound query detected - handling structured response")
+        if isinstance(raw_intent, dict) and raw_intent.get("type") in ["compound_query_results", "compound_partial_results"]:
+            result_type = raw_intent.get("type")
+            logger.info(f"{result_type.replace('_', ' ').title()} detected - handling structured response")
+
             ctx.raw_intent = raw_intent
             ctx.is_compound_query = True
 
@@ -453,17 +708,22 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
             ctx.success = True
             ctx.stage = Stage.COMPLETED
             ctx.duration_ms = ctx.elapsed_ms()
-            raise _Halt  # ← stop pipeline here, skip validate/build/execute steps
 
             _span_set(span,
                 output_compound_query=True,
+                output_is_partial=result_type == "compound_partial_results",
                 output_subqueries_count=raw_intent.get("total_subqueries", 0),
                 output_completed_count=len(raw_intent.get("completed_subqueries", [])),
                 output_pending_count=len(raw_intent.get("pending_subqueries", [])),
                 output_value=raw_intent,
             )
-            logger.info(f"Compound query processed: {len(raw_intent.get('completed_subqueries', []))} completed, {len(raw_intent.get('pending_subqueries', []))} pending")
-            return
+
+            if result_type == "compound_partial_results":
+                logger.info(f"Compound partial results processed: {len(raw_intent.get('completed_subqueries', []))} completed, {len(raw_intent.get('pending_subqueries', []))} pending")
+            else:
+                logger.info(f"Compound query processed: {len(raw_intent.get('completed_subqueries', []))} completed, {len(raw_intent.get('pending_subqueries', []))} pending")
+
+            raise _Halt  # ← stop pipeline here, skip validate/build/execute steps
 
         # Single query result - continue with normal processing
         ctx.raw_intent = raw_intent
@@ -493,6 +753,38 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
         ctx.stage = Stage.CLARIFICATION_REQUESTED
         ctx.duration_ms = ctx.elapsed_ms()
         _span_set(span, output_clarification_requested=True, output_missing_fields=str(e.missing_fields))
+        raise _Halt
+
+    except CompoundClarificationRequired as e:
+        logger.info(f"Compound query clarification required: {e}")
+
+        # Store compound clarification state
+        ctx.compound_clarification_state = e.compound_state
+        ctx.is_compound_query = True
+        ctx.clarification = True
+
+        # Format compound clarification response
+        clarification_response = format_compound_clarification_response(e.compound_state)
+
+        # Extract clarification details for context
+        pending_clarification = e.compound_state.pending_clarification
+        if pending_clarification:
+            clarification_obj = pending_clarification.clarification
+            ctx.missing_fields = [clarification_obj.field]
+            ctx.clarification_message = clarification_obj.question
+            ctx.allowed_values = clarification_obj.options
+
+        # Store the complete clarification response
+        ctx.compound_metadata = clarification_response
+
+        ctx.stage = Stage.CLARIFICATION_REQUESTED
+        ctx.duration_ms = ctx.elapsed_ms()
+        _span_set(span,
+            output_compound_clarification_requested=True,
+            output_subquery_index=pending_clarification.subquery_index if pending_clarification else -1,
+            output_completed_count=len(e.compound_state.completed_indices),
+            output_total_subqueries=len(e.compound_state.decomposed_queries)
+        )
         raise _Halt
 
     except LLMTimeoutError as e:

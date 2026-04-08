@@ -520,3 +520,69 @@ def validate_gepa_setup() -> Dict[str, Any]:
     )
 
     return results
+
+
+# =============================================================================
+# INSIGHTS MODULE SINGLETON
+# =============================================================================
+
+class InsightsModuleManager:
+    """
+    Manages DSPy insights module instance with lazy loading.
+
+    Separate from the main pipeline manager to allow independent optimization
+    and lifecycle management of the insights refinement module.
+    """
+
+    def __init__(self):
+        self._module = None
+        self._is_configured = False
+
+    def get_module(self) -> 'InsightsModule':
+        """
+        Get insights module instance.
+
+        Returns:
+            InsightsModule: Ready-to-use module
+        """
+        if not self._is_configured:
+            self._configure()
+
+        if not self._module:
+            from .insights_module import InsightsModule
+            logger.info("Creating fresh DSPy insights module")
+            self._module = InsightsModule()
+
+        return self._module
+
+    def _configure(self) -> None:
+        """Configure DSPy environment for insights module."""
+        if self._is_configured:
+            return
+
+        try:
+            configure_dspy_model()
+            self._is_configured = True
+            logger.info("DSPy insights module manager configured")
+
+        except Exception as e:
+            logger.error(f"DSPy insights module configuration failed: {e}")
+            raise
+
+    def force_refresh(self) -> None:
+        """Force refresh of module instance (for testing/development)."""
+        self._module = None
+        logger.info("Insights module instance reset")
+
+
+# Global insights module manager instance
+_insights_manager = InsightsModuleManager()
+
+
+def get_insights_module() -> 'InsightsModule':
+    """
+    Get configured DSPy insights module instance.
+
+    This is the main entry point for DSPy insights module usage.
+    """
+    return _insights_manager.get_module()

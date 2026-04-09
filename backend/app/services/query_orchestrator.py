@@ -130,11 +130,16 @@ def resume_query(
                 # Get the clarification answer (assuming single field for now)
                 clarification_answer = list(clarification_answers.values())[0] if clarification_answers else None
 
+                # Accumulate overrides
+                overrides = getattr(state, "resolved_clarifications", {}) or {}
+                overrides.update(clarification_answers)
+
                 # Resume compound clarification
                 result_ctx = resume_compound_clarification(
                     compound_state=compound_state,
                     clarification_answer=clarification_answer,
-                    session_id=resolved_session_id
+                    session_id=resolved_session_id,
+                    overrides=overrides
                 )
 
                 # Clean up state on success
@@ -143,6 +148,18 @@ def resume_query(
                         delete_state(state.request_id)
                     except Exception:
                         pass
+                elif result_ctx.stage == Stage.CLARIFICATION_REQUESTED:
+                    # Save the new clarification state so the next reply works
+                    state_to_save = PersistedState(
+                        request_id=result_ctx.request_id,
+                        original_query=state.original_query,
+                        intent={"compound_query_state": result_ctx.compound_clarification_state.model_dump() if hasattr(result_ctx.compound_clarification_state, "model_dump") else result_ctx.compound_clarification_state} if result_ctx.compound_clarification_state else {},
+                        missing_fields=result_ctx.missing_fields or [],
+                        session_id=resolved_session_id,
+                        resolved_clarifications=overrides,
+                    )
+                    save_state(state_to_save)
+                    logger.info(f"Updated clarification state saved: {result_ctx.request_id}")
 
                 result = result_ctx.to_dict()
                 _span_set(span,

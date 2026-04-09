@@ -62,6 +62,8 @@ def step_extract_intent(ctx: PipelineContext, span) -> None:
             previous_qco=ctx.previous_qco,
             skip_reset_overrides=ctx.skip_reset_overrides,
             overrides=overrides,
+            request_id=ctx.request_id,
+            session_id=ctx.session_id,
         )
 
         # Capture and store any newly created resolved terms for future queries

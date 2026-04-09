@@ -273,7 +273,8 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
 def resume_compound_clarification(
     compound_state: CompoundClarificationState,
     clarification_answer: Any,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    overrides: Optional[dict] = None
 ) -> PipelineContext:
     """
     Resume compound query processing after clarification is provided.
@@ -295,7 +296,7 @@ def resume_compound_clarification(
             compound_state=compound_state,
             clarification_answer=clarification_answer,
             current_date=None,
-            overrides={}
+            overrides=overrides or {}
         )
 
         # Create context to wrap the result
@@ -311,6 +312,15 @@ def resume_compound_clarification(
             ctx.is_compound_query = True
             ctx.clarification = True
             ctx.compound_metadata = format_compound_clarification_response(result)
+            
+            # Populate standard clarification fields for the frontend wrapper
+            pending_clarification = result.pending_clarification
+            if pending_clarification:
+                clarification_obj = pending_clarification.clarification
+                ctx.missing_fields = [clarification_obj.field]
+                ctx.clarification_message = f"For sub-query {pending_clarification.subquery_index + 1}: {clarification_obj.question}"
+                ctx.allowed_values = clarification_obj.options
+                
             ctx.stage = Stage.CLARIFICATION_REQUESTED
         elif isinstance(result, dict):
             # Compound results are ready

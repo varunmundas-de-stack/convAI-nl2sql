@@ -16,20 +16,11 @@ Data → InsightEngine → InsightResult → InsightRefiner → RefinedInsightRe
 """
 
 import logging
-import json
-import re
+import logging
 from typing import Any, Optional
-from pathlib import Path
 from pydantic import BaseModel, Field
 
-try:
-    from json_repair import repair_json
-    _HAS_JSON_REPAIR = True
-except ImportError:
-    _HAS_JSON_REPAIR = False
-
 from app.services.insight_engine import InsightResult, Insight, Severity, Direction
-from app.services.llm_service import call_claude, count_tokens
 from app.models.qco import QueryContextObject
 
 logger = logging.getLogger(__name__)
@@ -108,51 +99,43 @@ def refine_insights(
     previous_qco: Optional[QueryContextObject] = None,
 ) -> RefinedInsightResult:
     """
-    Refine insights using LLM.
-    
+    Refine insights using DSPy module with fallback to original implementation.
+
     This is the ONLY public function.
-    
+
     Args:
         insight_result: Deterministic insights from InsightEngine
         data: Raw query result (for summary statistics)
         query: Original user query
         previous_qco: Previous QCO for context
-        
+
     Returns:
-        RefinedInsightResult with LLM-enhanced insights
+        RefinedInsightResult with enhanced insights
     """
-    logger.info(f"Refining {len(insight_result.insights)} insights with LLM")
-    
+    logger.info(f"Refining {len(insight_result.insights)} insights")
+
+    # Try DSPy refinement first
     try:
-        # Build compact data summary (not full raw rows)
-        data_summary = _build_data_summary(insight_result, data)
-        
-        # Build LLM prompt
-        prompt = _build_prompt(insight_result, data_summary, query, previous_qco)
-        
-        # Call LLM
-        logger.debug(f"Calling LLM for insight refinement (prompt length: {len(prompt)} chars)")
-        response = call_claude(prompt)
-        try:
-            token_count = count_tokens(prompt)
-            logger.info(f"Input token count: {token_count.input_tokens}")
-        except Exception as e:
-            logger.warning(f"Error counting tokens: {e}")
-        # Parse response
-        raw_text = response.content[0].text
-        refinements = _parse_refinements(raw_text)
-        
-        # Apply refinements
-        refined_result = _apply_refinements(insight_result, refinements)
-        
-        logger.info(f"Insights refined: {len(refined_result.insights)} insights, "
+        from app.dspy_pipeline.config import get_insights_module
+
+        insights_module = get_insights_module()
+        refined_output = insights_module.forward(
+            query=query,
+            insight_result=insight_result,
+            previous_qco=previous_qco
+        )
+
+        # Convert DSPy output to RefinedInsightResult
+        refined_result = _convert_dspy_output(insight_result, refined_output)
+
+        logger.info(f"DSPy insights refined: {len(refined_result.insights)} insights, "
                      f"executive_summary={'present' if refined_result.executive_summary else 'none'}")
-        
+
         return refined_result
-        
+
     except Exception as e:
-        logger.warning(f"Insight refinement failed (non-fatal): {e}, falling back to original insights")
-        # Fallback: convert original insights to refined format without LLM changes
+        logger.warning(f"DSPy insight refinement failed: {e}")
+        # Ultimate fallback: convert original insights without enhancement
         return _fallback_to_original(insight_result)
 
 
@@ -160,221 +143,43 @@ def refine_insights(
 # HELPER FUNCTIONS
 # =============================================================================
 
-def _build_data_summary(insight_result: InsightResult, data: list[dict[str, Any]]) -> dict[str, Any]:
+def _convert_dspy_output(insight_result: InsightResult, dspy_output: dict[str, Any]) -> RefinedInsightResult:
     """
-    Build a compact summary of data + insights for LLM.
-    
-    We do NOT pass 1000 raw rows. We pass aggregated statistics.
-    Includes Layer 1 (MetricsFact) and Layer 2 (RuleInsights) for structured LLM input.
+    Convert DSPy structured output to RefinedInsightResult.
+
+    Args:
+        insight_result: Original InsightResult with numeric values
+        dspy_output: DSPy module output with refinements
+
+    Returns:
+        RefinedInsightResult with DSPy enhancements applied
     """
-    summary: dict[str, Any] = {
-        "total_rows": insight_result.total_rows,
-        "total_value": insight_result.total_value,
-        "total_formatted": insight_result.total_formatted,
-        "metric": insight_result.metric,
-        "dimensions": insight_result.dimensions,
-        "intent_type": insight_result.intent_type,
-        "has_previous_context": insight_result.has_previous_context,
-    }
-
-    # Layer 1: structured metrics facts (pure math)
-    if insight_result.metrics_facts:
-        mf = insight_result.metrics_facts
-        summary["metrics_facts"] = {
-            "trend_class": mf.trend_class,
-            "percent_change_latest": mf.percent_change_latest,
-            "percent_change_overall": mf.percent_change_overall,
-            "growth_acceleration": mf.growth_acceleration,
-            "is_accelerating": mf.is_accelerating,
-            "consecutive_growth_periods": mf.consecutive_growth_periods,
-            "consecutive_decline_periods": mf.consecutive_decline_periods,
-            "largest_drop_period": mf.largest_drop_period,
-            "largest_drop_pct": mf.largest_drop_pct,
-            "largest_gain_period": mf.largest_gain_period,
-            "largest_gain_pct": mf.largest_gain_pct,
-            "mean": mf.mean,
-            "std_dev": mf.std_dev,
-            "coefficient_of_variation": mf.coefficient_of_variation,
-            "volatility_flag": mf.volatility_flag,
-            "anomaly_flag": mf.anomaly_flag,
-            "anomaly_periods": mf.anomaly_periods,
-            "top_contributor": mf.top_contributor,
-            "top_contributor_pct": mf.top_contributor_pct,
-            "top3_contributor_pct": mf.top3_contributor_pct,
-            "concentration_flag": mf.concentration_flag,
-        }
-
-    # Layer 2: rule-triggered insights (business logic)
-    if insight_result.rule_insights:
-        summary["rule_insights"] = [
-            {
-                "type": ri.type,
-                "severity": ri.severity.value,
-                "message_key": ri.message_key,
-                "description": ri.description,
-                "context": ri.context,
-                "triggered_by": ri.triggered_by,
-            }
-            for ri in insight_result.rule_insights
-        ]
-
-    # Sample data points (max 5 rows — for grounding)
-    if data:
-        summary["sample_data"] = data[:5]
-
-    return summary
-
-
-def _build_prompt(
-    insight_result: InsightResult,
-    data_summary: dict[str, Any],
-    query: str,
-    previous_qco: Optional[QueryContextObject],
-) -> str:
-    """
-    Build the LLM prompt from template.
-    """
-    # Load prompt template
-    prompt_path = Path(__file__).parent.parent / "prompts" / "insight_refiner.txt"
-    with open(prompt_path, "r", encoding="utf-8") as f:
-        template = f.read()
-    
-    # Build input data structure
-    input_data = {
-        "query": query,
-        "data_summary": data_summary,
-        "previous_context": (
-            {
-                "metric": previous_qco.metric,
-                "sales_scope": previous_qco.sales_scope,
-                "time_range": previous_qco.time_range.model_dump() if previous_qco.time_range else None,
-                "previous_query": previous_qco.original_query,
-            }
-            if previous_qco
-            else None
-        ),
-    }
-    
-    # Inject into template
-    prompt = template.replace("{{INPUT_DATA}}", json.dumps(input_data, indent=2))
-    
-    return prompt
-
-
-def _parse_refinements(raw_text: str) -> dict[str, Any]:
-    """
-    Parse LLM response as JSON.
-    
-    Expected format:
-    {
-      "executive_summary": "...",
-      "key_risks": ["risk 1", "risk 2"],
-      "possible_drivers": ["driver 1", "driver 2"],
-      "recommendations": ["action 1", "action 2"],
-      "refined_insights": [
-        {
-          "label": "...",
-          "headline": "...",
-          "severity": "...",
-          "confidence": 0.8,
-          "context_note": "..."
-        }
-      ]
-    }
-    """
-    # Extract JSON from markdown code blocks if present
-    if "```json" in raw_text:
-        start = raw_text.find("```json") + 7
-        end = raw_text.find("```", start)
-        raw_text = raw_text[start:end].strip()
-    elif "```" in raw_text:
-        start = raw_text.find("```") + 3
-        end = raw_text.find("```", start)
-        raw_text = raw_text[start:end].strip()
-    
-    try:
-        return json.loads(raw_text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM refinement response: {e}")
-        logger.debug(f"Raw response (first 500 chars): {raw_text[:500]}")
-
-        # Attempt 1: use json-repair library if available
-        if _HAS_JSON_REPAIR:
-            try:
-                repaired = repair_json(raw_text, return_objects=True)
-                if isinstance(repaired, dict):
-                    logger.info("json-repair successfully recovered malformed JSON")
-                    return repaired
-            except Exception as repair_err:
-                logger.warning(f"json-repair also failed: {repair_err}")
-
-        # Attempt 2: manual cleanup of common LLM mistakes
-        try:
-            cleaned = raw_text
-            # Remove trailing commas before closing braces/brackets
-            cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
-            # Replace smart quotes with straight quotes
-            cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            pass
-
-        raise InsightRefinerError(f"LLM returned invalid JSON: {e}")
-
-
-def _to_dict(val: Any) -> dict[str, str]:
-    if isinstance(val, dict):
-        return {str(k): str(v) for k, v in val.items()}
-    if isinstance(val, list):
-        return {str(i+1): str(v) for i, v in enumerate(val)}
-    return {}
-
-def _apply_refinements(
-    insight_result: InsightResult,
-    refinements: dict[str, Any],
-) -> RefinedInsightResult:
-    """
-    Apply LLM refinements to insights.
-    
-    CRITICAL: Only interpretation fields are modified.
-    All numeric fields are preserved from the original.
-    """
-    # Build refinement map by label — support both old "insights" key and new "refined_insights" key
-    refinement_map = {
-        r["label"]: r
-        for r in (refinements.get("refined_insights") or refinements.get("insights") or [])
-    }
-    
-    # Convert insights to refined format
+    # Convert original insights to refined format
     refined_insights = []
-    for original in insight_result.insights:
-        refinement = refinement_map.get(original.label, {})
-        
-        refined = RefinedInsight(
-            # Immutable fields (preserved from original)
-            insight_type=original.insight_type.value,
-            label=original.label,
-            metric_value=original.metric_value,
-            metric_formatted=original.metric_formatted,
-            comparison_value=original.comparison_value,
-            comparison_formatted=original.comparison_formatted,
-            change_pct=original.change_pct,
-            direction=original.direction,
-            dimension=original.dimension,
-            dimension_value=original.dimension_value,
-            
-            # Refinable fields (may be overridden by LLM)
-            headline=refinement.get("headline", original.headline),
-            severity=Severity(refinement.get("severity", original.severity.value)),
-            confidence=refinement.get("confidence", original.confidence),
-            context_note=refinement.get("context_note"),
+    for i, original_insight in enumerate(insight_result.insights):
+        refined_insight = RefinedInsight(
+            # Preserve all numeric fields exactly
+            insight_type=original_insight.insight_type,
+            label=original_insight.label,
+            metric_value=original_insight.metric_value,
+            metric_formatted=original_insight.metric_formatted,
+            comparison_value=original_insight.comparison_value,
+            comparison_formatted=original_insight.comparison_formatted,
+            change_pct=original_insight.change_pct,
+            direction=original_insight.direction,
+            dimension=original_insight.dimension,
+            dimension_value=original_insight.dimension_value,
+            # Apply DSPy refinements to interpretation fields
+            headline=_get_refined_headline(original_insight, dspy_output, i),
+            severity=original_insight.severity,  # Could be enhanced by DSPy in future
+            confidence=original_insight.confidence,  # Could be enhanced by DSPy in future
+            context_note=None  # Could be enhanced by DSPy in future
         )
-        
-        refined_insights.append(refined)
-    
-    # Build refined result
-    refined_result = RefinedInsightResult(
-        # Preserved from original
+        refined_insights.append(refined_insight)
+
+    # Create refined result with DSPy narrative
+    return RefinedInsightResult(
+        # Preserve all numeric aggregates exactly
         total_rows=insight_result.total_rows,
         total_value=insight_result.total_value,
         total_formatted=insight_result.total_formatted,
@@ -382,28 +187,47 @@ def _apply_refinements(
         dimensions=insight_result.dimensions,
         intent_type=insight_result.intent_type,
         has_previous_context=insight_result.has_previous_context,
-        
-        # Refined insights
+        # Add refined content
         insights=refined_insights,
-        
-        # LLM-generated narrative (Layer 3)
-        executive_summary=refinements.get("executive_summary"),
-        key_risks=_to_dict(refinements.get("key_risks")),
-        possible_drivers=_to_dict(refinements.get("possible_drivers")),
-        recommendations=_to_dict(refinements.get("recommendations")),
+        primary_insight=refined_insights[0] if refined_insights else None,
+        # Apply DSPy narrative enhancements
+        executive_summary=dspy_output.get("executive_summary"),
+        key_risks=dspy_output.get("key_risks", {}),
+        possible_drivers=dspy_output.get("possible_drivers", {}),
+        recommendations=dspy_output.get("recommendations", {})
     )
-    
-    # Set primary insight (highest severity + confidence)
-    if refined_insights:
-        refined_result.primary_insight = max(
-            refined_insights,
-            key=lambda i: (
-                ["low", "medium", "high", "critical"].index(i.severity),
-                i.confidence,
-            )
-        )
-    
-    return refined_result
+
+
+def _get_refined_headline(original_insight: Insight, dspy_output: dict[str, Any], index: int) -> str:
+    """
+    Extract refined headline for a specific insight from DSPy output.
+
+    Args:
+        original_insight: Original insight object
+        dspy_output: DSPy structured output
+        index: Index of the insight in the list
+
+    Returns:
+        Refined headline or original if not found
+    """
+    try:
+        refined_headlines = dspy_output.get("refined_headlines", [])
+        if isinstance(refined_headlines, list) and index < len(refined_headlines):
+            refined_headline = refined_headlines[index]
+            if isinstance(refined_headline, str) and refined_headline.strip():
+                return refined_headline.strip()
+            elif isinstance(refined_headline, dict) and "headline" in refined_headline:
+                return str(refined_headline["headline"]).strip()
+
+        # Fallback to original
+        return original_insight.headline
+
+    except Exception as e:
+        logger.debug(f"Failed to extract refined headline for index {index}: {e}")
+        return original_insight.headline
+
+
+
 
 
 def _fallback_to_original(insight_result: InsightResult) -> RefinedInsightResult:

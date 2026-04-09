@@ -20,7 +20,7 @@ import logging
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
-from app.services.insight_engine import InsightResult, Insight, Severity, Direction
+from app.services.insights.insight_engine import InsightResult, Insight, Severity, Direction
 from app.models.qco import QueryContextObject
 
 logger = logging.getLogger(__name__)

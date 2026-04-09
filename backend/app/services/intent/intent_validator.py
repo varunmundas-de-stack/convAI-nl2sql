@@ -23,7 +23,7 @@ from app.models.intent import (
     Metric,
 )
 from app.services.catalog_manager import CatalogManager
-from app.services.intent_errors import (
+from app.services.intent.intent_errors import (
     IntentValidationError,
     MalformedIntentError,
     UnknownMetricError,
@@ -140,7 +140,7 @@ class IntentValidator:
             and intent_type != IntentType.TREND          # Rule 4 didn’t fire above
             and "time.granularity" not in missing_fields  # not already flagged
         ):
-            from app.services.intent_normalizer import TREND_KEYWORDS
+            from app.services.intent.intent_normalizer import TREND_KEYWORDS
             _query_lower = original_query.lower()
             _has_trend_kw = any(kw in _query_lower for kw in TREND_KEYWORDS)
             _granularity_missing = (

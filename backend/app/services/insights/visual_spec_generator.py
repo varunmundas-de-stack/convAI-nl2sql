@@ -19,7 +19,7 @@ from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from app.services.insight_engine import InsightResult, Direction, Severity, InsightType
+from app.services.insights.insight_engine import InsightResult, Direction, Severity, InsightType
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def generate_compound_visual_spec(
 # GENERATOR
 # =============================================================================
 
-from app.services.pivot_utils import pivot_rows, merge_dual_query, strip_cube_prefix
+from app.services.insights.pivot_utils import pivot_rows, merge_dual_query, strip_cube_prefix
 
 def generate_visual_spec(
     data: list[dict[str, Any]],

@@ -1,6 +1,6 @@
 import pytest
-from app.services.intent_validator import validate_intent
-from app.services.intent_errors import (
+from app.services.intent.intent_validator import validate_intent
+from app.services.intent.intent_errors import (
     UnknownMetricError,
     UnknownDimensionError,
     InvalidTimeWindowError,

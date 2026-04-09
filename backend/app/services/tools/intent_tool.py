@@ -9,18 +9,18 @@ import logging
 
 from app.pipeline.context import PipelineContext, Stage
 from app.pipeline.runner import pipeline_step, _span_set, _span_error, _Halt
-from app.services.intent_extractor import (
+from app.services.intent.intent_extractor import (
     extract_intent, ExtractionError, LLMCallError, LLMTimeoutError,
 )
 from app.dspy_pipeline.clarification_tool import (
     CompoundClarificationRequired,
     format_compound_clarification_response
 )
-from app.services.intent_errors import IntentValidationError, IntentIncompleteError
-from app.services.intent_validator import validate_intent
-from app.services.intent_normalizer import normalize_intent, patch_trend_intent
-from app.services.intent_merger import merge_intent
-from app.services.drill_detector import detect_drill, apply_drill_mutation
+from app.services.intent.intent_errors import IntentValidationError, IntentIncompleteError
+from app.services.intent.intent_validator import validate_intent
+from app.services.intent.intent_normalizer import normalize_intent, patch_trend_intent
+from app.services.intent.intent_merger import merge_intent
+from app.services.intent.drill_detector import detect_drill, apply_drill_mutation
 
 logger = logging.getLogger(__name__)
 

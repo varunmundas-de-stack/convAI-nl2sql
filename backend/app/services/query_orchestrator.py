@@ -26,7 +26,7 @@ from app.pipeline.pipeline_state import PipelineState as PersistedState
 from app.pipeline.qco_store import load_qco
 
 # Import for clarification resumption
-from app.services.intent_merger import merge_intent
+from app.services.intent.intent_merger import merge_intent
 
 # Import for compound clarification
 from app.services.tools.compound_tool import resume_compound_clarification

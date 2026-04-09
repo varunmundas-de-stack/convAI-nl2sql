@@ -22,7 +22,7 @@ from app.dspy_pipeline.clarification_tool import (
     CompoundClarificationRequired,
     CompoundClarificationState
 )
-from app.services.intent_errors import IntentIncompleteError
+from app.services.intent.intent_errors import IntentIncompleteError
 from app.models.intent import Intent
 from datetime import date
 
@@ -39,21 +39,6 @@ def _process_clarification_overrides(overrides: dict) -> dict:
 
     This converts DSPy clarification answers into term-specific mappings
     that allow multiple terms of the same role to be resolved sequentially.
-
-    Example:
-        Input overrides might contain clarification metadata:
-        {
-            "metrics": "net_value",
-            "dspy_clarification_request_id": "abc-123",
-            "dspy_clarification_term": "sales"  # The specific term being clarified
-        }
-
-        Output adds term-specific mapping:
-        {
-            "metrics": "net_value",
-            "resolved_metric_terms": {"sales": "net_value"},
-            ...
-        }
     """
     if not overrides:
         return overrides

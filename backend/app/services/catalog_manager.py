@@ -1,6 +1,4 @@
 """
-Catalog Manager for FMCG Sales Analytics NL2SQL System
-
 Handles loading and querying the semantic catalog that maps natural language
 concepts to Cube.js measures and dimensions.
 

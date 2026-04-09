@@ -6,7 +6,7 @@ from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from app.services.insight_engine import Direction, Severity
+from app.services.insights.insight_engine import Direction, Severity
 
 class ChartType(str, Enum):
     BAR = "bar"

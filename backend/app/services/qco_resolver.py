@@ -19,7 +19,7 @@ from typing import Optional, Dict, Any
 from app.models.intent import Intent
 from app.models.qco import QueryContextObject, QCOTimeRange, QCOFilter, QCOMetric, SlotMeta
 from app.models.hierarchy import get_axis
-from app.services.cube_query_builder import resolve_time_window
+from app.services.cube.cube_query_builder import resolve_time_window
 from app.dspy_pipeline.pipeline import get_stored_agent_results, clear_stored_agent_results
 
 logger = logging.getLogger(__name__)

@@ -27,7 +27,7 @@ from enum import Enum
 
 from app.models.intent import Intent
 from app.models.qco import QueryContextObject
-from app.services.pivot_utils import merge_dual_query
+from app.services.insights.pivot_utils import merge_dual_query
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +440,7 @@ def _post_process_by_strategy(
     Dispatch to the correct math function based on QueryStrategy.
     Called as Step 0 inside generate_insights() before any statistical analysis.
     """
-    from app.services.period_planner import QueryStrategy  # local import avoids circular
+    from app.services.cube.period_planner import QueryStrategy  # local import avoids circular
 
     if strategy == QueryStrategy.SINGLE_TIME_SERIES.value:
         return _compute_row_wise_growth(data_a, _metric_key(intent), _time_col_key(intent))

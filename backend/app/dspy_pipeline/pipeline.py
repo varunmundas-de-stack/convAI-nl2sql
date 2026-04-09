@@ -29,7 +29,7 @@ from .clarification_tool import (
     build_compound_clarification
 )
 from .schemas import Intent, DecomposedQuery
-from app.services.drill_detector import DrillResult, detect_drill
+from app.services.intent.drill_detector import DrillResult, detect_drill
 from app.dspy_pipeline.schemas import ScopeResult
 
 def _span_set(span, **kwargs) -> None:

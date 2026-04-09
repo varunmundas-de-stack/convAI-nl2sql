@@ -12,9 +12,9 @@ from app.utils.tracer import get_tracer
 
 from app.pipeline.context import PipelineContext, Stage
 from app.pipeline.runner import pipeline_step, _span_set, _span_error
-from app.services.insight_engine import generate_insights, InsightEngineError
-from app.services.insight_refiner import refine_insights
-from app.services.visual_spec_generator import generate_visual_spec
+from app.services.insights.insight_engine import generate_insights, InsightEngineError
+from app.services.insights.insight_refiner import refine_insights
+from app.services.insights.visual_spec_generator import generate_visual_spec
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)

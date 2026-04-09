@@ -12,11 +12,11 @@ from app.utils.tracer import get_tracer
 
 from app.pipeline.context import PipelineContext, Stage
 from app.pipeline.runner import pipeline_step, _span_set, _span_error
-from app.services.cube_query_builder import (
+from app.services.cube.cube_query_builder import (
     build_cube_query, build_comparison_query, build_total_query, CubeQueryBuildError,
 )
-from app.services.cube_client import CubeClient, CubeHTTPError, CubeQueryExecutionError
-from app.services.period_planner import determine_strategy, QueryStrategy, transform_intent_for_strategy
+from app.services.cube.cube_client import CubeClient, CubeHTTPError, CubeQueryExecutionError
+from app.services.cube.period_planner import determine_strategy, QueryStrategy, transform_intent_for_strategy
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)

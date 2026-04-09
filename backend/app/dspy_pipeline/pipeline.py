@@ -862,10 +862,10 @@ class IntentExtractionPipeline(dspy.Module):
         compound_state.pending_clarification = None
 
         # Reconstruct the decomposed query structure
-        from .schemas import SubQuery, DecomposedQuery
+        from .schemas import SubQueryItem, DecomposedQuery
 
         sub_queries = [
-            SubQuery(
+            SubQueryItem(
                 index=i,
                 text=query_text,
                 dependencies=compound_state.dependencies.get(i, [])

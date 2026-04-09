@@ -132,45 +132,6 @@ class EmptyResponseError(ExtractionError):
 # PUBLIC INTERFACE
 # =============================================================================
 
-# def extract_intent(
-#     query: str,
-#     previous_qco: Optional[QueryContextObject] = None,
-#     prompt_version: Optional[str] = None,
-#     use_dspy: Optional[bool] = None,
-#     skip_reset_overrides: bool = False,
-#     overrides: Optional[dict] = None
-# ) -> dict[str, Any]:
-#     """
-#     Extract intent from natural language query using DSPy pipeline.
-
-#     Args:
-#         query: Natural language user query
-#         previous_qco: Optional QCO from the previous query in this session
-#         prompt_version: Optional prompt version for RLHF (unused in DSPy mode)
-#         use_dspy: Ignored - always uses DSPy pipeline
-#         skip_reset_overrides: Pass to DSPy pipeline
-#         overrides: Pipeline clarification overrides
-
-#     Returns:
-#         Raw intent dict (UNTRUSTED, semantically unvalidated)
-
-#     Raises:
-#         ExtractionError: Technical failure (pipeline error, timeout)
-#         IntentIncompleteError: Clarification required
-
-#     The returned dict is NOT validated against the catalog.
-#     Semantic validation happens downstream in intent_validator.
-#     """
-#     start_time = time.monotonic()
-
-#     # DSPy pipeline is the only extraction method
-#     return _extract_intent_dspy(
-#         query,
-#         previous_qco,
-#         start_time,
-#         skip_reset_overrides,
-#         overrides
-#     )
 
 
 def _handle_compound_query_results(compound_result: dict, start_time: float) -> dict[str, Any]:
@@ -215,7 +176,9 @@ def extract_intent(
     query: str,
     previous_qco: Optional[QueryContextObject],
     skip_reset_overrides: bool = False,
-    overrides: Optional[dict] = None
+    overrides: Optional[dict] = None,
+    request_id: Optional[str] = None,
+    session_id: Optional[str] = None
 ) -> dict[str, Any]:
     """
     Extract intent using DSPy pipeline.
@@ -257,6 +220,8 @@ def extract_intent(
             previous_context=previous_qco,  # Pass the QCO object for drill detection
             current_date=date.today().isoformat(),
             overrides=processed_overrides,
+            request_id=request_id,
+            session_id=session_id,
         )
 
         # Check if this is a compound query result (including partial results)

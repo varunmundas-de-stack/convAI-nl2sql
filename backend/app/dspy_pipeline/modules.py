@@ -373,7 +373,10 @@ class ScopeModule(dspy.Module):
                 # 2. LLM extraction
                 # -------------------------
                 relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role == "SCOPE"]
-                prediction = self.predict(classified_terms=json.dumps(relevant_terms))
+                prediction = self.predict(
+                    original_query=classified_query.original_query,
+                    classified_terms=json.dumps(relevant_terms)
+                )
                 result: ScopeResult = prediction.scope_result
 
                 # -------------------------
@@ -488,6 +491,7 @@ class TimeModule(dspy.Module):
 
                 relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("TIME_RANGE", "TIME_GRANULARITY")]
                 prediction = self.predict(
+                    original_query=classified_query.original_query,
                     classified_terms=json.dumps(relevant_terms),
                     current_date=resolved_date.isoformat(),
                     query_intent=intent,
@@ -1501,57 +1505,6 @@ class PostProcessingModule(dspy.Module):
 # AGENT 7 — AssemblerModule
 # =============================================================================
 
-# class AssemblerModule(dspy.Module):
-#     """
-#     Merges all upstream agent outputs into the final typed Intent.
-
-#     Inputs  : ClassifiedQuery, ScopeResult, TimeResult, MetricsResult, DimensionsResult
-#     Outputs : Intent
-#     """
-
-#     def __init__(self):
-#         super().__init__()
-#         self.predict = dspy.Predict(AssembleIntent)
-
-#     def forward(
-#         self,
-#         classified_query: ClassifiedQuery,
-#         scope_result: ScopeResult,
-#         time_result: TimeResult,
-#         metrics_result: MetricsResult,
-#         dimensions_result: DimensionsResult,
-#         post_processing_result: PostProcessingResult,
-#     ) -> Intent:
-#         """
-#         Assemble the final Intent from all upstream results.
-
-#         The LLM handles post_processing derivation (RANKING/COMPARISON/TREND
-#         logic) as described in the AssembleIntent signature.  The module
-#         trusts Pydantic validation on the Intent model to catch structural
-#         issues, logging a warning and re-raising for the caller to handle.
-
-#         Args:
-#             classified_query   : Output of ClassifierModule.
-#             scope_result       : Output of ScopeModule.
-#             time_result        : Output of TimeModule.
-#             metrics_result     : Output of MetricsModule.
-#             dimensions_result  : Output of DimensionsModule.
-
-#         Returns:
-#             Fully populated Intent object.
-#         """
-#         prediction = self.predict(
-#             classified_query=classified_query,
-#             scope_result=scope_result,
-#             time_result=time_result,
-#             metrics_result=metrics_result,
-#             dimensions_result=dimensions_result,
-#             post_processing_result=post_processing_result,
-#         )
-#         intent: Intent = prediction.final_intent
-#         return intent
-
-
 class AssemblerModule:
     def forward(
         self,
@@ -1646,87 +1599,3 @@ class AssemblerModule:
                 logger.error(f"[DSPy Assembler] Error: {e}")
                 raise
 
-# =============================================================================
-# PIPELINE — IntentExtractionPipeline
-# # =============================================================================
-
-# class IntentExtractionPipeline(dspy.Module):
-#     """
-#     Orchestrates all six agents in sequence and returns the final Intent.
-
-#     Usage:
-#         pipeline = IntentExtractionPipeline()
-#         intent   = pipeline(query="top 5     The pipeline is stateless. Multi-turn context must be supplied via
-#     `previous_context` on each call.
-#     """
-
-#     def __init__(self):
-#         super().__init__()
-#         self.classifier  = ClassifierModule()
-#         self.scope       = ScopeModule()
-#         self.time        = TimeModule()
-#         self.metrics     = MetricsModule()
-#         self.dimensions  = DimensionsModule()
-#         self.assembler   = AssemblerModule()
-
-#     def forward(
-#         self,
-#         query: str,
-#         current_date: Optional[date] = None,
-#         previous_context: Optional[dict] = None,
-#     ) -> Intent:
-#         """
-#         Run the full intent extraction pipeline for a single query.
-
-#         Execution order:
-#             1. ClassifierModule  — classify all terms and determine query_intent
-#             2. ScopeModule       — resolve PRIMARY / SECONDARY (parallel-safe)
-#             3. TimeModule        — resolve time window + granularity (parallel-safe)
-#             4. MetricsModule     — extract and validate metrics (parallel-safe)
-#             5. DimensionsModule  — resolve group_by and filters (parallel-safe)
-#             6. AssemblerModule   — merge outputs into final Intent
-
-#         Steps 2–5 are data-independent after step 1 and can be parallelised if
-#         the execution framework supports it (e.g. dspy.Parallel or asyncio).
-
-#         Args:
-#             query            : Raw natural-language query from the user.
-#             current_date     : Today's date; defaults to date.today().
-#             previous_context : Prior QCO result dict for multi-turn conversations.
-
-#         Returns:
-#             Intent object ready for downstream query construction.
-#         """
-#         # Step 1: Classify
-#         classified_query = self.classifier(query=query)
-
-#         # Steps 2-5: Resolve independently (sequential for now)
-#         scope_result = self.scope(classified_query=classified_query)
-
-#         time_result = self.time(
-#             classified_query=classified_query,
-#             current_date=current_date,
-#             previous_context=previous_context,
-#         )
-
-#         metrics_result = self.metrics(
-#             classified_query=classified_query,
-#             sales_scope=scope_result.sales_scope,
-#         )
-
-#         dimensions_result = self.dimensions(
-#             classified_query=classified_query,
-#             sales_scope=scope_result.sales_scope,
-#             previous_context=previous_context,
-#         )
-
-#         # Step 6: Assemble
-#         intent = self.assembler(
-#             classified_query=classified_query,
-#             scope_result=scope_result,
-#             time_result=time_result,
-#             metrics_result=metrics_result,
-#             dimensions_result=dimensions_result,
-#         )
-
-#         return intent

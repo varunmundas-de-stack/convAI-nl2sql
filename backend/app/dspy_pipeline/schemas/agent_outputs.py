@@ -283,4 +283,21 @@ class PostProcessingResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
  
  
+
+class RefinedInsights(BaseModel):
+    executive_summary: str = Field(
+        description="1-2 sentences in plain business language referencing actual numeric values. No jargon. Use Indian numbering (Lakhs/Crores)."
+    )
+    key_risks: dict[str, str] = Field(
+        min_length=2,
+        description="Numbered keys '1','2','3'. Format: '[what is at risk] because [plain-language evidence]'. Always populate — infer from data even if no rule_insights flagged."
+    )
+    possible_drivers: dict[str, str] = Field(
+        min_length=2,
+        description="Numbered keys '1','2','3'. Format: '[hypothesis] — supported by [plain-language data point]'. Always populate."
+    )
+    recommendations: dict[str, str] = Field(
+        min_length=2,
+        description="Numbered keys '1','2','3'. Format: '[verb] [what] to [goal]'. Always populate with actionable steps for frontline reps."
+    )
  

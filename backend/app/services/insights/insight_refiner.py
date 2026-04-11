@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.services.insights.insight_engine import InsightResult, Insight, Severity, Direction
 from app.models.qco import QueryContextObject
+from app.dspy_pipeline.config import get_insights_module
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,6 @@ def refine_insights(
 
     # Try DSPy refinement first
     try:
-        from app.dspy_pipeline.config import get_insights_module
 
         insights_module = get_insights_module()
         refined_output = insights_module.forward(

@@ -1,12 +1,9 @@
 import dspy
-from app.dspy_pipeline.schemas import PostProcessingResult
+from app.dspy_pipeline.schemas.agent_outputs import RefinedInsights
 
 class RefineInsights(dspy.Signature):
-    """Refine insights with enhanced interpretation while preserving all numeric values.
-
-    Enhance insights with executive-style commentary, confidence levels, and contextual interpretation.
-    NEVER modify numeric fields (metric_value, change_pct, total_value, etc.) - only interpretation.
-    Focus on business significance, severity assessment, and actionable recommendations.
+    """Refine insights with executive-style commentary for frontline sales reps and area managers.
+    Translate analytics into plain English — no statistics background required.
     """
 
     query: str = dspy.InputField(desc="Original user query for context")
@@ -19,14 +16,13 @@ class RefineInsights(dspy.Signature):
         default=""
     )
 
-    refined_insights: str = dspy.OutputField(
-        desc="JSON object containing: "
-             "executive_summary (concise business interpretation), "
-             "refined_headlines (array of enhanced insight headlines maintaining original numeric values), "
-             "key_risks (object with risk categories and descriptions), "
-             "possible_drivers (object with potential business causes), "
-             "recommendations (object with actionable next steps). "
-             "CRITICAL: Preserve ALL numeric values exactly as provided. "
-             "Only refine interpretation, severity assessment, and business context. "
-             "Headlines should be executive-ready while maintaining factual precision."
+    refined_insights: RefinedInsights = dspy.OutputField(
+        desc=(
+            "Structured insights object. CRITICAL RULES: "
+            "(1) Never recalculate or modify any numeric values — READ-ONLY. "
+            "(2) No statistical jargon — use plain sales language. "
+            "(3) Indian numbering — Lakhs and Crores only. "
+            "(4) NEVER return empty dicts for any section — minimum 2 entries each. "
+            "(5) Every claim must trace to an input field."
+        )
     )

@@ -136,12 +136,18 @@ def get_optimization_mode() -> str:
 # DSPY CONFIGURATION
 # =============================================================================
 
+_dspy_configured = False
+
 def configure_dspy_model() -> None:
     """
     Configure DSPy with Anthropic Claude model.
 
     Uses environment variables for API key and model configuration.
     """
+    global _dspy_configured
+    if _dspy_configured:
+        return
+
     # Get Anthropic API key
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     if not anthropic_api_key:
@@ -165,6 +171,7 @@ def configure_dspy_model() -> None:
         )
 
         dspy.configure(lm=lm)
+        _dspy_configured = True
 
         logger.info("DSPy configured with Anthropic Claude via LiteLLM")
 
@@ -549,7 +556,7 @@ class InsightsModuleManager:
             self._configure()
 
         if not self._module:
-            from .insights_module import InsightsModule
+            from .agents.insight.agent import InsightsModule
             logger.info("Creating fresh DSPy insights module")
             self._module = InsightsModule()
 

@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 import dspy
 
-from app.dspy_pipeline.signatures import RefineInsights
+from app.dspy_pipeline.agents.insight.signature import RefineInsights
 from app.services.insights.insight_engine import InsightResult
 from app.models.qco import QueryContextObject
 

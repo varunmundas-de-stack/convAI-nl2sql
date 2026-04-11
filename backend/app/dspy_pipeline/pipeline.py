@@ -10,16 +10,13 @@ from app.utils.tracer import get_tracer
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
 
-from .modules import (
-    QueryDecomposerModule,
-    ClassifierModule,
-    ScopeModule,
-    TimeModule,
-    MetricsModule,
-    DimensionsModule,
-    PostProcessingModule,
-    AssemblerModule,
-)
+from .agents.decomposer.agent import QueryDecomposerModule
+from .agents.classifier.agent import ClassifierModule
+from .agents.scope.agent import ScopeModule
+from .agents.time.agent import TimeModule
+from .agents.metrics.agent import MetricsModule
+from .agents.dimension.agent import DimensionsModule
+from .agents.postprocessing.agent import PostProcessingModule
 from .clarification_tool import (
     ClarificationRequired,
     MultipleClarificationsRequired,
@@ -28,7 +25,7 @@ from .clarification_tool import (
     create_compound_state,
     build_compound_clarification
 )
-from .schemas import Intent, DecomposedQuery
+from .schemas import Intent, DecomposedQuery, TimeSpec, FilterCondition
 from app.services.intent.drill_detector import DrillResult, detect_drill
 from app.dspy_pipeline.schemas import ScopeResult
 
@@ -446,6 +443,106 @@ class ContextInjectingPipelineManager:
                 overrides=overrides,
             )
         return results
+
+
+
+#### ASSEMBLER MODULE
+
+
+class AssemblerModule:
+    def forward(
+        self,
+        classified_query,
+        scope_result,
+        time_result,
+        metrics_result,
+        dimensions_result,
+        post_processing_result,
+    ) -> Intent:
+        with tracer.start_as_current_span("dspy.assembler") as span:
+            _span_set(span,
+                input_intent=classified_query.query_intent if classified_query else "",
+                input_has_scope=scope_result is not None,
+                input_has_time=time_result is not None,
+                input_has_metrics=metrics_result is not None,
+                input_has_dimensions=dimensions_result is not None,
+                input_has_post_processing=post_processing_result is not None
+            )
+
+            try:
+                start_time = time.monotonic()
+
+                # -------------------------
+                # Metrics (already structured)
+                # -------------------------
+                # MetricsResult.metrics is already List[MetricSpec]
+                metrics = metrics_result.metrics if metrics_result else []
+
+                # -------------------------
+                # Time
+                # -------------------------
+                time_spec = None
+                if time_result and (
+                    time_result.time_window or
+                    time_result.start_date or
+                    time_result.end_date
+                ):
+                    time_spec = TimeSpec(
+                        # alias handles mapping internally
+                        time_window=time_result.time_window,
+                        start_date=time_result.start_date,
+                        end_date=time_result.end_date,
+                        granularity=time_result.granularity,
+                    )
+
+                # -------------------------
+                # Filters — merge dimensions filters + classifier filter_hints
+                # -------------------------
+                filters = dimensions_result.filters if dimensions_result else None
+
+                if not filters and classified_query.filter_hints:
+                    filters = [
+                        FilterCondition(
+                            dimension=hint.dimension,
+                            operator="equals",
+                            value=hint.value,
+                        )
+                        for hint in classified_query.filter_hints
+                    ]
+
+                # -------------------------
+                # Final Intent
+                # -------------------------
+                result = Intent(
+                    sales_scope=scope_result.sales_scope if scope_result else "SECONDARY",
+                    metrics=metrics,
+                    group_by=dimensions_result.group_by if dimensions_result else None,
+                    filters=filters,  # ← use merged filters
+                    time=time_spec,
+                    post_processing=post_processing_result,
+                )
+
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                _span_set(span,
+                    output_sales_scope=result.sales_scope,
+                    output_metrics_count=len(metrics),
+                    output_group_by_count=len(result.group_by or []),
+                    output_filters_count=len(filters or []),
+                    output_has_time=time_spec is not None,
+                    output_duration_ms=duration_ms,
+                    output_value=result.model_dump() if hasattr(result, "model_dump") else str(result)
+                )
+
+                logger.debug(f"[DSPy Assembler] Completed in {duration_ms}ms | metrics={len(metrics)} | group_by={len(result.group_by or [])} | filters={len(filters or [])}")
+                return result
+
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                _span_set(span, error_type=type(e).__name__, error_message=str(e))
+                logger.error(f"[DSPy Assembler] Error: {e}")
+                raise
+
 
 
 

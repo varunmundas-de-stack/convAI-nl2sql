@@ -16,14 +16,12 @@ from app.dspy_pipeline.schemas import (
     DimensionsResult,
     FilterCondition
 )
-from app.dspy_pipeline.modules import (
-    ClassifierModule,
-    ScopeModule,
-    TimeModule,
-    MetricsModule,
-    DimensionsModule,
-    AssemblerModule
-)
+from app.dspy_pipeline.agents.classifier.agent import ClassifierModule
+from app.dspy_pipeline.agents.scope.agent import ScopeModule
+from app.dspy_pipeline.agents.time.agent import TimeModule
+from app.dspy_pipeline.agents.metrics.agent import MetricsModule
+from app.dspy_pipeline.agents.dimension.agent import DimensionsModule
+from app.dspy_pipeline.pipeline import AssemblerModule
 from app.dspy_pipeline.pipeline import IntentExtractionPipeline
 from app.dspy_pipeline.training import intent_extraction_metric, IntentExtractionOptimizer
 from app.models.intent import Intent, Metric, Filter, TimeSpec

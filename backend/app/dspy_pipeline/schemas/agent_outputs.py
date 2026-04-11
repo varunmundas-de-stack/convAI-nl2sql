@@ -1,78 +1,8 @@
-"""
-Pydantic schemas for DSPy pipeline intermediate results and catalog constants.
 
-Following RULE P1: One Pydantic model per agent output
-Following RULE P4: Catalog constants in schemas.py, import everywhere
-"""
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Literal, Union
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
-
-# =============================================================================
-# CATALOG CONSTANTS (RULE P4)
-# Single source of truth for all catalog validation
-# =============================================================================
-
-# Metrics available in the catalog
-METRICS_CATALOG = [
-    {
-        "name": "count",
-        "description": "Number of sales transactions",
-        "aggregation": "count",
-    },
-    {
-        "name": "net_value",
-        "description": "Total net sales value after discounts",
-        "aggregation": "sum",
-    },
-    {
-        "name": "gross_value",
-        "description": "Total gross sales value before discounts",
-        "aggregation": "sum",
-    },
-    {
-        "name": "tax_value",
-        "description": "Total tax amount",
-        "aggregation": "sum",
-    },
-    {
-        "name": "billed_qty",
-        "description": "Total sales quantity (units/volume sold)",
-        "aggregation": "sum",
-    },
-]
-
-CATALOG_METRICS = frozenset(m["name"] for m in METRICS_CATALOG)
-
-# Dimensions available in both PRIMARY and SECONDARY
-COMMON_DIMENSIONS = frozenset({
-    "city", "state", "zone",
-    "distributor_code", "distributor_name",
-    "brand", "category", "sub_category", "pack_size", "sku_code"
-})
-
-# Dimensions only available in SECONDARY scope
-SECONDARY_ONLY_DIMENSIONS = frozenset({
-    "retailer_code", "retailer_name", "retailer_type",
-    "route_code", "route_name"
-})
-
-# All valid dimensions
-ALL_DIMENSIONS = COMMON_DIMENSIONS | SECONDARY_ONLY_DIMENSIONS
-
-# Time windows from catalog
-TIME_WINDOWS = frozenset({
-    "today", "yesterday",
-    "last_7_days", "last_30_days", "last_90_days",
-    "month_to_date", "quarter_to_date", "year_to_date",
-    "last_month", "last_quarter", "last_year",
-    "all_time",
-})
-
-# Time granularities
-TIME_GRANULARITIES = frozenset({
-    "day", "week", "month", "quarter", "year"
-})
+from .primitives import *
 
 # =============================================================================
 # QUERY DECOMPOSITION — Before Agent Pipeline
@@ -100,73 +30,6 @@ class DecomposedQuery(BaseModel):
 # =============================================================================
 # AGENT 1 OUTPUT — ClassifiedQuery
 # =============================================================================
- 
-# Closed role taxonomy. Every term gets exactly one role.
-TermRole = Literal[
-    "METRIC",           # net_value, billed_qty, count, gross_value, tax_value
-    "DIMENSION",        # zone, brand, category, state, distributor_name...
-    "TIME_RANGE",       # last month, last 30 days, Q1 2024, this quarter
-    "TIME_GRANULARITY", # daily, weekly, monthly, quarterly, yearly
-    "FILTER_VALUE",     # Gold Flake, North-1, Kirana, 5 kg, Oil
-    "RANKING",          # top 5, bottom 3, highest, lowest, best, worst
-    "SCOPE",            # Primary, Secondary
-    "COMPARISON",       # vs, compared to, versus, growth, change
-    "TREND",            # trend, trending, over time, trajectory
-]
- 
-QueryIntent = Literal[
-    "SNAPSHOT",        # single aggregated value, no dimension breakdown (was KPI)
-    "DISTRIBUTION",    # breakdown by one or more dimensions
-    "RANKING",         # top/bottom N with a grouping dimension
-    "TREND",           # metric over time requiring granularity
-    "COMPARISON",      # current period vs another period or dimension
-    "DRILL_DOWN",      # navigating deeper into a hierarchy from previous context
-    "MINIMAL_MESSAGE", # bare dimension or metric name only — context-dependent
-    "STRUCTURAL",      # asking what entities exist, not how they performed
-]
- 
- 
-class ClassifiedTerm(BaseModel):
-    
-    term: str = Field(
-        description="Exact word or phrase as it appears in the query."
-    )
-    role: TermRole = Field(
-        description="Semantic role this term plays in the query."
-    )
-    catalog_match: Optional[str] = Field(
-    default=None,
-    description=(
-        "The resolved canonical column name from the data catalog. "
-        "Apply known aliases and synonyms to map user-facing terms to their "
-        "standardized catalog equivalents. Null if the term has no direct "
-        "catalog entry (e.g. analytical intents like ranking, trends, or comparisons)."
-        )
-    )
-    scope: Optional[Literal["PRIMARY", "SECONDARY"]] = Field(
-        default=None,
-        description="The scope implied by this term (e.g., 'secondary sales' implies SECONDARY). Null if not applicable."
-    )
- 
-    model_config = ConfigDict(extra="forbid")
- 
- 
-class FilterHint(BaseModel):
-    """
-    A specific filter value paired with the dimension it qualifies.
-    """
-    dimension: str = Field(
-        description=(
-            "Catalog dimension this value qualifies. "
-            "Examples: brand→'Gold Flake', zone→'North-1', "
-            "category→'Oil', pack_size→'5 kg', retailer_type→'Kirana'."
-        )
-    )
-    value: str = Field(
-        description="Exact filter value as mentioned in the query."
-    )
- 
-    model_config = ConfigDict(extra="forbid")
  
  
 class ClassifiedQuery(BaseModel):
@@ -217,8 +80,8 @@ class ClassifiedQuery(BaseModel):
     )
  
     model_config = ConfigDict(extra="forbid")
- 
- 
+
+
 # =============================================================================
 # AGENT 2 OUTPUT — ScopeResult
 # =============================================================================
@@ -231,7 +94,8 @@ class ScopeResult(BaseModel):
     )
  
     model_config = ConfigDict(extra="forbid")
- 
+
+
  
 # =============================================================================
 # AGENT 3 OUTPUT — TimeResult
@@ -288,7 +152,8 @@ class TimeResult(BaseModel):
         return any([self.time_window, self.start_date, self.end_date])
  
     model_config = ConfigDict(extra="forbid")
- 
+
+
  
 # =============================================================================
 # AGENT 4 OUTPUT — MetricsResult
@@ -318,29 +183,10 @@ class MetricsResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
  
  
+
 # =============================================================================
 # AGENT 5 OUTPUT — DimensionsResult
 # =============================================================================
- 
-class FilterCondition(BaseModel):
-    """
-    A single filter condition on a dimension.
-    """
- 
-    dimension: str = Field(
-        description="Canonical catalog dimension name to filter on."
-    )
-    operator: Literal["equals", "not_equals", "in", "not_in", "contains"] = Field(
-        description=(
-            "Filter operator. Single value → 'equals'. "
-            "Multiple values → 'in'. Exclusion → 'not_equals'/'not_in'."
-        )
-    )
-    value: Union[str, List[str]] = Field(
-        description="Filter value(s). Use List[str] only with 'in'/'not_in' operators."
-    )
- 
-    model_config = ConfigDict(extra="forbid")
  
  
 class DimensionsResult(BaseModel):
@@ -372,7 +218,8 @@ class DimensionsResult(BaseModel):
  
     model_config = ConfigDict(extra="forbid")
  
- 
+
+
 # =============================================================================
 # ASSEMBLER OUTPUT — Final Intent
 # =============================================================================
@@ -405,8 +252,7 @@ class ComparisonConfig(BaseModel):
         return v
  
     model_config = ConfigDict(extra="forbid")
- 
- 
+
 class PostProcessingResult(BaseModel):
     """
     Post-processing specification.
@@ -437,58 +283,4 @@ class PostProcessingResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
  
  
-class TimeSpec(BaseModel):
-    """Time block in the final Intent. Always uses 'invoice_date'."""
  
-    dimension: Literal["invoice_date"] = Field(default="invoice_date")
-    window: Optional[str] = Field(alias="time_window")
-    start_date: Optional[str] = Field(default=None)
-    end_date: Optional[str] = Field(default=None)
-    granularity: Optional[Literal["day", "week", "month", "quarter", "year"]] = Field(default=None)
- 
-    model_config = ConfigDict(extra="forbid")
- 
- 
-class MetricSpec(BaseModel):
-    """A single metric with its aggregation in the final Intent."""
-    name: str
-    aggregation: Literal["sum", "count", "avg"]
- 
-    model_config = ConfigDict(extra="forbid")
- 
- 
-class Intent(BaseModel):
-    """
-    Final output of the pipeline. Schema matches the original monolithic
-    prompt's output exactly — the internal agent structure is invisible
-    to downstream consumers.
-    """
- 
-    sales_scope: Literal["PRIMARY", "SECONDARY"]
-    metrics: List[MetricSpec] = Field(min_length=1)
-    group_by: Optional[List[str]] = Field(default=None)
-    
-    @field_validator("group_by", mode="before")
-    @classmethod
-    def ensure_group_by_is_list(cls, v):
-        if isinstance(v, str):
-            return [v]
-        return v
-        
-    filters: Optional[List[FilterCondition]] = Field(default=None)
-    time: Optional[TimeSpec] = Field(default=None)
-    post_processing: Optional[PostProcessingResult] = Field(default=None)
- 
-    model_config = ConfigDict(extra="forbid")
- 
- 
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
- 
-def get_valid_dimensions_for_scope(scope: str) -> frozenset[str]:
-    """Returns the set of valid dimensions for a given sales scope."""
-    return COMMON_DIMENSIONS if scope == "PRIMARY" else ALL_DIMENSIONS
-  
-def is_valid_time_window(window: str) -> bool:
-    return window in TIME_WINDOWS

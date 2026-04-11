@@ -22,7 +22,7 @@ from app.models.intent import (
     TimeSpec,
     Metric,
 )
-from app.services.catalog_manager import CatalogManager
+from app.services.helpers.catalog_manager import CatalogManager
 from app.services.intent.intent_errors import (
     IntentValidationError,
     MalformedIntentError,

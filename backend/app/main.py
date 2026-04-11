@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from opentelemetry.trace import Status, StatusCode
 
 from app.services.query_orchestrator import execute_query as run_pipeline, resume_query, execute_retry_query, Stage
-from app.services.catalog_manager import CatalogManager
+from app.services.helpers.catalog_manager import CatalogManager
 from app.utils.tracer import get_tracer
 
 # Module-level tracer (provider is set up by llm_service on first import)

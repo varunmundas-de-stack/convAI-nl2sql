@@ -13,8 +13,8 @@ from opentelemetry.trace import Status, StatusCode
 
 from app.pipeline.context import PipelineContext, Stage
 from app.pipeline.runner import pipeline_step, _span_set
-from app.services.catalog_manager import CatalogManager
-from app.services.qco_resolver import resolve_qco
+from app.services.helpers.catalog_manager import CatalogManager
+from app.services.helpers.qco_resolver import resolve_qco
 from app.pipeline.qco_store import save_qco, load_qco
 
 logger = logging.getLogger(__name__)

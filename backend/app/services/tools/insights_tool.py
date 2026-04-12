@@ -63,7 +63,6 @@ def step_gen_insights(ctx: PipelineContext, span) -> None:
             try:
                 refined = refine_insights(
                     insight_result=result,
-                    data=ctx.data or [],
                     query=ctx.query,
                     previous_qco=ctx.previous_qco,
                 )
@@ -71,13 +70,12 @@ def step_gen_insights(ctx: PipelineContext, span) -> None:
                 ctx.stage = Stage.INSIGHTS_REFINED
                 try:
                     _span_set(s,
-                        output_refined_count=len(refined.insights),
                         output_executive_summary=refined.executive_summary or "",
                         output_value=getattr(refined, "model_dump", lambda: str(refined))(),
                     )
                 except Exception as _e:
                     logger.debug(f"Non-fatal span log error: {_e}")
-                logger.info(f"Insights refined: {len(refined.insights)}")
+                logger.info("Insights refined (narrative layer generated).")
             except Exception as e:
                 s.set_status(Status(StatusCode.ERROR, str(e)))
                 s.record_exception(e)
@@ -89,7 +87,7 @@ def step_gen_insights(ctx: PipelineContext, span) -> None:
             logger.info("Step 6c: Generating visual spec...")
             spec = generate_visual_spec(
                 data=ctx.data or [],
-                insights=ctx.refined_insights or result,
+                insights=result,
                 chart_type_hint=None,
                 query=ctx.query,
                 comparison_data=ctx.comparison_data,

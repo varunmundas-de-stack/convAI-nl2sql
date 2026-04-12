@@ -221,7 +221,7 @@ class IntentValidator:
                 if "post_processing.comparison.comparison_window" not in missing_fields:
                     missing_fields.append("post_processing.comparison.comparison_window")
                     clarification_questions.append(
-                        "Compared to which period? (e.g., last_month, last_quarter, last_year)"
+                        "Compared to which period?"
                     )
         
         # --- Validate filters ---

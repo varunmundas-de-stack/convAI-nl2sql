@@ -63,6 +63,7 @@ def step_build_query(ctx: PipelineContext, span) -> None:
         ctx.fail(Stage.INTENT_VALIDATED, "CubeQueryBuildError", str(e))
         _span_error(span, ctx.error)
 
+# MAX_RETRIES = 1
 
 @pipeline_step("cube.execute")
 def step_execute_query(ctx: PipelineContext, span) -> None:
@@ -78,12 +79,18 @@ def step_execute_query(ctx: PipelineContext, span) -> None:
         with tracer.start_as_current_span("cube.primary_query") as primary_span:
             try:
                 client.get_sql(ctx.cube_query)
-                ctx.data = client.load(ctx.cube_query).data
+                data = client.load(ctx.cube_query).data
+                if not data:
+                    logger.warning("Primary query returned 0 rows, retrying...")
+                    time.sleep(0.3)
+                    data = client.load(ctx.cube_query).data
+                ctx.data = data
                 _span_set(primary_span,
                     output_row_count=len(ctx.data),
                     output_sample_row=str(ctx.data[0])[:500] if ctx.data else "",
                 )
                 logger.info(f"Primary query: {len(ctx.data)} rows")
+
             except CubeHTTPError as e:
                 primary_span.set_status(Status(StatusCode.ERROR, str(e)))
                 ctx.fail(Stage.CUBE_QUERY_BUILT, "CubeHTTPError", "Cube query failed",

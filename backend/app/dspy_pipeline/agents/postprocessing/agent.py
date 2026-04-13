@@ -139,7 +139,7 @@ class PostProcessingModule(dspy.Module):
 
     def __init__(self):
         super().__init__()
-        self.predict = dspy.Predict(ResolvePostProcessing)
+        self.predict = dspy.ChainOfThought(ResolvePostProcessing)
         self.resolver = PostProcessingResolver()
 
     def forward(

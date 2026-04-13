@@ -603,36 +603,6 @@ class IntentExtractionPipeline(dspy.Module):
     ) -> Union[Intent, Dict[str, Any]]:
         """
         Process a query through the full pipeline.
-
-        Args:
-            query: The query string to process
-            current_date: Current date for time processing
-            previous_context: Previous QCO context
-            overrides: Override dict for pipeline
-            request_id: Request ID for state tracking
-            session_id: Session ID for state tracking
-            compound_state: Existing compound state for resumption
-
-        Returns:
-            Intent: for single queries
-            Dict:   for compound queries with structure:
-                        {
-                            "type": "compound_query_results",
-                            "original_query": str,
-                            "total_subqueries": int,
-                            "completed_subqueries": [...],
-                            "pending_subqueries": [...],
-                            "dependencies": {...}
-                        }
-                    OR for partial results:
-                        {
-                            "type": "compound_partial_results",
-                            ...
-                        }
-
-        Raises:
-            ClarificationRequired: for single query clarifications
-            CompoundClarificationRequired: for compound query clarifications
         """
         overrides = overrides or {}
         logger.info("[DSPy Pipeline] Starting intent extraction pipeline")
@@ -1092,22 +1062,7 @@ class IntentExtractionPipeline(dspy.Module):
         - Resumption from clarification point with persistent state
         - Graceful handling of clarifications without losing completed sub-queries
 
-        Args:
-            decomposed: Decomposed query object
-            current_date: Current date for time processing
-            previous_context: Previous QCO context
-            overrides: Override dict for pipeline
-            request_id: Request ID for state tracking
-            session_id: Session ID for state tracking
-            compound_state: Existing compound state for resumption
-
-        Returns:
-            - CompoundClarificationState: when a clarification is needed
-            - Dict: completed compound results when all sub-queries are done
-
-        Raises:
-            ClarificationRequired: when a sub-query needs clarification (converted to CompoundClarificationRequired)
-        """
+      """
         overrides = overrides or {}
 
         # Resolve previous context

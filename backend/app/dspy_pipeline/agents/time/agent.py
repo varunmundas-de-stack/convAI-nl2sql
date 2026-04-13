@@ -15,11 +15,6 @@ from app.dspy_pipeline.clarification_tool import ClarificationRequired, Clarific
 import uuid
 tracer = get_tracer(__name__)
 
-from app.dspy_pipeline.schemas import TimeResult, ClassifiedQuery, TIME_WINDOWS
-from .signature import ResolveTime
-from app.dspy_pipeline.clarification_tool import ClarificationRequired, Clarification, build_time_clarification
-import uuid
-
 
 # =============================================================================
 # AGENT 3 — TimeModule

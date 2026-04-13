@@ -6,18 +6,15 @@ import time
 from opentelemetry.trace import Status, StatusCode
 from app.utils.tracer import get_tracer
 from app.utils.tracer import _span_set
+from app.dspy_pipeline.schemas import MetricsResult, ClassifiedQuery, METRICS_CATALOG, CATALOG_METRICS, MetricSpec
+from .signature import ExtractMetrics
+from app.dspy_pipeline.clarification_tool import ClarificationRequired, Clarification, build_metric_clarification, build_individual_metric_clarifications
+import uuid
+
+
 
 logger = logging.getLogger(__name__)
-from app.dspy_pipeline.schemas import MetricsResult, ClassifiedQuery, METRICS_CATALOG, CATALOG_METRICS, MetricSpec
-from .signature import ExtractMetrics
-from app.dspy_pipeline.clarification_tool import ClarificationRequired, Clarification, build_metric_clarification, build_individual_metric_clarifications
-import uuid
 tracer = get_tracer(__name__)
-
-from app.dspy_pipeline.schemas import MetricsResult, ClassifiedQuery, METRICS_CATALOG, CATALOG_METRICS, MetricSpec
-from .signature import ExtractMetrics
-from app.dspy_pipeline.clarification_tool import ClarificationRequired, Clarification, build_metric_clarification, build_individual_metric_clarifications
-import uuid
 
 # =============================================================================
 # AGENT 4 — MetricsModule

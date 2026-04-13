@@ -162,6 +162,7 @@ class PostProcessingModule(dspy.Module):
 
                 relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("RANKING", "COMPARISON", "TREND")]
                 llm_output = self.predict(
+                    original_query=classified_query.original_query,
                     query_intent=classified_query.query_intent,
                     classified_terms=json.dumps(relevant_terms),
                     time_result=time_result,

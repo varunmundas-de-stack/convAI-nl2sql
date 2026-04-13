@@ -2,18 +2,58 @@ import dspy
 from ...schemas import DecomposedQuery
 
 class DecomposeQuery(dspy.Signature):
-    """Identify and split compound queries into independent analytical sub-queries.
-    
-    ONLY split when there are clearly independent analytical intents.
-    Examples to SPLIT: 'Show me revenue vs last quarter and also which reps are underperforming' → 2 queries.
-    Examples to NOT SPLIT: 'Show me revenue by zone and by product' → 1 query (multiple dimensions).
-    For single queries, return is_compound=false with original query as single sub_query.
+    """Identify and split compound analytical queries.
+
+    RULES:
+    1. Split when the query involves MULTIPLE INDEPENDENT SCOPES.
+       - Scope = fundamentally different data domains (e.g., primary sales, secondary sales, inventory, targets).
+       - Example: "Compare primary vs secondary sales" → 2 sub-queries.
+
+    2. Do NOT split when it's just multiple dimensions within SAME scope.
+       - Example: "Revenue by zone and product" → 1 query.
+
+    3. Do NOT split simple comparisons within SAME dataset.
+       - Example: "Revenue this month vs last month" → 1 query.
+
+    4. Split when:
+       - Different scopes
+       - Different business entities
+       - Different aggregation logic that cannot be answered in a single query cleanly
+
+       CRITICAL RULE:
+
+        Decomposition must produce ONLY independently executable queries.
+
+        DO NOT include:
+        - intermediate reasoning steps
+        - comparison steps
+        - aggregation steps
+
+        If the query is a comparison across scopes:
+        - ONLY return the base data queries
+        - DO NOT include a separate comparison query
+
+        Example:
+
+        Query: Compare primary vs secondary sales
+
+        Correct:
+        [
+        "Primary sales",
+        "Secondary sales"
+        ]
+
+        Incorrect:
+        [
+        "Primary sales",
+        "Secondary sales",
+        "Compare primary vs secondary sales"
+]
     """
 
-    query: str = dspy.InputField(desc="Natural language query to analyze")
-    session_context: str = dspy.InputField(desc="Previous context from session", default="")
+    query: str = dspy.InputField(desc="User query")
+    session_context: str = dspy.InputField(desc="Session memory", default="")
 
     decomposed_query: DecomposedQuery = dspy.OutputField(
-        desc="Structured decomposition of the query into independent sub-queries."
+        desc="List of independent sub-queries with clear scope separation"
     )
-

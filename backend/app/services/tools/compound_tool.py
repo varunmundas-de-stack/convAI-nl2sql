@@ -93,6 +93,11 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
                 step_gen_insights(subquery_ctx)
                 logger.info(f"Sub-query {subquery_index}: Insights generation completed")
 
+                # Step 7: Resolve QCO
+                from app.services.tools.qco_tool import step_resolve_qco
+                step_resolve_qco(subquery_ctx)
+                logger.info(f"Sub-query {subquery_index}: QCO resolution completed")
+
                 # Mark as successful if we made it this far without errors
                 if not subquery_ctx.error:
                     subquery_ctx.success = True

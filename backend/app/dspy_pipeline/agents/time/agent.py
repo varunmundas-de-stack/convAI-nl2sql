@@ -87,6 +87,7 @@ class TimeModule(dspy.Module):
 
                 relevant_terms = [t.model_dump() for t in classified_query.classified_terms if t.role in ("TIME_RANGE", "TIME_GRANULARITY")]
                 prediction = self.predict(
+                    original_query=classified_query.original_query,
                     classified_terms=json.dumps(relevant_terms),
                     current_date=resolved_date.isoformat(),
                     query_intent=intent,

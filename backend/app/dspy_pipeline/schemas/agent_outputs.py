@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Optional, Dict, Any, Literal, Union
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from .primitives import *
+from app.dspy_pipeline.schemas.catalog import TIME_WINDOWS
 
 # =============================================================================
 # QUERY DECOMPOSITION — Before Agent Pipeline

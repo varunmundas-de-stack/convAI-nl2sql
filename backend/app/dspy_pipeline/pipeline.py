@@ -10,6 +10,7 @@ from app.utils.tracer import get_tracer
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
 
+from .agents.interpreter.agent import QueryInterpreterModule
 from .agents.decomposer.agent import QueryDecomposerModule
 from .agents.classifier.agent import ClassifierModule
 from .agents.scope.agent import ScopeModule
@@ -572,11 +573,9 @@ class IntentExtractionPipeline(dspy.Module):
 
     def __init__(self):
         super().__init__()
+        self.interpreter = QueryInterpreterModule()
         self.decomposer = QueryDecomposerModule()
         self.classifier = ClassifierModule()
-
-        # FIX (Problem 1): Instantiate modules once here only.
-        # ContextInjectingPipelineManager receives references — no duplicate instances.
         self.scope = ScopeModule()
         self.time = TimeModule()
         self.metrics = MetricsModule()
@@ -590,6 +589,31 @@ class IntentExtractionPipeline(dspy.Module):
             metrics=self.metrics,
             dimensions=self.dimensions,
         )
+
+    def _build_interpreter_context(self, previous_qco) -> str:
+        if not previous_qco:
+            return ""
+        
+        lines = []
+        
+        if previous_qco.sales_scope:
+            lines.append(f"Scope: {previous_qco.sales_scope}")
+        
+        if previous_qco.metrics:
+            names = [m.name for m in previous_qco.metrics]
+            lines.append(f"Metrics: {', '.join(names)}")
+        
+        if previous_qco.group_by:
+            lines.append(f"Dimensions: {', '.join(previous_qco.group_by)}")
+        
+        if previous_qco.time_range:
+            lines.append(f"Time: {previous_qco.time_range}")
+        
+        if previous_qco.filters:
+            filter_strs = [f"{f.dimension}={f.value}" for f in previous_qco.filters]
+            lines.append(f"Filters: {', '.join(filter_strs)}")
+        
+        return "\n".join(lines)
 
     def forward(
         self,
@@ -646,7 +670,34 @@ class IntentExtractionPipeline(dspy.Module):
 
     # -------------------------------------------------------------------------
     # SHARED HELPERS
-    # -------------------------------------------------------------------------
+    # -------------------- -----------------------------------------------------
+
+    def _build_conversation_string(self, previous_qco) -> str:
+        if not previous_qco:
+            return ""
+        # with open("conversation.txt", "w") as f:
+        #     f.write(str(previous_qco))
+        turns = getattr(previous_qco, 'query_history', None) or []
+        if not turns:
+            return ""
+
+        lines = []
+        for turn in turns[-5:]:  # last 5 full turns
+            # User's original query
+            if turn.get("query"):
+                lines.append(f"User: {turn['query']}")
+
+            # Clarification exchanges within this turn
+            for clar in turn.get("clarifications", []):
+                if clar.get("question"):
+                    lines.append(f"System: {clar['question']}")
+                if clar.get("answer"):
+                    lines.append(f"User: {clar['answer']}")
+
+            # if turn.get("summary"):
+            #     lines.append(f"System: {turn['summary']}")
+
+        return "\n".join(lines)
 
     def _resolve_previous_context(self, previous_context) -> Tuple[Any, Optional[str]]:
         """
@@ -763,11 +814,29 @@ class IntentExtractionPipeline(dspy.Module):
                 full_start_time = time.monotonic()
 
                 # -------------------------
+                # 0.5 Query Interpretation
+                # -------------------------
+                conversation = self._build_conversation_string(previous_qco)
+                interpreter_context = self._build_interpreter_context(previous_qco) if previous_qco else ""
+
+                resolved_query = self.interpreter(
+                    current_input=query_text,
+                    conversation=conversation,
+                    session_context=interpreter_context,
+                ) if previous_qco else query_text  # skip on first turn, nothing to resolve
+
+                logger.info(
+                    "[DSPy Pipeline] [0.5/5] Interpreter resolved: '%s' → '%s'",
+                    query_text,
+                    resolved_query,
+                )
+
+                # -------------------------
                 # 1. Classify
                 # -------------------------
                 logger.info("[DSPy Pipeline] [1/5] Executing Classifier")
                 step_start = time.monotonic()
-                classified_query = self.classifier(query=query_text, session_context=previous_qco)
+                classified_query = self.classifier(query=resolved_query, session_context=previous_qco)
                 classify_duration = int((time.monotonic() - step_start) * 1000)
                 logger.info(
                     "[DSPy Pipeline] [1/5] Classifier completed in %dms | intent=%s",

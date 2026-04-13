@@ -24,6 +24,7 @@ class InterpretQuery(dspy.Signature):
         "A fully specified, unambiguous, standalone natural language query in plain conversational English. "
         "Resolve vague or ambiguous terms to their exact catalog equivalents using session context. "
         "Only use words that appear in the catalog or were explicitly stated by the user. "
+        "Never ask questions, never express uncertainty, never request clarification. "
         "Never introduce aggregation words, structural phrases, or paraphrasing that wasn't in the original input. "
         "Preserve the user's original terms where they are already unambiguous."
     )

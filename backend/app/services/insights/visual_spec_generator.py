@@ -211,6 +211,28 @@ def generate_visual_spec(
     series = []
     out_data = data
     x_axis_key = None
+
+    # Intent-type override — TREND always routes to line regardless of data shape
+    intent_type = None
+    if intent and hasattr(intent, "post_processing"):
+        # intent_type comes from classified_query, pass it through as a param if available
+        pass
+    if chart_type_hint == "trend" or (intent and getattr(intent, "intent_type", None) == "TREND"):
+        if time_dim and len(data) >= 2:
+            if group_by:
+                chart_type = ChartType.MULTI_LINE
+                pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by, values=metric)
+                pivot_config = PivotConfig(
+                    index_dimension=strip_cube_prefix(time_dim),
+                    stack_dimension=strip_cube_prefix(group_by[0]),
+                    stack_dimensions=[strip_cube_prefix(d) for d in group_by],
+                    stack_keys=stack_keys
+                )
+                out_data = pivoted
+                x_axis_key = pivot_config.index_dimension
+            else:
+                chart_type = ChartType.LINE
+                x_axis_key = time_dim
     
     # NEW PRIORITY ROUTING LOGIC
     if strategy == "contribution":
@@ -297,16 +319,33 @@ def generate_visual_spec(
                 chart_type = ChartType.BAR
                 x_axis_key = group_by[0]
         else:
-            chart_type = ChartType.STACKED_BAR
-            pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1:], values=metric)
-            pivot_config = PivotConfig(
-                index_dimension=strip_cube_prefix(group_by[0]),
-                stack_dimension=strip_cube_prefix(group_by[1]),
-                stack_dimensions=[strip_cube_prefix(d) for d in group_by[1:]],
-                stack_keys=stack_keys
-            )
-            out_data = pivoted
-            x_axis_key = pivot_config.index_dimension
+            # Check for time-series with multiple group dimensions — same as len==1 case
+            if time_dim and time_dim not in group_by and len(data) >= 2:
+                chart_type = ChartType.MULTI_LINE
+                pivoted, stack_keys = pivot_rows(data, index=time_dim, columns=group_by, values=metric)
+                pivot_config = PivotConfig(
+                    index_dimension=strip_cube_prefix(time_dim),
+                    stack_dimension=strip_cube_prefix(group_by[0]),
+                    stack_dimensions=[strip_cube_prefix(d) for d in group_by],
+                    stack_keys=stack_keys
+                )
+                out_data = pivoted
+                x_axis_key = pivot_config.index_dimension
+                logger.info(
+                    f"SINGLE_QUERY with time_dim='{time_dim}' + group_by={group_by} → "
+                    "promoting chart type to MULTI_LINE"
+                )
+            else:
+                chart_type = ChartType.STACKED_BAR
+                pivoted, stack_keys = pivot_rows(data, index=group_by[0], columns=group_by[1:], values=metric)
+                pivot_config = PivotConfig(
+                    index_dimension=strip_cube_prefix(group_by[0]),
+                    stack_dimension=strip_cube_prefix(group_by[1]),
+                    stack_dimensions=[strip_cube_prefix(d) for d in group_by[1:]],
+                    stack_keys=stack_keys
+                )
+                out_data = pivoted
+                x_axis_key = pivot_config.index_dimension
 
     # Ensure table view logic holds if > 2 raw keys without group_by pivots protecting them
     if not pivot_config and chart_type not in (ChartType.GROUPED_BAR, ChartType.NUMBER_CARD) and data and len(data[0].keys()) > 2 and len(group_by) > 1:

@@ -300,7 +300,10 @@ async def execute_query(request: QueryRequest):
         span.set_attribute("output.duration_ms", response.duration_ms)
         span.set_attribute("output.row_count", len(response.data or []))
         if response.visual_spec:
-            span.set_attribute("output.chart_type", response.visual_spec.chart_type or "")
+            if isinstance(response.visual_spec, dict):
+                span.set_attribute("output.chart_type", response.visual_spec.get("chart_type", ""))
+            else:
+                span.set_attribute("output.chart_type", getattr(response.visual_spec, "chart_type", ""))
         span.set_attribute("http.status_code", 200)
         span.set_attribute("output.value", json.dumps(response_dict, default=str))
 
@@ -497,7 +500,10 @@ async def retry_query_endpoint(request: RetryRequest):
         span.set_attribute("output.duration_ms", getattr(response, "duration_ms", 0))
         span.set_attribute("output.row_count", len(getattr(response, "data", []) or []))
         if getattr(response, "visual_spec", None):
-            span.set_attribute("output.chart_type", getattr(response.visual_spec, "chart_type", "") or "")
+            if isinstance(response.visual_spec, dict):
+                span.set_attribute("output.chart_type", response.visual_spec.get("chart_type", ""))
+            else:
+                span.set_attribute("output.chart_type", getattr(response.visual_spec, "chart_type", ""))
         span.set_attribute("http.status_code", 200)
         span.set_attribute("output.value", json.dumps(response_dict, default=str))
 

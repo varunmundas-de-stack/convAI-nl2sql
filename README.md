@@ -53,6 +53,14 @@ The system is composed of distinct layers, each with a specific responsibility:
 - Coordinates interactions between the LLM, validation layer, and data layer
 - Returns structured responses
 
+**Modular Service Tools**
+- **CatalogTool:** Semantic catalog management and metric/dimension validation
+- **CubeClientTool:** HTTP transport to Cube.js API with retry logic
+- **VisualSpecTool:** Chart specification generation and compound visualization support
+- **PivotUtilsTool:** Data transformation, pivoting, and field normalization
+- **NormalizerTool:** Intent normalization, trend patching, and field mapping
+- Managed via an **Integration Layer** for seamless composability and testing
+
 **Intent Extractor (LLM - Anthropic Claude)**
 - Processes natural language questions
 - Extracts structured intent: metrics, filters, dimensions, time ranges
@@ -132,9 +140,8 @@ A complete query follows this workflow:
 ┌────────────────────▼────────────────────────────────┐
 │            FastAPI Backend (Python)                  │
 │         - Query Orchestrator (main flow)             │
-│         - Intent Extractor                           │
-│         - Intent Validator                           │
-│         - Query Compiler                             │
+│         - Integration Layer & Modular Tools          │
+│           (Catalog, CubeClient, VisualSpec, etc.)    │
 └────┬──────────────────────┬────────────────────┬────┘
      │                      │                    │
      │ (1) Load context     │ (2) Extract intent │ (3) Store state
@@ -162,6 +169,7 @@ A complete query follows this workflow:
 **Data flow:**
 - Request flows left-to-right through the pipeline
 - Each stage validates and enriches the query
+- Modular tools (CatalogTool, CubeClientTool, etc.) provide specific processing logic via an Integration Layer
 - Redis stores conversational context across requests
 - Cube.js generates and executes SQL
 
@@ -195,6 +203,11 @@ A complete query follows this workflow:
 - Single contract between all pipeline stages
 - Type safety prevents bugs in data transformation
 - Validation rules are centralized and testable
+
+**Why use a Modular Service Architecture:**
+- Decouples pipeline stages into independently testable and composable tools (CatalogTool, CubeClientTool, etc.)
+- Provides consistent error handling, structured logging, and performance metrics across the system
+- Legacy compatibility is maintained through an integration layer, ensuring seamless migration
 
 ---
 
@@ -253,32 +266,48 @@ A complete query follows this workflow:
 # Configure environment
 cp .env.example .env
 # Edit .env with ANTHROPIC_API_KEY, CUBE_API_URL, REDIS_URL
-
-# Start all services
-docker-compose up -d
-
-# Verify services are running
-curl http://localhost:4000/health    # Cube.js
-curl http://localhost:8000/health    # FastAPI
 ```
 
-### Development
+### Full Local Development (Windows)
 
 ```bash
+# Start all services (Docker + FastAPI with hot-reload)
+.\start-dev.ps1
+
+# Stop all services and cleanup
+# Ctrl+C will trigger automatic cleanup
+```
+
+### Manual Development Setup
+
+If you prefer to start services manually:
+
+```bash
+# Start backing services (PostgreSQL, Redis, Cube.js)
+docker compose up -d
+
 # Backend (with hot-reload)
 cd backend
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Using activated venv: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Frontend
 cd frontend
 npm run dev
 ```
 
-### Testing
+### Testing & Tools Demonstration
 
 ```bash
 cd backend
+
+# Run all tests
 pytest
+
+# Run comprehensive Phase 1 tool tests
+pytest app/tests/test_phase1_tools.py
+
+# Run Phase 1 tool demonstration script
+python demo_phase1_tools.py
 ```
 
 Visit `http://localhost:3000` to access the interface.

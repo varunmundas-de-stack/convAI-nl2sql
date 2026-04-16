@@ -12,6 +12,13 @@ from typing import Any, Dict, Optional
 
 import dspy
 
+from .agent_gepa_optimizer import (
+    AGENT_ARTIFACTS_DIR,
+    OPTIMIZABLE_AGENTS,
+    AgentGepaOptimizer,
+    get_available_optimized_agents,
+    load_optimized_agents_into_pipeline,
+)
 from .pipeline import IntentExtractionPipeline
 
 logger = logging.getLogger(__name__)
@@ -19,7 +26,9 @@ logger = logging.getLogger(__name__)
 # Configuration paths
 DSPY_CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "config" / "dspy_config.json"
 COMPILED_PIPELINE_PATH = Path(__file__).parent.parent.parent / "models" / "optimized_intent_pipeline.json"
-GEPA_PIPELINE_PATH = Path(__file__).parent.parent.parent / "models" / "gepa_optimized_pipeline.json"
+GEPA_AGENTS_PATH = AGENT_ARTIFACTS_DIR
+# Backward-compatible alias; isolated GEPA now stores per-agent artifacts in this directory.
+GEPA_PIPELINE_PATH = GEPA_AGENTS_PATH
 
 # =============================================================================
 # GEPA CONFIGURATION
@@ -33,19 +42,19 @@ class GepaConfig:
         self.reflection_model = os.getenv("GEPA_REFLECTION_MODEL", "claude-3-5-sonnet")
         self.budget_mode = os.getenv("GEPA_BUDGET_MODE", "medium")  # light, medium, heavy
         self.max_metric_calls = self._get_int_env("GEPA_MAX_METRIC_CALLS", None)
-        self.component_selector = os.getenv("GEPA_COMPONENT_SELECTOR", "round_robin")
         self.use_merge = self._get_bool_env("GEPA_USE_MERGE", True)
         self.track_stats = self._get_bool_env("GEPA_TRACK_STATS", True)
         self.log_dir = os.getenv("GEPA_LOG_DIR", None)
         self.wandb_enabled = self._get_bool_env("GEPA_WANDB_ENABLED", False)
         self.wandb_api_key = os.getenv("WANDB_API_KEY", None)
 
-        # Component-specific settings
+        # Agent-specific settings
         self.optimize_classifier = self._get_bool_env("GEPA_OPTIMIZE_CLASSIFIER", True)
         self.optimize_scope = self._get_bool_env("GEPA_OPTIMIZE_SCOPE", True)
         self.optimize_time = self._get_bool_env("GEPA_OPTIMIZE_TIME", True)
         self.optimize_metrics = self._get_bool_env("GEPA_OPTIMIZE_METRICS", True)
         self.optimize_dimensions = self._get_bool_env("GEPA_OPTIMIZE_DIMENSIONS", True)
+        self.optimize_post_processing = self._get_bool_env("GEPA_OPTIMIZE_POST_PROCESSING", True)
 
         # Training configuration
         self.training_examples_limit = self._get_int_env("GEPA_TRAINING_LIMIT", None)
@@ -68,20 +77,22 @@ class GepaConfig:
             logger.warning(f"Invalid integer value for {key}: {value}, using default: {default}")
             return default
 
-    def get_enabled_components(self) -> list[str]:
-        """Get list of components enabled for optimization."""
-        components = []
+    def get_enabled_agents(self) -> list[str]:
+        """Get list of agents enabled for isolated optimization."""
+        agents = []
         if self.optimize_classifier:
-            components.append('classifier')
+            agents.append("classifier")
         if self.optimize_scope:
-            components.append('scope')
+            agents.append("scope")
         if self.optimize_time:
-            components.append('time')
+            agents.append("time")
         if self.optimize_metrics:
-            components.append('metrics')
+            agents.append("metrics")
         if self.optimize_dimensions:
-            components.append('dimensions')
-        return components
+            agents.append("dimensions")
+        if self.optimize_post_processing:
+            agents.append("post_processing")
+        return [agent for agent in agents if agent in OPTIMIZABLE_AGENTS]
 
     def get_reflection_lm(self) -> Any:
         """Create reflection language model for GEPA."""
@@ -103,12 +114,11 @@ class GepaConfig:
             'reflection_model': self.reflection_model,
             'budget_mode': self.budget_mode,
             'max_metric_calls': self.max_metric_calls,
-            'component_selector': self.component_selector,
             'use_merge': self.use_merge,
             'track_stats': self.track_stats,
             'log_dir': self.log_dir,
             'wandb_enabled': self.wandb_enabled,
-            'enabled_components': self.get_enabled_components(),
+            'enabled_agents': self.get_enabled_agents(),
             'training_examples_limit': self.training_examples_limit,
             'validation_examples_limit': self.validation_examples_limit,
             'seed': self.seed
@@ -128,7 +138,7 @@ def is_gepa_enabled() -> bool:
 def get_optimization_mode() -> str:
     """Get current optimization mode."""
     if is_gepa_enabled():
-        return "gepa"
+        return "gepa_agents"
     else:
         return "bootstrap"
 
@@ -198,6 +208,7 @@ class PipelineManager:
         self._gepa_pipeline = None
         self._is_configured = False
         self._optimization_method = None
+        self._loaded_gepa_agents: list[str] = []
 
     def get_pipeline(self) -> IntentExtractionPipeline:
         """
@@ -209,7 +220,7 @@ class PipelineManager:
         if not self._is_configured:
             self._configure()
 
-        # Priority order: GEPA > Compiled (BootstrapFewShot) > Fresh
+        # Priority order: GEPA agent artifacts > Compiled (BootstrapFewShot) > Fresh
         if self._should_use_gepa() and not self._gepa_pipeline:
             self._try_load_gepa_pipeline()
 
@@ -230,24 +241,26 @@ class PipelineManager:
             return self._pipeline
 
     def _should_use_gepa(self) -> bool:
-        """Check if GEPA pipeline should be used."""
-        return is_gepa_enabled() and GEPA_PIPELINE_PATH.exists()
+        """Check if GEPA agent artifacts should be used."""
+        return is_gepa_enabled() and bool(get_available_optimized_agents())
 
     def _try_load_gepa_pipeline(self) -> None:
-        """Try to load GEPA-optimized pipeline."""
-        if not GEPA_PIPELINE_PATH.exists():
-            logger.info("GEPA pipeline not found")
+        """Try to load pipeline with isolated GEPA-optimized agents."""
+        available = get_available_optimized_agents()
+        if not available:
+            logger.info("No GEPA agent artifacts found")
             return
 
         try:
-            logger.info(f"Loading GEPA-optimized pipeline from {GEPA_PIPELINE_PATH}")
+            logger.info("Loading GEPA-optimized agents: %s", ", ".join(available))
             pipeline = IntentExtractionPipeline()
-            pipeline.load(str(GEPA_PIPELINE_PATH))
+            loaded = load_optimized_agents_into_pipeline(pipeline)
             self._gepa_pipeline = pipeline
-            self._optimization_method = "gepa"
-            logger.info("GEPA-optimized pipeline loaded successfully")
+            self._loaded_gepa_agents = loaded
+            self._optimization_method = "gepa_agents"
+            logger.info("GEPA agents loaded successfully")
         except Exception as e:
-            logger.warning(f"Failed to load GEPA pipeline: {e}")
+            logger.warning(f"Failed to load GEPA agent artifacts: {e}")
 
     def _try_load_compiled_pipeline(self) -> None:
         """Try to load BootstrapFewShot compiled pipeline."""
@@ -286,7 +299,9 @@ class PipelineManager:
         return {
             'method': self._optimization_method or 'none',
             'gepa_enabled': is_gepa_enabled(),
-            'gepa_available': GEPA_PIPELINE_PATH.exists(),
+            'gepa_available': bool(get_available_optimized_agents()),
+            'gepa_agents_loaded': self._loaded_gepa_agents,
+            'gepa_artifacts_path': str(GEPA_AGENTS_PATH),
             'compiled_available': COMPILED_PIPELINE_PATH.exists(),
             'current_mode': get_optimization_mode(),
             'gepa_config': gepa_config.to_dict() if is_gepa_enabled() else None
@@ -298,6 +313,7 @@ class PipelineManager:
         self._compiled_pipeline = None
         self._gepa_pipeline = None
         self._optimization_method = None
+        self._loaded_gepa_agents = []
         logger.info("Pipeline instances reset")
 
     def use_gepa_pipeline(self, pipeline_path: str) -> None:
@@ -307,15 +323,17 @@ class PipelineManager:
         Args:
             pipeline_path: Path to GEPA-optimized pipeline
         """
-        try:
-            pipeline = IntentExtractionPipeline()
-            pipeline.load(pipeline_path)
-            self._gepa_pipeline = pipeline
-            self._optimization_method = "gepa"
-            logger.info(f"Using GEPA pipeline from: {pipeline_path}")
-        except Exception as e:
-            logger.error(f"Failed to load GEPA pipeline from {pipeline_path}: {e}")
-            raise
+        candidate = Path(pipeline_path)
+        if not candidate.exists() or not candidate.is_dir():
+            raise ValueError(
+                "Whole-pipeline GEPA artifacts are deprecated. Provide a directory containing per-agent artifacts."
+            )
+        pipeline = IntentExtractionPipeline()
+        loaded = load_optimized_agents_into_pipeline(pipeline, artifact_root=candidate)
+        self._gepa_pipeline = pipeline
+        self._loaded_gepa_agents = loaded
+        self._optimization_method = "gepa_agents"
+        logger.info("Using GEPA agent artifacts from: %s", pipeline_path)
 
     def use_compiled_pipeline(self, pipeline_path: str) -> None:
         """
@@ -356,7 +374,7 @@ def get_pipeline_info() -> Dict[str, Any]:
 # =============================================================================
 
 def trigger_gepa_optimization(reflection_lm: Optional[Any] = None,
-                             **kwargs) -> IntentExtractionPipeline:
+                             **kwargs) -> Dict[str, Any]:
     """
     Trigger GEPA optimization with current configuration.
 
@@ -365,31 +383,23 @@ def trigger_gepa_optimization(reflection_lm: Optional[Any] = None,
         **kwargs: Additional GEPA configuration overrides
 
     Returns:
-        GEPA-optimized pipeline
+        Per-agent optimization summary
     """
     if not gepa_config.enabled:
         raise ValueError("GEPA optimization is not enabled. Set GEPA_OPTIMIZATION_ENABLED=true")
-
-    try:
-        from .gepa_optimizer import GepaIntentOptimizer
-    except ImportError:
-        raise ImportError("GEPA optimizer not available")
 
     # Get reflection LM
     if reflection_lm is None:
         reflection_lm = gepa_config.get_reflection_lm()
 
-    # Create optimizer
-    optimizer = GepaIntentOptimizer(
+    optimizer = AgentGepaOptimizer(
         pipeline=IntentExtractionPipeline(),
         reflection_lm=reflection_lm,
-        log_dir=gepa_config.log_dir
+        artifact_root=gepa_config.log_dir or str(GEPA_AGENTS_PATH),
     )
 
-    # Configure optimizer
     optimizer_config = {
         'auto': gepa_config.budget_mode,
-        'component_selector': gepa_config.component_selector,
         'use_merge': gepa_config.use_merge,
         'track_stats': gepa_config.track_stats,
         'seed': gepa_config.seed
@@ -405,21 +415,21 @@ def trigger_gepa_optimization(reflection_lm: Optional[Any] = None,
             'wandb_api_key': gepa_config.wandb_api_key
         })
 
-    # Apply overrides
     optimizer_config.update(kwargs)
 
-    # Configure and optimize
     optimizer.configure(**optimizer_config)
-    optimized_pipeline = optimizer.optimize()
+    enabled_agents = gepa_config.get_enabled_agents()
+    results = optimizer.optimize_all_agents(agents=enabled_agents)
 
-    # Save GEPA pipeline
-    optimizer.save_optimized_pipeline(str(GEPA_PIPELINE_PATH))
-
-    # Update pipeline manager
-    pipeline_manager.use_gepa_pipeline(str(GEPA_PIPELINE_PATH))
-
-    logger.info("GEPA optimization completed and pipeline updated")
-    return optimized_pipeline
+    pipeline_manager.force_refresh()
+    pipeline_manager.get_pipeline()
+    logger.info("Isolated GEPA optimization completed for agents: %s", ", ".join(enabled_agents))
+    return {
+        "mode": "isolated_agents",
+        "artifact_root": str(GEPA_AGENTS_PATH),
+        "enabled_agents": enabled_agents,
+        "results": results,
+    }
 
 def compare_optimization_methods(reflection_lm: Optional[Any] = None) -> Dict[str, Any]:
     """
@@ -431,22 +441,19 @@ def compare_optimization_methods(reflection_lm: Optional[Any] = None) -> Dict[st
     Returns:
         Comparison results
     """
-    try:
-        from .gepa_optimizer import GepaIntentOptimizer
-    except ImportError:
-        raise ImportError("GEPA optimizer not available")
-
-    # Get reflection LM
     if reflection_lm is None:
         reflection_lm = gepa_config.get_reflection_lm()
-
-    # Create optimizer and run comparison
-    optimizer = GepaIntentOptimizer(
+    optimizer = AgentGepaOptimizer(
         pipeline=IntentExtractionPipeline(),
-        reflection_lm=reflection_lm
+        reflection_lm=reflection_lm,
+        artifact_root=str(GEPA_AGENTS_PATH),
     )
-
-    return optimizer.compare_with_bootstrap()
+    return {
+        "mode": "isolated_agents",
+        "available_optimized_agents": get_available_optimized_agents(),
+        "enabled_agents": gepa_config.get_enabled_agents(),
+        "note": "Use trigger_gepa_optimization() to run per-agent GEPA optimization.",
+    }
 
 def create_reflection_lm(model: Optional[str] = None,
                         temperature: float = 1.0,
@@ -489,7 +496,9 @@ def validate_gepa_setup() -> Dict[str, Any]:
         'gepa_library_available': False,
         'reflection_lm_accessible': False,
         'config_valid': True,
-        'issues': []
+        'issues': [],
+        'optimizable_agents': OPTIMIZABLE_AGENTS,
+        'available_agent_artifacts': get_available_optimized_agents(),
     }
 
     # Check GEPA library availability
@@ -510,10 +519,10 @@ def validate_gepa_setup() -> Dict[str, Any]:
             results['issues'].append(f"Reflection LM not accessible: {e}")
 
     # Validate configuration
-    enabled_components = gepa_config.get_enabled_components()
-    if gepa_config.enabled and not enabled_components:
+    enabled_agents = gepa_config.get_enabled_agents()
+    if gepa_config.enabled and not enabled_agents:
         results['config_valid'] = False
-        results['issues'].append("GEPA enabled but no components configured for optimization")
+        results['issues'].append("GEPA enabled but no agents configured for optimization")
 
     if gepa_config.wandb_enabled and not gepa_config.wandb_api_key:
         results['issues'].append("Wandb enabled but WANDB_API_KEY not set")

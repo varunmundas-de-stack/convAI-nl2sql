@@ -115,3 +115,79 @@ def step_gen_insights(ctx: PipelineContext, span) -> None:
         span.set_status(Status(StatusCode.ERROR, str(e)))
         span.record_exception(e)
         logger.warning(f"Insight/spec generation failed (non-fatal): {e}")
+
+
+@pipeline_step("insights_no_refine")
+def step_gen_insights_no_refine(ctx: PipelineContext, span) -> None:
+    """
+    Step 6 (compound sub-query variant) — insight engine + visual spec only.
+
+    Skips the LLM refiner so that compound queries can do a single
+    aggregate refinement after all sub-queries are processed.
+    """
+    _span_set(span,
+        input_data_row_count=len(ctx.data or []),
+        input_has_comparison_data=ctx.comparison_data is not None,
+        input_strategy=ctx.period_strategy or "",
+    )
+    try:
+        # 6a — Insight engine
+        with tracer.start_as_current_span("insights.engine") as s:
+            logger.info("Step 6a: Generating insights (no LLM refine)...")
+            result = generate_insights(
+                data=ctx.data or [],
+                intent=ctx.validated_intent,
+                previous_qco=ctx.previous_qco,
+                strategy=ctx.period_strategy,
+                comparison_data=ctx.comparison_data,
+            )
+            ctx.insights = result
+            ctx.stage = Stage.INSIGHTS_GENERATED
+            try:
+                _span_set(s,
+                    output_insight_count=len(result.insights),
+                    output_total_formatted=result.total_formatted or "",
+                    output_intent_type=result.intent_type or "",
+                    output_primary_label=getattr(result.primary_insight, "label", ""),
+                    output_value=getattr(result, "model_dump", lambda: str(result))(),
+                )
+            except Exception as _e:
+                logger.debug(f"Non-fatal span log error: {_e}")
+            logger.info(f"Insights generated: {len(result.insights)}")
+
+        # 6b — Skipped (LLM refinement deferred to compound-level aggregate call)
+        ctx.refined_insights = None
+
+        # 6c — Visual spec
+        with tracer.start_as_current_span("visual_spec") as s:
+            logger.info("Step 6c: Generating visual spec...")
+            spec = generate_visual_spec(
+                data=ctx.data or [],
+                insights=result,
+                chart_type_hint=None,
+                query=ctx.query,
+                comparison_data=ctx.comparison_data,
+                strategy=ctx.period_strategy,
+                intent=ctx.validated_intent,
+            )
+            ctx.visual_spec = spec
+            ctx.stage = Stage.VISUAL_SPEC_GENERATED
+            _span_set(s,
+                output_chart_type=spec.chart_type or "",
+                output_annotations_count=len(spec.annotations),
+                output_markers_count=len(spec.markers),
+                output_title=getattr(spec, "title", "") or "",
+                output_value=getattr(spec, "model_dump", lambda: str(spec))(),
+            )
+            logger.info(f"Visual spec generated: chart_type={spec.chart_type}")
+
+    except InsightEngineError as e:
+        logger.error(f"Insight engine error: {e}")
+        span.record_exception(e)
+        ctx.fail(Stage.CUBE_EXECUTED, e.__class__.__name__, str(e))
+        _span_error(span, ctx.error)
+
+    except Exception as e:
+        span.set_status(Status(StatusCode.ERROR, str(e)))
+        span.record_exception(e)
+        logger.warning(f"Insight/spec generation failed (non-fatal): {e}")

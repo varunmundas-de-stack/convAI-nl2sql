@@ -478,7 +478,7 @@ function CompoundSectionsRenderer({ spec }: CompoundSectionsRendererProps) {
                         </div>
                         <div className="p-4">
                             {isCompleted && section.visual_spec ? (
-                                <ChartRenderer visual_spec={section.visual_spec} refined_insights={section.insights} />
+                                <ChartRenderer visual_spec={section.visual_spec} />
                             ) : isPending ? (
                                 <div className="flex items-center justify-center h-32 text-gray-400">
                                     {status === "clarifying" ? (

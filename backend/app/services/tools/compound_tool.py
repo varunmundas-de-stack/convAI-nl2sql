@@ -71,7 +71,7 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
                 # Import step functions from their respective tools
                 from app.services.tools.intent_tool import step_drill_merge, step_validate_intent
                 from app.services.tools.query_tool import step_build_query, step_execute_query
-                from app.services.tools.insights_tool import step_gen_insights
+                from app.services.tools.insights_tool import step_gen_insights_no_refine
 
                 # Step 2: Drill merge
                 step_drill_merge(subquery_ctx)
@@ -89,8 +89,8 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
                 step_execute_query(subquery_ctx)
                 logger.info(f"Sub-query {subquery_index}: Query execution completed")
 
-                # Step 6: Generate insights and visual spec
-                step_gen_insights(subquery_ctx)
+                # Step 6: Generate insights and visual spec (no LLM refine — done once at aggregate level)
+                step_gen_insights_no_refine(subquery_ctx)
                 logger.info(f"Sub-query {subquery_index}: Insights generation completed")
 
                 # Step 7: Resolve QCO
@@ -206,11 +206,15 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
         combined_results.append(section_data)
 
         # Collect insights and visual specs
-        if section_data.get("insights"):
+        # Store both the serialized dict (for per-section display) and the raw InsightResult
+        # object (for the aggregate LLM refinement step that runs once after the loop).
+        if section_data.get("status") == "completed":
             combined_insights.append({
                 "subquery_index": subquery_index,
                 "subquery_text": subquery_text,
-                "insights": section_data["insights"]
+                "insights": section_data["insights"],
+                # Raw InsightResult — used only for post-loop aggregate refinement, not serialised
+                "raw_insight_result": subquery_ctx.insights,
             })
 
         if section_data.get("visual_spec"):
@@ -251,16 +255,70 @@ def _handle_compound_query_response(compound_result: dict, ctx: PipelineContext)
         "is_partial": result_type == "compound_partial_results"
     }
 
-    # Create compound insights
+    # Create compound insights (refined_insights will be patched in after aggregate call below)
     compound_insights = {
         "type": "compound_insights",
-        "sections": combined_insights,
+        "sections": [
+            {"subquery_index": s["subquery_index"], "subquery_text": s["subquery_text"], "insights": s["insights"]}
+            for s in combined_insights
+        ],
         "summary": status_summary,
-        "is_partial": result_type == "compound_partial_results"
+        "is_partial": result_type == "compound_partial_results",
+        "refined_insights": None,  # populated below
     }
 
     logger.info(f"Compound query processing complete: {len(combined_results)} sections with data")
 
+    # -------------------------------------------------------------------------
+    # Single aggregate LLM refinement across all sub-query insights
+    # -------------------------------------------------------------------------
+    compound_refined_insights = None
+    if combined_insights:
+        try:
+            from app.services.insights.insight_refiner import refine_insights
+            from app.services.insights.insight_engine import InsightResult
+
+            # Merge all sub-query InsightResult objects into one representative object.
+            # We build a synthetic InsightResult whose `insights` list contains all
+            # collected insights from every sub-query.
+            merged_all_insights = []
+            merged_total_value = 0.0
+            merged_total_rows = 0
+            for section_insights in combined_insights:
+                section_result = section_insights.get("raw_insight_result")
+                if section_result:
+                    merged_all_insights.extend(section_result.insights or [])
+                    merged_total_value += section_result.total_value or 0.0
+                    merged_total_rows += section_result.total_rows or 0
+
+            if merged_all_insights:
+                merged_insight_result = InsightResult(
+                    total_rows=merged_total_rows,
+                    total_value=merged_total_value,
+                    total_formatted=None,  # refiner doesn't need this formatted
+                    insights=merged_all_insights,
+                    primary_insight=merged_all_insights[0] if merged_all_insights else None,
+                )
+
+                # Use the original compound query text as the prompt
+                original_query = compound_result.get("original_query") or ctx.original_query or "compound query"
+                compound_refined_insights = refine_insights(
+                    insight_result=merged_insight_result,
+                    query=original_query,
+                    previous_qco=None,
+                )
+                logger.info("Compound aggregate refinement completed — single LLM call for all sub-queries")
+        except Exception as e:
+            logger.warning(f"Compound aggregate insight refinement failed (non-fatal): {e}")
+            compound_refined_insights = None
+
+    # Attach the aggregate refined insights to the compound insights dict
+    if compound_refined_insights is not None:
+        compound_insights["refined_insights"] = (
+            compound_refined_insights.model_dump()
+            if hasattr(compound_refined_insights, "model_dump")
+            else compound_refined_insights
+        )
     return {
         "results": combined_results,
         "visual_spec": compound_visual_spec,

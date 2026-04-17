@@ -132,6 +132,13 @@ class PipelineContext:
             if parts:
                 effective = f"{self.original_query} ({', '.join(parts)})"
 
+        # For compound queries the aggregate refined_insights is nested inside
+        # ctx.insights["refined_insights"] (a plain dict).  Surface it at the
+        # top level so the frontend can find it at backendResponse.refined_insights.
+        refined_insights_out = _dump(self.refined_insights)
+        if refined_insights_out is None and isinstance(self.insights, dict):
+            refined_insights_out = self.insights.get("refined_insights")
+
         return {
             "query": self.query,
             "original_query": self.original_query,
@@ -151,7 +158,7 @@ class PipelineContext:
             "data": self.data,
             "comparison_data": self.comparison_data,
             "insights": _dump(self.insights),
-            "refined_insights": _dump(self.refined_insights),
+            "refined_insights": refined_insights_out,
             "visual_spec": _dump(self.visual_spec),
             "clarification": self.clarification,
             "missing_fields": self.missing_fields,
@@ -160,7 +167,7 @@ class PipelineContext:
             "clarification_answers": self.clarification_answers,
             "is_compound_query": self.is_compound_query,
             "compound_metadata": self.compound_metadata,
-            "is_compound_partial": self.is_compound_partial,
+            "is_partial": self.is_compound_partial,
             "has_compound_clarification_state": self.compound_clarification_state is not None,
             "error": self.error.to_dict() if self.error else None,
-        }
+        }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { ArrowUp } from "lucide-react";
-import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession } from "@/services/api";
+import { ArrowUp, Plus } from "lucide-react";
+import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession, retryQuery } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
 import { parseClarificationAnswers } from "@/utils/clarificationParser";
@@ -12,12 +12,14 @@ export default function ChatWindow() {
     const [isBackendAvailable, setIsBackendAvailable] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [sessionId, setSessionId] = useState<string | null>(null);
+    const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const {
         messages,
         pendingClarification,
         backendResponse,
+        compoundState,
         addUserMessage,
         handleResponse,
         clearMessages,
@@ -67,16 +69,27 @@ export default function ChatWindow() {
         try {
             let result;
 
-            if (pendingClarification && backendResponse) {
-                // In clarification mode - parse user input into structured format
-                const missingFields = backendResponse.missing_fields || [];
-                const answers = parseClarificationAnswers(userInput, missingFields);
+            if (pendingClarification) {
+                // Handle compound clarifications
+                if (pendingClarification.type === "compound_clarification_required" && compoundState) {
+                    result = await clarify({
+                        compound_state: compoundState,
+                        clarification_answer: userInput,
+                    });
+                } else if (backendResponse) {
+                    // Regular clarifications
+                    const missingFields = backendResponse.missing_fields || [];
+                    const answers = parseClarificationAnswers(userInput, missingFields);
 
-                result = await clarify({
-                    request_id: backendResponse.request_id,
-                    answers: answers,
-                });
+                    result = await clarify({
+                        request_id: backendResponse.request_id,
+                        answers: answers,
+                    });
+                } else {
+                    throw new Error("Missing backend response for clarification");
+                }
             } else {
+                // Regular query
                 result = await sendQuery(userInput);
                 // Update session ID from response
                 if (result.sessionId) {
@@ -97,7 +110,7 @@ export default function ChatWindow() {
     }
 
     async function submitClarification(answerValue: string) {
-        if (isLoading || !isBackendAvailable || !pendingClarification || !backendResponse) return;
+        if (isLoading || !isBackendAvailable || !pendingClarification) return;
 
         // Show friendly message to user
         const displayValue = answerValue.replace(/_/g, " ");
@@ -106,13 +119,28 @@ export default function ChatWindow() {
         setIsLoading(true);
 
         try {
-            const missingFields = backendResponse.missing_fields || [];
-            const answers = parseClarificationAnswers(answerValue, missingFields);
+            let result;
 
-            const result = await clarify({
-                request_id: backendResponse.request_id,
-                answers: answers,
-            });
+            // Handle compound clarifications
+            if (pendingClarification.type === "compound_clarification_required" && compoundState) {
+                result = await clarify({
+                    compound_state: compoundState,
+                    clarification_answer: answerValue,
+                });
+            } else {
+                // Regular clarification handling
+                if (!backendResponse) {
+                    throw new Error("Missing backend response for clarification");
+                }
+
+                const missingFields = backendResponse.missing_fields || [];
+                const answers = parseClarificationAnswers(answerValue, missingFields);
+
+                result = await clarify({
+                    request_id: backendResponse.request_id,
+                    answers: answers,
+                });
+            }
 
             handleResponse(result.response, result.raw);
         } catch (error) {
@@ -122,6 +150,47 @@ export default function ChatWindow() {
             });
         } finally {
             setIsLoading(false);
+        }
+    }
+
+    async function handleRetry(modifiedQuery: string, originalMessage: any) {
+        if (isLoading || !isBackendAvailable || !sessionId) return;
+
+        // Use the original_query from the backend response (not effective_query)
+        // The original_query is what we want for RLHF logging
+        const originalQuery = originalMessage.rawBackendData?.original_query ||
+                             originalMessage.rawBackendData?.query ||
+                             modifiedQuery;
+
+        setRetryingMessageId(originalMessage.id);
+        setIsLoading(true);
+
+        try {
+            const result = await retryQuery(
+                originalMessage.rawBackendData?.request_id,
+                modifiedQuery,
+                sessionId,
+                originalQuery
+            );
+
+            // Update session ID from response
+            if (result.sessionId) {
+                setSessionId(result.sessionId);
+            }
+
+            // Add user message with the modified query
+            addUserMessage(modifiedQuery);
+
+            // Handle the response
+            handleResponse(result.response, result.raw);
+        } catch (error) {
+            handleResponse({
+                type: "error",
+                message: error instanceof Error ? error.message : "Retry failed",
+            });
+        } finally {
+            setIsLoading(false);
+            setRetryingMessageId(null);
         }
     }
 
@@ -162,6 +231,15 @@ export default function ChatWindow() {
                 <div className="flex items-center justify-between">
                     <h1 className="text-xl font-semibold text-gray-900">NL2SQL Chat</h1>
                     <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleNewConversation}
+                            className="flex items-center gap-1.5 text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+                            title="Start a new conversation"
+                        >
+                            <Plus size={14} />
+                            New Chat
+                        </button>
+
                         {/* Session Indicator */}
                         {sessionId && (
                             <div className="flex items-center gap-2 text-xs">
@@ -169,17 +247,10 @@ export default function ChatWindow() {
                                 <code className="bg-gray-100 px-2 py-1 rounded text-gray-700 font-mono">
                                     {sessionId}
                                 </code>
-                                <button
-                                    onClick={handleNewConversation}
-                                    className="text-blue-600 hover:text-blue-700 underline"
-                                    title="Start a new conversation"
-                                >
-                                    New
-                                </button>
                             </div>
                         )}
                         {/* Backend Status */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 ml-2">
                             <div
                                 className={`w-2 h-2 rounded-full ${isBackendAvailable ? "bg-green-500" : "bg-red-500"
                                     }`}
@@ -201,15 +272,36 @@ export default function ChatWindow() {
                         </div>
                     )}
 
-                    {messages.map((msg) => (
-                        <MessageBubble
-                            key={msg.id}
-                            message={msg}
-                            responseData={msg.responseData}
-                            onClarify={submitClarification}
-                            isActiveClarification={pendingClarification === msg.responseData}
-                        />
-                    ))}
+                    {messages.map((msg, index) => {
+                        // Determine the query to show in retry modal
+                        // Use effective_query (original + clarifications) for display
+                        let originalQuery = "";
+                        if (msg.role === "assistant" && msg.rawBackendData?.effective_query) {
+                            // Use the effective query (original + clarifications)
+                            originalQuery = msg.rawBackendData.effective_query;
+                        } else if (msg.role === "assistant" && msg.rawBackendData?.original_query) {
+                            // Fall back to original query from backend
+                            originalQuery = msg.rawBackendData.original_query;
+                        } else if (index > 0 && messages[index - 1].role === "user") {
+                            // Final fallback to previous user message
+                            originalQuery = messages[index - 1].content;
+                        }
+
+                        return (
+                            <MessageBubble
+                                key={msg.id}
+                                message={msg}
+                                responseData={msg.responseData}
+                                rawBackendData={msg.rawBackendData}
+                                onClarify={submitClarification}
+                                isActiveClarification={pendingClarification === msg.responseData}
+                                onRetry={msg.role === "assistant" && msg.rawBackendData?.request_id
+                                    ? (modifiedQuery) => handleRetry(modifiedQuery, msg)
+                                    : undefined}
+                                originalQuery={originalQuery}
+                            />
+                        );
+                    })}
 
                     {isLoading && (
                         <div className="flex justify-start mb-4">

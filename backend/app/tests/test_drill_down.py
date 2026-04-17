@@ -22,7 +22,7 @@ from app.models.hierarchy import (
     all_hierarchy_dimensions,
     MAX_NON_TIME_AXES,
 )
-from app.services.drill_detector import (
+from app.services.intent.drill_detector import (
     detect_drill,
     apply_drill_mutation,
     DrillResult,

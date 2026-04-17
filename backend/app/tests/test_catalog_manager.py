@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from app.services.catalog_manager import CatalogManager
+from app.services.helpers.catalog_manager import CatalogManager
 
 CATALOG_PATH = Path(__file__).parent.parent.parent / "catalog" / "catalog.yaml"
 

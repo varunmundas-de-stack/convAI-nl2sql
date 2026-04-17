@@ -4,15 +4,27 @@ import { ChatMessage, ChatResponse } from "@/types/chat";
 import TableRenderer from "./TableRenderer";
 import ChartRenderer from "./ChartRenderer";
 import ClarificationPrompt from "./ClarificationPrompt";
+import FeedbackBar from "./FeedbackBar";
 
 interface MessageBubbleProps {
     message: ChatMessage;
     responseData?: ChatResponse;
+    rawBackendData?: any;
     onClarify?: (value: string) => void;
     isActiveClarification?: boolean;
+    onRetry?: (modifiedQuery: string) => void;
+    originalQuery?: string;
 }
 
-export default function MessageBubble({ message, responseData, onClarify, isActiveClarification }: MessageBubbleProps) {
+export default function MessageBubble({
+    message,
+    responseData,
+    rawBackendData,
+    onClarify,
+    isActiveClarification,
+    onRetry,
+    originalQuery
+}: MessageBubbleProps) {
     const isUser = message.role === "user";
     const isSystem = message.role === "system";
 
@@ -34,6 +46,12 @@ export default function MessageBubble({ message, responseData, onClarify, isActi
         (responseData.type === "clarification_required" && isActiveClarification) ||
         responseData.type === "error"
     );
+
+    // Show feedback bar for assistant messages that are NOT errors or clarifications
+    const showFeedback = !isUser && !isSystem && responseData &&
+        responseData.type !== "error" &&
+        responseData.type !== "clarification_required" &&
+        rawBackendData?.request_id;
 
     return (
         <div className={`flex ${alignClasses} mb-6`}>
@@ -70,6 +88,33 @@ export default function MessageBubble({ message, responseData, onClarify, isActi
                             </div>
                         )}
                     </div>
+                )}
+
+                {/* Feedback bar */}
+                {showFeedback && (
+                    <FeedbackBar
+                        requestId={rawBackendData.request_id}
+                        query={rawBackendData.query || ""}
+                        promptVersion={rawBackendData.prompt_version}
+                        abGroup={rawBackendData.ab_group}
+                        responseSummary={
+                            rawBackendData.refined_insights?.executive_summary ||
+                            rawBackendData.refined_insights?.primary_insight?.headline ||
+                            message.content || ""
+                        }
+                        fullResponse={
+                            rawBackendData.refined_insights
+                                ? JSON.stringify(rawBackendData.refined_insights)
+                                : undefined
+                        }
+                        sqlQuery={
+                            rawBackendData.cube_query
+                                ? JSON.stringify(rawBackendData.cube_query)
+                                : undefined
+                        }
+                        originalQuery={originalQuery}
+                        onRetry={onRetry}
+                    />
                 )}
             </div>
         </div>

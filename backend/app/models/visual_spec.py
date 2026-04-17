@@ -6,7 +6,7 @@ from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from app.services.insight_engine import Direction, Severity
+from app.services.insights.insight_engine import Direction, Severity
 
 class ChartType(str, Enum):
     BAR = "bar"
@@ -18,6 +18,8 @@ class ChartType(str, Enum):
     HORIZONTAL_BAR = "horizontal_bar"
     GROUPED_BAR = "grouped_bar"
     MULTI_LINE = "multi_line"
+    COMPOUND_SECTIONS = "compound_sections"
+    COMPOUND_SECTIONS_PARTIAL = "compound_sections_partial"
 
 
 class EmphasisLevel(str, Enum):
@@ -62,6 +64,7 @@ class SeriesConfig(BaseModel):
 class PivotConfig(BaseModel):
     index_dimension: str
     stack_dimension: str
+    stack_dimensions: Optional[list[str]] = None
     stack_keys: list[str]
 
 
@@ -114,3 +117,10 @@ class VisualSpec(BaseModel):
     metric: Optional[str] = None
     empty: bool = False
     trend_slope: Optional[float] = None
+
+    # Compound query specific fields
+    sections: Optional[list[dict[str, Any]]] = None
+    total_sections: Optional[int] = None
+    completed_sections: Optional[int] = None
+    pending_sections: Optional[int] = None
+    is_partial: Optional[bool] = None

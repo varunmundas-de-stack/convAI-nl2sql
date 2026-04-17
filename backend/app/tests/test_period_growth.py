@@ -6,7 +6,7 @@ Tests for Period & Growth Execution:
 
 import pytest
 from app.models.intent import Intent, Metric, TimeSpec, PostProcessing, ComparisonSpec
-from app.services.period_planner import QueryStrategy, determine_strategy
+from app.services.cube.period_planner import QueryStrategy, determine_strategy
 from app.services.growth_computer import (
     compute_row_wise_growth,
     merge_and_compute_growth,

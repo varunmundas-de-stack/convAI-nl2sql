@@ -26,8 +26,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from opentelemetry.trace import Status, StatusCode
 
-from app.services.query_orchestrator import execute_query as run_pipeline, resume_query, PipelineStage
-from app.services.catalog_manager import CatalogManager
+from app.services.query_orchestrator import execute_query as run_pipeline, resume_query, execute_retry_query, Stage
+from app.services.helpers.catalog_manager import CatalogManager
 from app.utils.tracer import get_tracer
 
 # Module-level tracer (provider is set up by llm_service on first import)
@@ -97,6 +97,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Loading catalog from: {CATALOG_PATH}")
     app_state.catalog = CatalogManager(str(CATALOG_PATH))
     
+    # Initialize RLHF database and register v1
+    try:
+        from app.rlhf.db import init_db
+        from app.rlhf.prompt_manager import ensure_v1_registered
+        init_db()
+        ensure_v1_registered()
+        logger.info("RLHF subsystem initialized")
+    except Exception as e:
+        logger.warning(f"RLHF initialization failed (non-fatal): {e}")
+    
     logger.info("NL2SQL API started successfully")
     
     yield
@@ -115,6 +125,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Mount RLHF router
+try:
+    from app.rlhf.router import router as rlhf_router
+    app.include_router(rlhf_router, prefix="/rlhf")
+except Exception as e:
+    logger.warning(f"RLHF router mount failed (non-fatal): {e}")
 
 # CORS middleware
 app.add_middleware(
@@ -150,6 +167,31 @@ class ClarificationRequest(BaseModel):
     answers: dict[str, Any]
     session_id: str | None = None
 
+class RetryRequest(BaseModel):
+    """Request model for retrying a query with modifications."""
+    original_request_id: str = Field(
+        ...,
+        description="Request ID of the original query being retried",
+        json_schema_extra={"example": "req_abc123"}
+    )
+    modified_query: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Modified query to retry with",
+        json_schema_extra={"example": "Show me total sales by region for last 60 days"}
+    )
+    session_id: str = Field(
+        ...,
+        description="Session ID to maintain conversational context",
+        json_schema_extra={"example": "sess_abc123"}
+    )
+    original_query: str = Field(
+        ...,
+        description="Original query for comparison and logging",
+        json_schema_extra={"example": "Show me total sales by region for last 30 days"}
+    )
+
 # =============================================================================
 # HELPER: MAP PIPELINE STAGE TO HTTP STATUS
 # =============================================================================
@@ -168,7 +210,7 @@ def _get_http_status_for_stage(stage: str, error_type: str) -> int:
         return status.HTTP_504_GATEWAY_TIMEOUT
     if "ServiceUnavailable" in error_type:
         return status.HTTP_503_SERVICE_UNAVAILABLE
-    if "Connection" in error_type or stage == PipelineStage.CUBE_QUERY_BUILT:
+    if "Connection" in error_type or stage == Stage.CUBE_QUERY_BUILT:
         return status.HTTP_502_BAD_GATEWAY
     
     # Intent/Validation errors are client errors
@@ -218,7 +260,7 @@ async def execute_query(request: QueryRequest):
         response_dict = response.to_dict()
 
         # Check for clarification request - this is NOT an error, return 200
-        if response.stage == PipelineStage.CLARIFICATION_REQUESTED:
+        if response.stage == Stage.CLARIFICATION_REQUESTED:
             logger.info(f"Clarification requested: {response.missing_fields}")
             span.set_attribute("output.clarification_requested", True)
             span.set_attribute("output.missing_fields", str(response.missing_fields or []))
@@ -258,7 +300,10 @@ async def execute_query(request: QueryRequest):
         span.set_attribute("output.duration_ms", response.duration_ms)
         span.set_attribute("output.row_count", len(response.data or []))
         if response.visual_spec:
-            span.set_attribute("output.chart_type", response.visual_spec.chart_type or "")
+            if isinstance(response.visual_spec, dict):
+                span.set_attribute("output.chart_type", response.visual_spec.get("chart_type", ""))
+            else:
+                span.set_attribute("output.chart_type", getattr(response.visual_spec, "chart_type", ""))
         span.set_attribute("http.status_code", 200)
         span.set_attribute("output.value", json.dumps(response_dict, default=str))
 
@@ -334,7 +379,7 @@ async def clarify_endpoint(req: ClarificationRequest):
         response_dict = resume_query(req.request_id, req.answers, session_id=req.session_id)
 
         # Clarification requested again — not an error, return 200
-        if response_dict.get("stage") == PipelineStage.CLARIFICATION_REQUESTED:
+        if response_dict.get("stage") == Stage.CLARIFICATION_REQUESTED:
             span.set_attribute("output.clarification_requested_again", True)
             span.set_attribute("output.value", json.dumps(response_dict, default=str))
             return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
@@ -369,6 +414,101 @@ async def clarify_endpoint(req: ClarificationRequest):
         span.set_attribute("http.status_code", 200)
         span.set_attribute("output.value", json.dumps(response_dict, default=str))
         return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
+
+
+@app.post(
+    "/retry",
+    tags=["Query"],
+    summary="Retry query with modifications",
+    description="Retry a previous query with modifications while maintaining session context",
+)
+async def retry_query_endpoint(request: RetryRequest):
+    """
+    Retry a previous query with modifications while maintaining conversational context.
+
+    This endpoint allows users to refine their queries based on previous responses.
+    The retry is logged for RLHF analysis and the full pipeline is executed with the modified query.
+    """
+    logger.info(f"Received retry: {request.modified_query} (session={request.session_id}, original_id={request.original_request_id})")
+
+    with tracer.start_as_current_span("http.retry") as span:
+        span.set_attribute("http.method", "POST")
+        span.set_attribute("http.route", "/retry")
+        span.set_attribute("input.original_request_id", request.original_request_id)
+        span.set_attribute("input.modified_query", request.modified_query[:500])
+        span.set_attribute("input.session_id", request.session_id)
+        span.set_attribute("input.original_query", request.original_query[:500])
+        span.set_attribute("input.value", json.dumps({
+            "original_request_id": request.original_request_id,
+            "modified_query": request.modified_query,
+            "session_id": request.session_id,
+            "original_query": request.original_query
+        }))
+
+        # Delegate to orchestrator (handles all retry logic)
+        response = execute_retry_query(
+            original_request_id=request.original_request_id,
+            modified_query=request.modified_query,
+            session_id=request.session_id,
+            original_query=request.original_query
+        )
+
+        # Convert to dict for JSON response
+        response_dict = response.to_dict() if hasattr(response, "to_dict") else vars(response)
+
+        # Check for clarification request - this is NOT an error, return 200
+        if getattr(response, "stage", None) == Stage.CLARIFICATION_REQUESTED:
+            logger.info(f"Retry clarification requested: {getattr(response, 'missing_fields', [])}")
+            span.set_attribute("output.clarification_requested", True)
+            span.set_attribute("output.missing_fields", str(getattr(response, 'missing_fields', [])))
+            span.set_attribute("output.clarification_message", getattr(response, "clarification_message", "") or "")
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+            return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
+
+        success = getattr(response, "success", False)
+        if not success:
+            # Pipeline failed - return error with appropriate HTTP status
+            error_obj = getattr(response, "error", None)
+            error_type = error_obj.error_type if error_obj and hasattr(error_obj, "error_type") else "UnknownError"
+            stage = getattr(response, "stage", "Unknown")
+            http_status = _get_http_status_for_stage(stage, error_type)
+
+            logger.warning(f"Retry pipeline failed at stage '{stage}': {error_type}")
+            span.set_status(Status(StatusCode.ERROR, error_type))
+            span.set_attribute("error.type", error_type)
+            span.set_attribute("error.stage", stage)
+            span.set_attribute("http.status_code", http_status)
+            span.set_attribute("output.value", json.dumps(response_dict, default=str))
+
+            # Convert the error object to a string or dict
+            if "error" in response_dict and isinstance(response_dict["error"], Exception):
+                response_dict["error"] = str(response_dict["error"])
+
+            raise HTTPException(status_code=http_status, detail=response_dict)
+
+        error_obj = getattr(response, "error", None)
+        if error_obj:
+            span.set_status(Status(StatusCode.ERROR, "LLM temporarily unavailable"))
+            span.set_attribute("http.status_code", 503)
+            raise HTTPException(
+                status_code=503,
+                detail="LLM temporarily unavailable"
+            )
+
+        logger.info(f"Retry executed successfully in {getattr(response, 'duration_ms', 0)}ms, {len(getattr(response, 'data', []) or [])} rows")
+        span.set_attribute("output.success", True)
+        span.set_attribute("output.duration_ms", getattr(response, "duration_ms", 0))
+        span.set_attribute("output.row_count", len(getattr(response, "data", []) or []))
+        if getattr(response, "visual_spec", None):
+            if isinstance(response.visual_spec, dict):
+                span.set_attribute("output.chart_type", response.visual_spec.get("chart_type", ""))
+            else:
+                span.set_attribute("output.chart_type", getattr(response.visual_spec, "chart_type", ""))
+        span.set_attribute("http.status_code", 200)
+        span.set_attribute("output.value", json.dumps(response_dict, default=str))
+
+        # Success - return full response
+        return JSONResponse(content=response_dict)
 
 
 # =============================================================================

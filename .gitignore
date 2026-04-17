@@ -11,3 +11,5 @@ logs/*
 .opencode/*
 .claude/*
 .github/*
+start-claude.ps1
+CLAUDE.md

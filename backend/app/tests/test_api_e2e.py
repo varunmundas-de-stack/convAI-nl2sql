@@ -2,8 +2,8 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 from app.main import app
-from app.services.intent_errors import IntentIncompleteError
-from app.services.query_orchestrator import PipelineStage
+from app.services.intent.intent_errors import IntentIncompleteError
+from app.pipeline.context import Stage
 
 client = TestClient(app)
 
@@ -42,7 +42,7 @@ def test_query_endpoint_success(mock_pipeline_components):
     data = response.json()
 
     assert data["success"] is True
-    assert data["stage"] == PipelineStage.COMPLETED
+    assert data["stage"] == Stage.COMPLETED
     assert "request_id" in data
     assert "cube_query" in data
     assert data["data"] == MOCK_CUBE_DATA
@@ -67,7 +67,7 @@ def test_query_endpoint_clarification(mocker):
     data = response.json()
 
     assert data["success"] is False
-    assert data["stage"] == PipelineStage.CLARIFICATION_REQUESTED
+    assert data["stage"] == Stage.CLARIFICATION_REQUESTED
     assert "missing_fields" in data
     assert "time_range" in data["missing_fields"]
     assert "request_id" in data
@@ -113,5 +113,5 @@ def test_clarify_flow(mocker):
     data = resp2.json()
 
     assert data["success"] is True
-    assert data["stage"] == PipelineStage.COMPLETED
+    assert data["stage"] == Stage.COMPLETED
     assert data["data"] == MOCK_CUBE_DATA

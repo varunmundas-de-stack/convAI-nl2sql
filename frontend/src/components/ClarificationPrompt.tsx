@@ -28,7 +28,6 @@ export default function ClarificationPrompt({ question, allowed_values, missing_
                     <p className="text-sm font-medium text-amber-800">
                         Clarification needed
                     </p>
-                    {/* <p className="mt-1 text-sm text-amber-700">{question}</p> */}
 
                     {allowed_values && allowed_values.length > 0 ? (
                         <div className="flex flex-wrap gap-2 mt-3">
@@ -43,11 +42,13 @@ export default function ClarificationPrompt({ question, allowed_values, missing_
                             ))}
                         </div>
                     ) : (
-                        <div className="text-xs space-y-0.5 mt-2">
-                            <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
-                            <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
-                            <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
-                        </div>
+                        !question && (
+                            <div className="text-xs space-y-0.5 mt-2">
+                                <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
+                                <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
+                                <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
+                            </div>
+                        )
                     )}
                 </div>
             </div>

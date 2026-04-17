@@ -40,6 +40,44 @@ export async function healthCheck() {
  * Transform backend response to frontend ChatResponse format
  */
 function transformBackendResponse(backendResponse: any): ChatResponse {
+    // ADD DEBUG LINE
+    console.log("🔍 Raw backend response:", JSON.stringify(backendResponse, null, 2));
+
+    // Handle compound clarification request
+    if (backendResponse.type === "compound_clarification_required") {
+        return {
+            type: "compound_clarification_required",
+            original_query: backendResponse.original_query,
+            completed_subqueries: backendResponse.completed_subqueries,
+            pending_clarification: backendResponse.pending_clarification,
+            compound_state: backendResponse.compound_state,
+        };
+    }
+
+    // Handle compound partial results
+    if (backendResponse.type === "compound_partial_results") {
+        return {
+            type: "compound_partial_results",
+            original_query: backendResponse.original_query,
+            completed_subqueries: backendResponse.completed_subqueries,
+            pending_subqueries: backendResponse.pending_subqueries,
+            visual_spec: backendResponse.visual_spec,
+            compound_metadata: backendResponse.compound_metadata,
+        };
+    }
+
+    // Handle complete compound results
+    if (backendResponse.type === "compound_query_results") {
+        return {
+            type: "chart",
+            chartType: "compound_sections",
+            data: {
+                visual_spec: backendResponse.visual_spec,
+                refined_insights: backendResponse.refined_insights || null,
+            },
+        };
+    }
+
     // Handle clarification request
     if (backendResponse.clarification === true) {
         const questions = Array.isArray(backendResponse.clarification_message)
@@ -169,14 +207,90 @@ export async function sendQuery(query: string): Promise<{
     };
 }
 
+export async function retryQuery(
+    originalRequestId: string,
+    modifiedQuery: string,
+    sessionId: string,
+    originalQuery: string
+): Promise<{
+    response: ChatResponse;
+    raw: any;
+    sessionId: string;
+}> {
+    console.log(`[Session] Sending retry for request_id: ${originalRequestId} with session_id: ${sessionId}`);
+
+    const res = await fetch(`${API_BASE}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            original_request_id: originalRequestId,
+            modified_query: modifiedQuery,
+            session_id: sessionId,
+            original_query: originalQuery,
+        }),
+    });
+
+    const backendResponse = await res.json();
+
+    // Extract and store session_id from backend response if present
+    if (backendResponse.session_id) {
+        setSessionId(backendResponse.session_id);
+    }
+
+    // Transform the backend response to frontend format
+    return {
+        response: transformBackendResponse(backendResponse),
+        raw: backendResponse,
+        sessionId: backendResponse.session_id || sessionId,
+    };
+}
+
 export async function clarify(payload: {
-    request_id: string;
-    answers: Record<string, any>;
+    request_id?: string;
+    answers?: Record<string, any>;
+    compound_state?: any;
+    clarification_answer?: any;
 }): Promise<{
     response: ChatResponse;
     raw: any;
     sessionId: string;
 }> {
+    // Handle compound clarifications
+    if (payload.compound_state && payload.clarification_answer !== undefined) {
+        console.log(`[Session] Sending compound clarification for request_id: ${payload.compound_state.request_id}`);
+
+        const res = await fetch(`${API_BASE}/clarify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                compound_state: payload.compound_state,
+                clarification_answer: payload.clarification_answer,
+            }),
+        });
+
+        const backendResponse = await res.json();
+
+        if (!res.ok) {
+            throw new Error(backendResponse.error || "Clarification failed");
+        }
+
+        // Update session ID if provided
+        if (backendResponse.session_id) {
+            setSessionId(backendResponse.session_id);
+        }
+
+        return {
+            response: transformBackendResponse(backendResponse),
+            raw: backendResponse,
+            sessionId: backendResponse.session_id || currentSessionId || "unknown",
+        };
+    }
+
+    // Handle regular clarifications
+    if (!payload.request_id || !payload.answers) {
+        throw new Error("Invalid clarification payload");
+    }
+
     console.log(`[Session] Sending clarification for request_id: ${payload.request_id}`);
 
     const res = await fetch(`${API_BASE}/clarify`, {
@@ -214,4 +328,109 @@ export async function getCatalogDimensions() {
 
 export async function getCatalogTimeWindows() {
     return fetch(`${API_BASE}/catalog/time-windows`).then((r) => r.json());
+}
+
+// =============================================================================
+// RLHF ADMIN API
+// =============================================================================
+
+export async function getPromptVersions(): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/prompt-versions`);
+    if (!res.ok) throw new Error(`Failed to fetch prompt versions: ${res.status}`);
+    return res.json();
+}
+
+export async function getAbStatus(): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/ab-status`);
+    if (!res.ok) throw new Error(`Failed to fetch A/B status: ${res.status}`);
+    return res.json();
+}
+
+export async function createAbTest(payload: {
+    version_a: string;
+    version_b: string;
+    traffic_split: number;
+}): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/ab-test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Failed to create A/B test: ${res.status}`);
+    return res.json();
+}
+
+export async function stopAbTest(): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/ab-stop`, { method: "POST" });
+    if (!res.ok) throw new Error(`Failed to stop A/B test: ${res.status}`);
+    return res.json();
+}
+
+export async function triggerRefinement(version: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/refine?version=${version}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Refinement failed: ${res.status}`);
+    return res.json();
+}
+
+export async function runRefinementCycle(
+    version: string,
+    minRatings: number = 50,
+    minImprovement: number = 0.3
+): Promise<any> {
+    const params = new URLSearchParams({
+        version,
+        min_ratings: String(minRatings),
+        min_improvement: String(minImprovement),
+    });
+    const res = await fetch(`${API_BASE}/rlhf/run-cycle?${params}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Run cycle failed: ${res.status}`);
+    return res.json();
+}
+
+export async function promoteVersion(version: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/promote?version=${version}`, { method: "POST" });
+    if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
+    return res.json();
+}
+
+export async function rollbackVersion(version: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/rollback?version=${version}`, { method: "POST" });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Rollback failed: ${res.status}`);
+    }
+    return res.json();
+}
+
+export async function compareVersions(versionA: string, versionB: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/compare?version_a=${versionA}&version_b=${versionB}`);
+    if (!res.ok) throw new Error(`Compare failed: ${res.status}`);
+    return res.json();
+}
+
+export async function getPreferencePairs(version: string, minGap: number = 2): Promise<any> {
+    const res = await fetch(`${API_BASE}/rlhf/preference-pairs?version=${version}&min_gap=${minGap}`);
+    if (!res.ok) throw new Error(`Failed to fetch preference pairs: ${res.status}`);
+    return res.json();
+}
+
+export async function submitFeedback(payload: {
+    request_id: string;
+    query: string;
+    response_summary: string;
+    prompt_version: string;
+    rating: number;
+    ab_group?: string | null;
+    correction?: string | null;
+    full_response?: string | null;
+    sql_query?: string | null;
+}): Promise<void> {
+    const res = await fetch(`${API_BASE}/rlhf/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        throw new Error(`Feedback submission failed: ${res.status}`);
+    }
 }

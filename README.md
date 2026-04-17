@@ -1,242 +1,322 @@
-# NL2SQL System Documentation
+# NL2SQL: Natural Language Analytics Interface
 
-[Improvements Since Version 1.1](#improvements-since-version-110)
+## 1. Project Overview
 
-## 1. System Overview
+**NL2SQL** is an analytics interface that enables business users to query FMCG (Fast-Moving Consumer Goods) sales data using plain English questions instead of SQL. The system combines rule-based validation with LLM reasoning to generate accurate, safe queries without ever allowing the AI to write SQL directly.
 
-The NL2SQL (Natural Language to SQL) system is a specialized analytics interface designed for the Fast-Moving Consumer Goods (FMCG) sector. It enables non-technical business users to query complex sales data using natural language, abstracting the underlying SQL complexity.
+**What the system does:**
+- Accepts natural language questions from users (e.g., "What were our sales in the North region last month?")
+- Understands user intent and maps it to business metrics and dimensions
+- Validates the request against a business catalog to ensure accuracy
+- Delegates all SQL generation and execution to Cube.js, a semantic data layer
+- Returns structured data and visualization specifications for frontend display
 
-The system operates on a "Guardrails First" philosophy, prioritizing accuracy and safety over generative freedom. It utilizes a deterministic pipeline architecture that combines Large Language Models (LLMs) for intent extraction with a strict semantic layer (Cube.js) for data retrieval. This approach mitigates hallucination risks common in generative AI database interfaces by enforcing a validated business catalog.
+**The problem it solves:**
+- Democratizes data access for non-technical business users
+- Eliminates manual SQL query writing by analysts
+- Reduces errors by enforcing structured validation over generative freedom
 
-## 2. Architecture Overview
+**The overall approach:**
+A "guardrails-first" architecture that prioritizes safety and accuracy over AI flexibility. The LLM handles only intent extraction; deterministic rule-based systems handle all structural transformations and validation.
 
-The system employs a microservices-based architecture orchestrated via Docker.
+---
 
-### Core Components
+## 2. Problem Statement
 
-*   **Orchestrator Service (Backend)**: A Python FastAPI application serving as the central nervous system. It manages the query lifecycle, state, and integration with external services.
-*   **Semantic Layer (Cube.js)**: Acts as the interface between the application and the raw database. It manages data modeling, caching, access control, and SQL generation.
-*   **Data Store (PostgreSQL)**: The relational database hosting the raw FMCG sales data (facts and dimensions).
-*   **State Store (Redis)**: High-performance key-value store used for managing conversational context (sessions) and temporary pipeline state during clarification loops.
-*   **Inference Engine (Anthropic Claude)**: External LLM service utilized strictly for natural language understanding and intent extraction, not for SQL generation.
+**Business context:**
+- Data analysts spend significant time writing SQL queries for business stakeholders
+- Business teams cannot directly query databases, creating a bottleneck
+- Manual analytics requests introduce delays and errors
+- SQL expertise is a scarce resource
 
-### Architecture Diagram
+**Technical challenge:**
+- Naive generative AI systems (LLMs that write SQL) are unreliable—they hallucinate table names, generate incorrect syntax, and produce unsafe queries
+- Pure rule-based systems lack the flexibility to understand natural language variation
+
+**Solution goal:**
+Enable users to retrieve insights using natural language queries while maintaining safety, accuracy, and performance. The system must never allow the LLM to write SQL; instead, use the LLM only for understanding intent, then translate to validated, deterministic queries.
+
+---
+
+## 3. System Overview
+
+The system is composed of distinct layers, each with a specific responsibility:
+
+**User Interface (Next.js)**
+- Web-based conversational interface
+- Displays query results and visualizations
+- Maintains session context across multiple queries
+
+**Query Orchestrator (FastAPI Backend)**
+- Accepts natural language questions
+- Manages the entire query processing pipeline
+- Coordinates interactions between the LLM, validation layer, and data layer
+- Returns structured responses
+
+**Modular Service Tools**
+- **CatalogTool:** Semantic catalog management and metric/dimension validation
+- **CubeClientTool:** HTTP transport to Cube.js API with retry logic
+- **VisualSpecTool:** Chart specification generation and compound visualization support
+- **PivotUtilsTool:** Data transformation, pivoting, and field normalization
+- **NormalizerTool:** Intent normalization, trend patching, and field mapping
+- Managed via an **Integration Layer** for seamless composability and testing
+
+**Intent Extractor (LLM - Anthropic Claude)**
+- Processes natural language questions
+- Extracts structured intent: metrics, filters, dimensions, time ranges
+- Leverages session history for follow-up question resolution
+- Never generates SQL
+
+**Semantic Validation Layer**
+- Validates extracted intent against the business catalog
+- Checks metric existence, dimension compatibility, filter validity
+- Triggers clarification requests when queries are ambiguous
+- Maps semantic names to physical database identifiers
+
+**Query Compiler**
+- Deterministically converts validated intent to Cube.js query format
+- No AI involved—pure mechanical translation
+
+**Data Layer (Cube.js + PostgreSQL)**
+- Cube.js acts as the semantic layer, generating SQL from validated queries
+- PostgreSQL stores the raw FMCG sales data
+- Cube.js handles caching, optimization, and SQL dialect specifics
+
+**Conversational Context (Redis)**
+- Stores session state (previous queries, resolved metrics)
+- Enables follow-up questions like "how about in a different region?"
+
+---
+
+## 4. System Workflow
+
+A complete query follows this workflow:
+
+1. **User submits a question** via the frontend (e.g., "Sales by region for Q1?")
+
+2. **Backend loads conversation context** from Redis using the session ID to support follow-up questions
+
+3. **LLM extracts intent** from the natural language question plus prior context, returning structured JSON with:
+   - Metrics (what to measure: sales, volume, margin)
+   - Filters (conditions: region=North, product=Soap)
+   - Group-by dimensions (how to slice: by region, by time period)
+   - Time range (last 30 days, specific dates, etc.)
+
+4. **Intent is merged with session history** to handle follow-ups (e.g., previous query context informs "the region" reference)
+
+5. **Semantic validation occurs** against `catalog.yaml`:
+   - Does the metric exist in the business data model?
+   - Is the dimension valid for analysis?
+   - Are filters applicable?
+   - If anything is ambiguous or missing, the pipeline stops and returns a clarification request to the user
+
+6. **Validated intent is compiled** into Cube.js JSON query format (deterministic, no AI)
+
+7. **Cube.js executes the query**:
+   - Generates dialect-specific SQL
+   - Executes against PostgreSQL
+   - Returns raw result set
+
+8. **Insights are generated** from results (trend detection, outliers, statistical summary)
+
+9. **Visualization specification is created** (e.g., bar chart config, table schema)
+
+10. **Session state is saved** to Redis for future follow-up queries
+
+11. **Response is returned** with data, visualization spec, natural language summary, and metadata
+
+---
+
+## 5. Architecture
 
 ```
-[Client] <-> [FastAPI Backend] <-> [Redis]
-                    |
-                    v
-             [Anthropic API]
-                    |
-                    v
-               [Cube.js API]
-                    |
-                    v
-               [PostgreSQL]
+┌─────────────────────────────────────────────────────┐
+│                  Browser / Frontend                  │
+│              (Next.js React Interface)               │
+└────────────────────┬────────────────────────────────┘
+                     │
+              POST /query endpoint
+                     │
+┌────────────────────▼────────────────────────────────┐
+│            FastAPI Backend (Python)                  │
+│         - Query Orchestrator (main flow)             │
+│         - Integration Layer & Modular Tools          │
+│           (Catalog, CubeClient, VisualSpec, etc.)    │
+└────┬──────────────────────┬────────────────────┬────┘
+     │                      │                    │
+     │ (1) Load context     │ (2) Extract intent │ (3) Store state
+     │                      │                    │
+┌────▼──────────┐  ┌────────▼──────────┐  ┌────▼─────────────┐
+│    Redis      │  │  Anthropic API    │  │  PostgreSQL      │
+│  (Sessions)   │  │   (Claude LLM)    │  │   (Raw Data)     │
+└───────────────┘  └────────┬──────────┘  └──────────────────┘
+                            │
+                     (4) Semantic Layer
+                            │
+                   ┌────────▼──────────┐
+                   │   Cube.js API     │
+                   │  - SQL Generator  │
+                   │  - Query Executor │
+                   │  - Caching        │
+                   └────────┬──────────┘
+                            │
+                   ┌────────▼──────────┐
+                   │   PostgreSQL      │
+                   │  (FMCG Data)      │
+                   └───────────────────┘
 ```
 
-## 3. Pipeline Flow
+**Data flow:**
+- Request flows left-to-right through the pipeline
+- Each stage validates and enriches the query
+- Modular tools (CatalogTool, CubeClientTool, etc.) provide specific processing logic via an Integration Layer
+- Redis stores conversational context across requests
+- Cube.js generates and executes SQL
 
-The query processing pipeline is linear but interruptible, managed by the `QueryOrchestrator`. It proceeds through the following distinct stages:
+---
 
-1.  **Context Retrieval**: The system accepts a query and a session ID. It attempts to load the previous Query Context Object (QCO) from Redis to support follow-up questions (e.g., "how about in the South region?").
-2.  **Intent Extraction**: The raw query and optional previous context are submitted to the LLM. The model returns a structured JSON representation of the user's intent, adhering to a defined schema.
-3.  **Intent Merging**: If previous context exists, the new intent is merged with the old QCO. Specific override rules determine how new filters replace or augment existing ones.
-4.  **Normalization**: Semantic terms (e.g., "sales", "last month") are mapped to physical identifiers defined in the Cube.js schema (e.g., `fact_secondary_sales.net_value`, `time_range: last_30_days`).
-5.  **Validation**: The normalized intent is validated against the `catalog.yaml`. The system checks for:
-    *   Metric existence and accessibility.
-    *   Dimension compatibility (group-by validity).
-    *   Filter validity.
-    *   **Ambiguity Detection**: If the intent is incomplete or ambiguous, the pipeline suspends and returns a `ClarificationRequest` to the client.
-6.  **Query Compilation**: A validated intent is deterministically compiled into a Cube.js JSON query object. This step involves no AI; it is a mechanical translation ensuring syntactical correctness.
-7.  **Execution**: The compiled query is transmitted to the Cube.js API. Cube.js generates the dialect-specific SQL, executes it against PostgreSQL, and returns the result set.
-8.  **Insight Generation**: The raw result set is analyzed to generate statistical insights (e.g., trend detection, outlier identification) and a declarative visualization specification (e.g., bar chart configuration).
-9.  **Context Resolution**: A new QCO is derived from the successful query and saved to Redis, updating the session state for future interactions.
-10. **Response Construction**: A comprehensive JSON response containing the data, visualization config, natural language summary, and debug metadata is returned to the client.
+## 6. Key Design Decisions
 
-## 4. Module Responsibilities
+**Why the LLM only extracts intent, not SQL:**
+- Pure generative SQL is unpredictable (hallucinations, incorrect syntax, unsafe queries)
+- Deterministic compilation from validated intent ensures correctness
+- Reduces latency and API costs by minimizing LLM invocations
 
-The backend codebase (`backend/app/`) is organized by functional responsibility:
+**Why use Cube.js as the semantic layer:**
+- Cube.js handles all SQL generation deterministically
+- Decouples the backend from database dialect details
+- Provides caching and optimization out-of-the-box
+- Acts as a guardrail against raw SQL injection
 
-*   **`services/query_orchestrator.py`**: The primary controller. It executes the pipeline steps sequentially, handles state transitions, and manages error propagation.
-*   **`services/intent_extractor.py`**: Manages interactions with the LLM provider. It constructs prompts, handles retries, and parses the LLM's string output into JSON.
-*   **`services/intent_validator.py`**: Enforces business logic. It ensures that the requested metrics and dimensions exist in the catalog and are compatible. It is responsible for triggering clarification flows.
-*   **`services/cube_query_builder.py`**: A translation engine that converts the internal `Intent` model into the external Cube.js query format.
-*   **`services/catalog_manager.py`**: Loads and serves the `catalog.yaml` definition file, providing a singleton interface for looking up metrics and dimensions.
-*   **`pipeline/state_store.py`**: Wraps Redis operations for saving and retrieving pipeline state, particularly for interrupted queries requiring user clarification.
+**Why validate against a catalog:**
+- `catalog.yaml` is the single source of truth for valid metrics and dimensions
+- Validation catches errors early (before query execution)
+- Enables ambiguity detection and clarification flows
+- Makes the system maintainable—change the catalog, not the code
 
-## 5. API Interfaces
+**Why store session context in Redis:**
+- Enables follow-up queries without re-specifying all filters
+- Example: "Sales last month?" → "What about this month?" (reuses region filter from prior query)
+- Redis key-value design is simple and fast
 
-The system exposes a RESTful API via FastAPI.
+**Why use structured Intent model (Pydantic):**
+- Single contract between all pipeline stages
+- Type safety prevents bugs in data transformation
+- Validation rules are centralized and testable
 
-### Primary Endpoints
+**Why use a Modular Service Architecture:**
+- Decouples pipeline stages into independently testable and composable tools (CatalogTool, CubeClientTool, etc.)
+- Provides consistent error handling, structured logging, and performance metrics across the system
+- Legacy compatibility is maintained through an integration layer, ensuring seamless migration
 
-#### `POST /query`
-Executes a natural language query.
-*   **Input**: `{"query": "string", "session_id": "string (optional)"}`
-*   **Output**: JSON object containing execution results, visualization data, or an error payload.
+---
 
-#### `POST /clarify`
-Resumes a suspended pipeline with user-provided disambiguation.
-*   **Input**: `{"request_id": "string", "answers": { ... }}`
-*   **Output**: Same structure as `/query`.
+## 7. Performance Considerations
 
-### Metadata Endpoints
+**Latency optimization:**
+- **Session reuse:** Redis caching means follow-up queries skip LLM calls if intent is clear from context
+- **Deterministic compilation:** Rule-based intent-to-query translation is instant (no AI wait)
+- **Cube.js caching:** Frequently accessed metrics are cached at the semantic layer
 
-*   **`GET /catalog/metrics`**: Lists available business metrics.
-*   **`GET /catalog/dimensions`**: Lists available analysis dimensions.
-*   **`GET /catalog/time-windows`**: Lists supported time ranges.
+**Reducing LLM dependency:**
+- LLM is invoked only for intent extraction (the highest-value use of generative reasoning)
+- Schema normalization (semantic-to-physical name mapping) is rule-based
+- Validation is deterministic
 
-## 6. Error Handling Strategy
+**Query optimization:**
+- Cube.js optimizes generated SQL before execution
+- Pre-aggregated facts reduce data warehouse scan size
+- Time-range filters minimize result sets
 
-The system implements a centralized error handling strategy utilizing the `OrchestratorResponse` object. Exceptions are caught at the pipeline level and converted into structured error data rather than causing HTTP 500 crashes.
+---
 
-### Error Classification
+## 8. Limitations
 
-*   **Client Errors (400)**:
-    *   `IntentValidationError`: The query requested metrics not in the catalog.
-    *   `IntentIncompleteError`: The query was too vague (triggers clarification).
-*   **Upstream Errors (502/504)**:
-    *   `CubeHTTPError`: Connection failure to the Cube.js service.
-    *   `CubeQueryExecutionError`: SQL execution failure within the data warehouse.
-*   **System Errors (500)**:
-    *   `LLMCallError`: Failure to communicate with the inference provider.
-    *   `PipelineCompletionError`: Internal logic failure.
+- **Complex nested queries** (e.g., multi-level aggregations, advanced statistical functions) may require manual review or escalation
+- **Schema changes** require updating `catalog.yaml`; the system cannot auto-discover new metrics or dimensions
+- **Ambiguous questions** may produce multiple valid interpretations, triggering clarification requests
+- **LLM latency** affects initial query response time (typically 1-3 seconds)
+- **Session context** only persists for the duration of a session; long-term learning across sessions is not implemented
+- **Cube.js dependency:** The system cannot function without a running Cube.js service
 
-Errors include a machine-readable `error_type` and a human-readable `message` to facilitate frontend error display.
+---
 
-## 7. Deployment Flow
+## 9. Future Improvements
 
-Deployment is containerized using Docker Compose, ensuring environment consistency.
+- **Semantic query understanding:** Improve LLM prompting to handle more complex multi-part questions
+- **Feedback-driven improvements:** Collect user feedback on clarification requests to refine intent extraction
+- **Query result caching:** Cache popular queries to reduce latency on repeated questions
+- **Multi-language support:** Extend LLM prompting to support queries in languages beyond English
+- **Adaptive clarification:** Machine learning on clarification patterns to predict which questions need disambiguation
+- **Advanced analytics:** Integrate statistical models for forecasting, anomaly detection, or causal analysis
+- **Row-level security:** Extend validation layer to enforce data governance policies
+- **Query audit trail:** Persistent logging of all executed queries for compliance and analysis
 
-### Requirements
-*   Docker Engine & Docker Compose
-*   Python 3.12+ (for local development)
-*   Anthropic API Credentials
+---
 
-### Configuration
-Environment variables function as the primary configuration mechanism, defined in `.env`:
-*   `ANTHROPIC_API_KEY`: Authentication for the LLM.
-*   `CUBE_API_URL`: Endpoint for the Cube.js service.
-*   `REDIS_URL`: Connection string for the state store.
+## Quick Start
 
-### Infrastructure Setup
-The `docker-compose.yml` defines the service mesh:
-1.  **PostgreSQL**: Initializes with seed data from `cube/data/`.
-2.  **Redis**: Starts with default persistence settings.
-3.  **Cube.js**: Connects to PostgreSQL and exposes the semantic API (port 4000).
-4.  **Backend**: Builds from `backend/Dockerfile` and exposes port 8000.
+### Prerequisites
+- Docker & Docker Compose
+- Anthropic API key
 
-### Installation
+### Setup
 
 ```bash
-# Clone the repository
-git clone <repository_url>
-
 # Configure environment
 cp .env.example .env
-# Edit .env with appropriate credentials
-
-# Start services
-docker-compose up -d
-
-# Initialize Database (if not using automatic seeding)
-cat cube/data/02_populate_data.sql | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
+# Edit .env with ANTHROPIC_API_KEY, CUBE_API_URL, REDIS_URL
 ```
 
-## Improvements Since Version 1.1.0
+### Full Local Development (Windows)
 
-### 1. Query Orchestration and Pipeline Refactoring
-Significant improvements were made to the internal orchestration pipeline to improve stability and maintainability.
+```bash
+# Start all services (Docker + FastAPI with hot-reload)
+.\start-dev.ps1
 
-Key updates include:
-* Refactoring of the Query Coordination Orchestrator (QCO) flow
-* Improved intent modelling and intent validation layers
-* Updated intent JSON format
-* Improved query orchestration handling
-* Added retry logic for LLM calls
-* Updated Cube query builder
-* Improved period strategy layer for time-based queries
+# Stop all services and cleanup
+# Ctrl+C will trigger automatic cleanup
+```
 
-These changes streamlined the pipeline and reduced errors in query interpretation and execution.
+### Manual Development Setup
 
-### 2. Insight Generation Enhancements
-The insight generation module was expanded to produce more structured and user-friendly analytics insights.
+If you prefer to start services manually:
 
-Enhancements include:
-* Implementation of three-layer insight generation
-* Addition of risks, drivers, and recommendations insights
-* Layman-friendly insight language formatting
-* Support for lakhs and crores numeric formatting
-* Latency reduction in insight generation pipeline
+```bash
+# Start backing services (PostgreSQL, Redis, Cube.js)
+docker compose up -d
 
-These improvements make insights more interpretable and relevant for business users.
+# Backend (with hot-reload)
+cd backend
+# Using activated venv: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-### 3. Drill-Down and Analytical Capability Improvements
-New analytical capabilities were introduced to support deeper data exploration.
+# Frontend
+cd frontend
+npm run dev
+```
 
-Key additions:
-* Hierarchy-based drill-down functionality
-* Drill detector module for identifying drillable dimensions
-* Pivot configuration support
-* Pivot table constraints and value mapping
+### Testing & Tools Demonstration
 
-These updates allow users to perform deeper analytical exploration of datasets.
+```bash
+cd backend
 
-### 4. Visualization and UI Improvements
-The frontend visualization layer received multiple improvements to enhance usability and presentation.
+# Run all tests
+pytest
 
-Enhancements include:
-* Improved pivot table rendering
-* Added stacked bar chart support
-* Chart-table toggle functionality
-* Chart window design improvements
-* Improved search bar layout
-* Better chart axis and label formatting
-* UI layout refinements (bubble width, padding, column tables)
+# Run comprehensive Phase 1 tool tests
+pytest app/tests/test_phase1_tools.py
 
-These changes improve the readability and usability of analytics results.
+# Run Phase 1 tool demonstration script
+python demo_phase1_tools.py
+```
 
-### 5. Logging and Observability Improvements (Arize Tracing)
-System observability was strengthened to improve debugging and monitoring.
+Visit `http://localhost:3000` to access the interface.
 
-Updates include:
-* Component-level logging
-* Cube client error logging
-* Integration with LLM tracing tools
-* Improved exception handling (token counting and execution errors)
+---
 
-This helps diagnose issues in the NL-to-SQL pipeline more effectively.
+## Documentation
 
-### 6. Data Handling and Test Data Quality
-Multiple fixes and improvements were implemented for dataset consistency and test data generation.
-
-Changes include:
-* Fix for data insertion bugs
-* Synthetic data variance generation
-* Price reduction and formatting updates
-
-These updates help improve testing reliability and system evaluation.
-
-### 7. Bug Fixes and Stability Improvements
-Several bugs affecting query interpretation and visualization were fixed.
-
-Notable fixes:
-* Time dimension handling issues
-* Chart selection bugs
-* Intent upstream issues
-* Clarification query handling issues
-* Granularity and trend patching issues
-* Various QCO pipeline bugs
-
-These fixes improved overall system stability.
-
-### 8. Performance Improvements
-Performance optimizations were introduced across the pipeline.
-
-Key improvements:
-* Insight latency reduction
-* CubeJS caching fixes
-* Pipeline execution optimizations
-
-These changes improved response times for analytical queries.
+- **Architecture Deep Dive:** See `docs/architecture.md`
+- **API Reference:** See `docs/api.md`
+- **Catalog Schema:** See `backend/catalog/catalog.yaml`
+- **Development Guide:** See `docs/development.md`

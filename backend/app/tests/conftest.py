@@ -8,7 +8,7 @@ import yaml
 backend_path = Path(__file__).parent.parent.parent.resolve()
 sys.path.append(str(backend_path))
 
-from app.services.catalog_manager import CatalogManager
+from app.services.helpers.catalog_manager import CatalogManager
 
 @pytest.fixture(scope="session")
 def catalog_path():

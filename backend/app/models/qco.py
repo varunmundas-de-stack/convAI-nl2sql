@@ -8,7 +8,8 @@ It carries NO query results — only the resolved intent parameters.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -43,6 +44,22 @@ class QCOMetric(BaseModel):
     """A single metric captured in the QCO (semantic names, not Cube IDs)."""
     name: str = Field(..., description="Semantic metric name, e.g. 'net_value'")
     aggregation: str = Field(default="sum", description="Aggregation function, e.g. 'sum', 'count', 'avg'")
+
+
+class SlotMeta(BaseModel):
+    """Metadata for tracking slot provenance in conversational context."""
+    source: Literal["override", "carry_forward", "tombstone"] = Field(
+        ...,
+        description="How this slot value was determined in the current turn"
+    )
+    turn: int = Field(
+        ...,
+        description="Conversation turn when this slot was last set"
+    )
+    timestamp: datetime = Field(
+        ...,
+        description="When this slot metadata was created"
+    )
 
 
 class QueryContextObject(BaseModel):
@@ -93,6 +110,7 @@ class QueryContextObject(BaseModel):
 
     # Visualization
     visualization_type: Optional[str] = Field(default=None, description="e.g. bar_chart, line_chart, table")
+    x_axis_labels: Optional[List[str]] = Field(default=None, description="Extracted X-axis labels from the retrieved data to provide context on available entities")
 
     # Limit
     limit: Optional[int] = Field(default=None)
@@ -101,6 +119,38 @@ class QueryContextObject(BaseModel):
     active_hierarchies: Optional[Dict[str, str]] = Field(
         default=None,
         description='Axis → current active dimension, e.g. {"geography": "zone", "product": "brand"}'
+    )
+
+    # New fields for agent architecture
+    slot_metadata: Dict[str, SlotMeta] = Field(
+        default_factory=dict,
+        description="Per-slot provenance tracking for merge behavior"
+    )
+    turn_index: int = Field(
+        default=0,
+        description="Current conversation turn, incremented on each successful query"
+    )
+    parent_request_id: Optional[str] = Field(
+        default=None,
+        description="Set when this QCO was produced by a sub-query in a decomposed compound query"
+    )
+
+    # Cached agent results for context injection
+    cached_scope_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from ScopeModule for selective re-execution"
+    )
+    cached_time_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from TimeModule for selective re-execution"
+    )
+    cached_metrics_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from MetricsModule for selective re-execution"
+    )
+    cached_dimensions_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Cached result from DimensionsModule for selective re-execution"
     )
 
     def to_prompt_context(self) -> str:
@@ -144,6 +194,9 @@ class QueryContextObject(BaseModel):
         if self.visualization_type:
             lines.append(f"Previous Visualization: {self.visualization_type}")
 
+        if self.x_axis_labels:
+            lines.append(f"Previous X-Axis Labels: {', '.join(self.x_axis_labels)}")
+
         if self.limit:
             lines.append(f"Previous Limit: {self.limit}")
 
@@ -152,3 +205,14 @@ class QueryContextObject(BaseModel):
             lines.append(f"Previous Hierarchies: {', '.join(hier_strs)}")
 
         return "\n".join(lines)
+
+    def to_decomposer_context(self) -> str:
+        """
+        Minimal context for the decomposer agent — just enough to understand
+        conversational references without overwhelming the decomposition decision.
+        """
+        return "\n".join([
+            f"Previous Query: \"{self.original_query}\"",
+            f"Previous Intent: {self.intent_type}",
+            f"Previous Metrics: {', '.join(m.name for m in self.metrics)}",
+        ])

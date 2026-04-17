@@ -509,7 +509,7 @@ def _compute_contribution(
     """Compute each row's % share of the grand total (CONTRIBUTION)."""
     if not data:
         return []
-    total = sum(_pp_to_float(r.get(metric_key)) or 0.0 for r in total_data)
+    total = _resolve_contribution_denominator(data, total_data, metric_key)
     result: list[dict[str, Any]] = []
     for row in data:
         new_row = dict(row)
@@ -517,6 +517,39 @@ def _compute_contribution(
         new_row[_CONTRIBUTION_KEY] = (value / total * 100.0) if total and value is not None else None
         result.append(new_row)
     return result
+
+
+def _resolve_contribution_denominator(
+    data: list[dict[str, Any]],
+    total_data: list[dict[str, Any]],
+    metric_key: str,
+) -> Optional[float]:
+    """
+    Resolve denominator for contribution %.
+
+    Expected source is an aggregate over the full filtered dataset. If the supplied
+    `total_data` looks like the same ranked subset as `data`, return None instead of
+    a misleading inflated percentage.
+    """
+    if not total_data:
+        return None
+
+    visible_total = sum(_pp_to_float(r.get(metric_key)) or 0.0 for r in data)
+    candidate_total = sum(_pp_to_float(r.get(metric_key)) or 0.0 for r in total_data)
+
+    if candidate_total <= 0:
+        return None
+
+    # Typical and preferred case: aggregate total query returns a single row.
+    if len(total_data) == 1:
+        return candidate_total
+
+    # If candidate total is not larger than visible subset total, it is ambiguous
+    # (often top-N subset); avoid producing potentially wrong percentages.
+    if candidate_total <= visible_total:
+        return None
+
+    return candidate_total
 
 
 # --- intent field extractors --------------------------------------------------
@@ -661,7 +694,8 @@ def compute_metrics_facts(
                 fact.largest_gain_pct = round(gr_pct, 2)
                 fact.largest_gain_period = label
 
-        fact.trend_class = _classify_trend(valid_growth, fact.coefficient_of_variation or 0.0)
+        trend_slope_pct, trend_r2 = _linear_trend_stats(values)
+        fact.trend_class = _classify_trend(trend_slope_pct, trend_r2)
 
     # --- Concentration (for grouped / ranked data) ---
     if dimensions and len(data) > 1 and fact.total_value and fact.total_value > 0:
@@ -684,35 +718,51 @@ def compute_metrics_facts(
     return fact
 
 
-def _classify_trend(growth_rates: list[float], cv: float) -> str:
-    """Deterministic trend classification from growth rates."""
-    if not growth_rates:
+def _classify_trend(slope_pct: Optional[float], r_squared: Optional[float]) -> str:
+    """Deterministic trend classification from fixed slope and R² thresholds."""
+    if slope_pct is None or r_squared is None:
         return "unknown"
-    if cv > 0.5:
-        return "volatile"
 
-    positives = sum(1 for g in growth_rates if g > 0)
-    negatives = sum(1 for g in growth_rates if g < 0)
-
-    if positives == len(growth_rates):
-        return "consistent_growth"
-    if negatives == len(growth_rates):
-        return "consistent_decline"
-
-    if len(growth_rates) >= 3:
-        mid = len(growth_rates) // 2
-        first_avg = sum(growth_rates[:mid]) / mid
-        last_avg = sum(growth_rates[mid:]) / len(growth_rates[mid:])
-        if first_avg > 0.05 and last_avg < -0.05:
-            return "demand_cooling"
-        if first_avg < -0.05 and last_avg > 0.05:
-            return "recovery"
-
-    abs_avg = sum(abs(g) for g in growth_rates) / len(growth_rates)
-    if abs_avg < 0.02:
+    abs_slope = abs(slope_pct)
+    if abs_slope < 0.5:
         return "flat"
-
+    if r_squared < 0.35:
+        return "mixed"
+    if slope_pct >= 0.5:
+        return "consistent_growth"
+    if slope_pct <= -0.5:
+        return "consistent_decline"
     return "mixed"
+
+
+def _linear_trend_stats(values: list[float]) -> tuple[Optional[float], Optional[float]]:
+    """
+    Compute normalized slope (%) and R² using simple linear regression.
+
+    Slope is normalized by mean value so thresholds are scale-independent.
+    """
+    if len(values) < 3:
+        return None, None
+
+    n = len(values)
+    x_vals = list(range(n))
+    x_mean = sum(x_vals) / n
+    y_mean = sum(values) / n
+
+    denominator = sum((x - x_mean) ** 2 for x in x_vals)
+    if denominator == 0:
+        return None, None
+
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, values))
+    slope = numerator / denominator
+
+    normalized_slope = (slope / y_mean) * 100 if y_mean != 0 else 0.0
+    intercept = y_mean - slope * x_mean
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(x_vals, values))
+    ss_tot = sum((y - y_mean) ** 2 for y in values)
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    return normalized_slope, max(0.0, min(1.0, r_squared))
 
 
 def _count_consecutive(growth_rates: list[float], positive: bool) -> int:
@@ -1096,9 +1146,7 @@ def _detect_outliers(
     metric_key: str,
     dimension_key: Optional[str],
 ) -> list[Insight]:
-    """
-    Detect values > 2 standard deviations from mean.
-    """
+    """Detect outliers using method selected by sample size and skewness."""
     insights = []
     
     values = []
@@ -1112,34 +1160,63 @@ def _detect_outliers(
         return insights
     
     nums = [v for _, v in values]
-    mean = sum(nums) / len(nums)
-    variance = sum((x - mean) ** 2 for x in nums) / len(nums)
-    std_dev = math.sqrt(variance) if variance > 0 else 0
-    
-    if std_dev == 0:
+    method = _select_outlier_method(nums)
+    baseline = _select_baseline(nums)
+    flagged: list[tuple[Optional[str], float, float, str]] = []
+
+    if method == "mad":
+        median = _median(nums)
+        mad = _median([abs(v - median) for v in nums])
+        if mad == 0:
+            return insights
+        for dim_val, val in values:
+            score = 0.6745 * (val - median) / mad
+            if abs(score) > 3.5:
+                flagged.append((dim_val, val, score, "MAD"))
+    elif method == "iqr":
+        q1 = _percentile(nums, 25.0)
+        q3 = _percentile(nums, 75.0)
+        iqr = q3 - q1
+        if iqr == 0:
+            return insights
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        for dim_val, val in values:
+            if val < lower or val > upper:
+                score = (val - baseline) / max(abs(baseline), 1.0)
+                flagged.append((dim_val, val, score, "IQR"))
+    else:
+        mean = sum(nums) / len(nums)
+        variance = sum((x - mean) ** 2 for x in nums) / len(nums)
+        std_dev = math.sqrt(variance) if variance > 0 else 0
+        if std_dev == 0:
+            return insights
+        for dim_val, val in values:
+            z_score = (val - mean) / std_dev
+            if abs(z_score) > 2.0:
+                flagged.append((dim_val, val, z_score, "z-score"))
+
+    if not flagged:
         return insights
-    
-    for dim_val, val in values:
-        z_score = (val - mean) / std_dev
-        
-        if abs(z_score) > 2.0:
-            direction = Direction.UP if z_score > 0 else Direction.DOWN
-            label_suffix = dim_val if dim_val else f"{val}"
-            
-            insights.append(Insight(
-                insight_type=InsightType.OUTLIER,
-                severity=Severity.HIGH if abs(z_score) > 3 else Severity.MEDIUM,
-                label=f"outlier_{label_suffix}".lower().replace(" ", "_"),
-                headline=f"{dim_val or 'A value'} is {abs(z_score):.1f}σ {'above' if z_score > 0 else 'below'} average",
-                metric_value=val,
-                metric_formatted=_format_number(val),
-                comparison_value=mean,
-                comparison_formatted=_format_number(mean),
-                direction=direction,
-                dimension=dimension_key,
-                dimension_value=dim_val,
-                confidence=min(1.0, (abs(z_score) / 4.0) * (min(len(values), 30) / 30.0)),
-            ))
+
+    for dim_val, val, score, score_label in flagged:
+        direction = Direction.UP if score > 0 else Direction.DOWN
+        label_suffix = dim_val if dim_val else f"{val}"
+        severity = Severity.HIGH if abs(score) > 3 else Severity.MEDIUM
+        insights.append(Insight(
+            insight_type=InsightType.OUTLIER,
+            severity=severity,
+            label=f"outlier_{label_suffix}".lower().replace(" ", "_"),
+            headline=f"{dim_val or 'A value'} is an outlier ({score_label}) vs baseline",
+            metric_value=val,
+            metric_formatted=_format_number(val),
+            comparison_value=baseline,
+            comparison_formatted=_format_number(baseline),
+            direction=direction,
+            dimension=dimension_key,
+            dimension_value=dim_val,
+            confidence=min(1.0, (abs(score) / 4.0) * (min(len(values), 30) / 30.0)),
+        ))
     
     return insights
 
@@ -1207,48 +1284,26 @@ def _analyze_trend(
     if len(values) < 3:
         return insights
     
-    # Simple linear regression: slope of y = mx + b
-    n = len(values)
-    x_vals = list(range(n))
-    x_mean = sum(x_vals) / n
-    y_mean = sum(values) / n
-    
-    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, values))
-    denominator = sum((x - x_mean) ** 2 for x in x_vals)
-    
-    if denominator == 0:
+    normalized_slope, r_squared = _linear_trend_stats(values)
+    if normalized_slope is None or r_squared is None:
         return insights
-    
-    slope = numerator / denominator
-    
-    # Normalize slope to percentage of mean
-    if y_mean != 0:
-        normalized_slope = (slope / y_mean) * 100
-    else:
-        normalized_slope = 0
-    
-    # Determine direction
+
+    trend_class = _classify_trend(normalized_slope, r_squared)
     abs_slope = abs(normalized_slope)
-    
-    if abs_slope <= 0.5:
+
+    if trend_class == "flat":
         direction = Direction.FLAT
-        headline = f"{_format_label(metric_key)} is flat ({normalized_slope:.1f}%)"
+        headline = f"{_format_label(metric_key)} is stable ({normalized_slope:.1f}%, R² {r_squared:.2f})"
         severity = Severity.LOW
-    elif abs_slope <= 2.0:
-        direction = Direction.UP if normalized_slope > 0 else Direction.DOWN
-        trend = "mild upward" if normalized_slope > 0 else "mild downward"
-        headline = f"{_format_label(metric_key)} shows a {trend} trend ({normalized_slope:.1f}%)"
+    elif trend_class == "mixed":
+        direction = Direction.UNKNOWN
+        headline = f"{_format_label(metric_key)} trend is mixed ({normalized_slope:.1f}%, R² {r_squared:.2f})"
         severity = Severity.LOW
     else:
         direction = Direction.UP if normalized_slope > 0 else Direction.DOWN
         trend = "upward" if normalized_slope > 0 else "downward"
-        headline = f"{_format_label(metric_key)} is trending {trend} ({normalized_slope:.1f}%)"
+        headline = f"{_format_label(metric_key)} is trending {trend} ({normalized_slope:.1f}%, R² {r_squared:.2f})"
         severity = Severity.HIGH if abs_slope > 10 else Severity.MEDIUM
-    
-    # R² for confidence
-    ss_res = sum((y - (slope * x + (y_mean - slope * x_mean))) ** 2 for x, y in zip(x_vals, values))
-    ss_tot = sum((y - y_mean) ** 2 for y in values)
-    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
     
     insights.append(Insight(
         insight_type=InsightType.TREND,
@@ -1261,6 +1316,61 @@ def _analyze_trend(
     ))
     
     return insights
+
+
+def _select_outlier_method(values: list[float]) -> str:
+    """Choose deterministic outlier method by sample size and skewness."""
+    n = len(values)
+    if n < 8:
+        return "mad"
+    skewness = abs(_sample_skewness(values))
+    if skewness > 1.0:
+        return "iqr"
+    return "zscore"
+
+
+def _select_baseline(values: list[float]) -> float:
+    """Use median baseline for skewed distributions, mean otherwise."""
+    if abs(_sample_skewness(values)) > 1.0:
+        return _median(values)
+    return sum(values) / len(values)
+
+
+def _sample_skewness(values: list[float]) -> float:
+    if len(values) < 3:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((x - mean) ** 2 for x in values) / len(values)
+    std_dev = math.sqrt(variance) if variance > 0 else 0.0
+    if std_dev == 0:
+        return 0.0
+    m3 = sum((x - mean) ** 3 for x in values) / len(values)
+    return m3 / (std_dev ** 3)
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    if len(ordered) == 1:
+        return ordered[0]
+
+    rank = (len(ordered) - 1) * (percentile / 100.0)
+    lower = int(math.floor(rank))
+    upper = int(math.ceil(rank))
+    if lower == upper:
+        return ordered[lower]
+    weight = rank - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
 
 
 # =============================================================================

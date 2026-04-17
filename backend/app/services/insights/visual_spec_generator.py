@@ -362,6 +362,21 @@ def generate_visual_spec(
         spec.pivot_config = pivot_config
         spec.x_axis_key = strip_cube_prefix(x_axis_key) if x_axis_key else None
         spec.data = out_data
+        x_axis_values = []
+        if spec.x_axis_key:
+            x_axis_values = [str(row.get(spec.x_axis_key, "")) for row in out_data]
+        x_axis_type = _infer_axis_type(x_axis_values, spec.x_axis_key)
+        spec.x_axis = Axis(
+            label=_clean_label(spec.x_axis_key) if spec.x_axis_key else "Category",
+            values=x_axis_values or None,
+            format="date" if x_axis_type == "time" else None,
+            axis_type=x_axis_type,
+        )
+        spec.y_axis = Axis(
+            label=_clean_label(metric_clean) if metric_clean else "Value",
+            format="number",
+            axis_type="linear",
+        )
     elif chart_type == ChartType.LINE:
         spec = _build_line_spec(out_data, insights)
     elif chart_type == ChartType.PIE:
@@ -449,16 +464,13 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
         x_values.append(x_val)
         y_values.append(y_val)
     
-    # Determine axis type based on dimension
-    axis_type = "categorical"
-    if dim_key:
-        dim_key_lower = dim_key.lower()
-        if any(kw in dim_key_lower for kw in ["date", "time", "month", "year", "quarter"]):
-            axis_type = "time"
+    # Explicit axis typing from observed data, not name heuristics only.
+    axis_type = _infer_axis_type(x_values, dim_key)
     
     spec.x_axis = Axis(
         label=_clean_label(dim_key) if dim_key else "Category",
         values=x_values,
+        format="date" if axis_type == "time" else None,
         axis_type=axis_type,
     )
     spec.y_axis = Axis(
@@ -472,7 +484,7 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     emphasis_map = _build_emphasis_map(insights, x_values)
     
     # Determine contextual colors per bar based on insights
-    color_map = _build_color_map(insights, x_values)
+    color_map = _build_color_map(x_values, y_values, insights)
     
     series = DataSeries(
         label=_clean_label(metric_key),
@@ -488,13 +500,12 @@ def _build_bar_spec(data: list[dict], insights: InsightResult, chart_type: Chart
     if insights.total_value is not None:
         spec.primary_value = insights.total_formatted
         spec.primary_label = f"Total {_clean_label(metric_key)}"
-        
-        # If there's a top contributor, add as secondary
-        for insight in insights.insights:
-            if insight.label == "top_contributor" and insight.dimension_value:
-                spec.secondary_value = insight.metric_formatted or ""
-                spec.secondary_label = f"{insight.dimension_value} (Top)"
-                break
+
+        # Use raw chart values to identify the top contributor.
+        top_dim, top_val = _find_top_contributor(x_values, y_values)
+        if top_dim is not None and top_val is not None:
+            spec.secondary_value = _format_number(top_val)
+            spec.secondary_label = f"{top_dim} (Top)"
     
     return spec
 
@@ -678,11 +689,17 @@ def _build_pie_spec(data: list[dict], insights: InsightResult) -> VisualSpec:
         labels.append(label)
         values.append(val)
     
-    spec.x_axis = Axis(label="Category", values=labels)
+    spec.x_axis = Axis(
+        label=_clean_label(dim_key) if dim_key else "Category",
+        values=labels,
+        axis_type="categorical",
+    )
+    color_map = _build_color_map(labels, values, insights)
     spec.series = [DataSeries(
         label=_clean_label(metric_key),
         values=values,
         color_hint="primary",
+        point_colors=[color_map.get(x) for x in labels] if any(color_map.values()) else None,
     )]
     
     return spec
@@ -796,6 +813,55 @@ def _build_emphasis_map(insights: InsightResult, x_values: list) -> dict[str, Em
                 emphasis[insight.dimension_value] = EmphasisLevel.SUBTLE
     
     return emphasis
+
+
+def _find_top_contributor(x_values: list[str], y_values: list[float]) -> tuple[Optional[str], Optional[float]]:
+    """Find top contributor directly from plotted data."""
+    if not x_values or not y_values or len(x_values) != len(y_values):
+        return None, None
+
+    max_idx = max(range(len(y_values)), key=lambda idx: y_values[idx])
+    return x_values[max_idx], y_values[max_idx]
+
+
+def _infer_axis_type(values: list[Any], dim_key: Optional[str]) -> str:
+    """Infer axis type explicitly from data values, with key-name fallback."""
+    if values:
+        parsed_count = 0
+        for value in values:
+            if _is_time_like_value(value):
+                parsed_count += 1
+        if parsed_count >= max(1, len(values) // 2):
+            return "time"
+
+    if dim_key:
+        dim_key_lower = dim_key.lower()
+        if any(kw in dim_key_lower for kw in ["date", "time", "month", "year", "quarter", "week", "day"]):
+            return "time"
+    return "categorical"
+
+
+def _is_time_like_value(value: Any) -> bool:
+    """Check whether a dimension value is likely a date/time."""
+    from datetime import datetime
+
+    if value is None:
+        return False
+    if isinstance(value, datetime):
+        return True
+
+    text = str(value).strip()
+    if not text:
+        return False
+
+    # Cube often emits timestamps like "2026-01-26T00:00:00.000"
+    if "T" in text:
+        text = text.split(".")[0]
+    try:
+        datetime.fromisoformat(text)
+        return True
+    except ValueError:
+        return False
 
 
 def _compute_axis_range(values: list[float], target_ticks: int = AXIS_TICK_COUNT) -> list[float]:
@@ -942,33 +1008,41 @@ def _clean_label(key: Optional[str]) -> str:
     return key.replace("_", " ").title()
 
 
-def _build_color_map(insights: InsightResult, x_values: list) -> dict[str, Optional[str]]:
+def _build_color_map(
+    x_values: list[str],
+    y_values: list[float],
+    insights: Optional[InsightResult] = None,
+) -> dict[str, Optional[str]]:
     """
     Build a color map for data points based on insights.
     
     Returns a dict mapping dimension values to color codes.
     """
     color_map: dict[str, Optional[str]] = {x: None for x in x_values}
-    
+
+    # Base highlight from raw values so visuals always match chart data.
+    if x_values and y_values and len(x_values) == len(y_values):
+        max_value = max(y_values)
+        min_value = min(y_values)
+        for idx, dim in enumerate(x_values):
+            if y_values[idx] == max_value:
+                color_map[dim] = ColorPalette.POSITIVE
+            elif y_values[idx] == min_value and min_value != max_value:
+                color_map[dim] = ColorPalette.MUTED
+
+    # Insight overlays only for explicit anomaly severity.
+    if not insights:
+        return color_map
+
     for insight in insights.insights:
         if not insight.dimension_value or insight.dimension_value not in x_values:
             continue
-        
-        # Top contributor -> highlight color
-        if insight.label == "top_contributor":
-            color_map[insight.dimension_value] = ColorPalette.POSITIVE
-        
-        # Outlier -> warning/danger color based on severity
-        elif insight.insight_type == InsightType.OUTLIER:
+        if insight.insight_type == InsightType.OUTLIER:
             if insight.severity in (Severity.HIGH, Severity.CRITICAL):
                 color_map[insight.dimension_value] = ColorPalette.NEGATIVE
             else:
                 color_map[insight.dimension_value] = ColorPalette.WARNING
-        
-        # Bottom performer -> muted color
-        elif insight.label == "bottom_performer":
-            color_map[insight.dimension_value] = ColorPalette.MUTED
-    
+
     return color_map
 
 

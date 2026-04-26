@@ -15,7 +15,11 @@ import json
 
 import dspy
 from dspy.teleprompt import BootstrapFewShotWithRandomSearch
-from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
+from dataclasses import dataclass
+@dataclass
+class ScoreWithFeedback:
+    score: float
+    feedback: str
 from dspy import Example, Prediction
 
 from .pipeline import IntentExtractionPipeline

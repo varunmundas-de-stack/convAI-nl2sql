@@ -164,10 +164,31 @@ class DimensionsModule(dspy.Module):
                 # -------------------------
                 # 4. Ambiguity handling (CORE)
                 # -------------------------
+                # -------------------------
+                # 3.5 Check Session Resolved Terms
+                # -------------------------
+                resolved_term_map = overrides.get("resolved_dimension_terms", {})
                 dim_terms = [
                     t.term for t in classified_query.classified_terms
                     if t.role == "DIMENSION"
                 ]
+
+                # If all dimension terms are already resolved in the session, use them directly
+                if dim_terms and all(term in resolved_term_map for term in dim_terms):
+                    resolved_dimensions = []
+                    for term in dim_terms:
+                        resolved_name = resolved_term_map[term]
+                        if resolved_name in valid_dims and resolved_name != "invoice_date":
+                            resolved_dimensions.append(resolved_name)
+                    if resolved_dimensions:
+                        final_result = DimensionsResult(
+                            group_by=resolved_dimensions,
+                            filters=valid_filters,
+                        )
+                        duration_ms = int((time.monotonic() - start_time) * 1000)
+                        _span_set(span, output_source="session_resolved_terms", output_group_by=str(resolved_dimensions))
+                        logger.debug(f"[DSPy Dimensions] Resolved using session terms: {resolved_dimensions}")
+                        return final_result
 
                 # ❗ No valid dimension
                 if len(valid_group_by) == 0 and classified_query.query_intent in ["DISTRIBUTION", "RANKING"]:

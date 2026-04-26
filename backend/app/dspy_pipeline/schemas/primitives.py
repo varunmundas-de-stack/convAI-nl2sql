@@ -10,6 +10,7 @@ TermRole = Literal[
     "SCOPE",            # Primary, Secondary
     "COMPARISON",       # vs, compared to, versus, growth, change
     "TREND",            # trend, trending, over time, trajectory
+    "QUERY_TYPE",       # show, what is, list, tell me
 ]
  
 QueryIntent = Literal[

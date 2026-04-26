@@ -25,6 +25,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
+from app.security.context import current_cube_token
 
 # Load environment variables
 load_dotenv()
@@ -179,9 +180,10 @@ class CubeClient:
             "X-Request-Id": request_id,
         }
         
-        # Add authorization if secret is configured
-        if self.api_secret:
-            headers["Authorization"] = self.api_secret
+        # Prefer per-request Cube JWT. Fall back to configured secret for legacy scripts/tests.
+        token = current_cube_token.get() or self.api_secret
+        if token:
+            headers["Authorization"] = token
         
         return headers
     

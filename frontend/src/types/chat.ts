@@ -15,7 +15,7 @@ export type TableResponse = {
 
 export type ChartResponse = {
     type: "chart";
-    chartType: "bar" | "line" | "pie";
+    chartType: "bar" | "line" | "pie" | "compound_sections" | (string & {});
     data: any;
     explanation?: string;
 };

@@ -17,10 +17,10 @@ import uuid
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -29,6 +29,9 @@ from opentelemetry.trace import Status, StatusCode
 from app.services.query_orchestrator import execute_query as run_pipeline, resume_query, execute_retry_query, Stage
 from app.services.helpers.catalog_manager import CatalogManager
 from app.utils.tracer import get_tracer
+from app.security.auth import create_cube_token, get_current_user
+from app.security.context import UserContext, current_cube_token, current_user
+from app.security.metadata_store import log_audit, save_chat_message
 
 # Module-level tracer (provider is set up by llm_service on first import)
 tracer = get_tracer(__name__)
@@ -129,9 +132,19 @@ app = FastAPI(
 # Mount RLHF router
 try:
     from app.rlhf.router import router as rlhf_router
-    app.include_router(rlhf_router, prefix="/rlhf")
+    app.include_router(rlhf_router, prefix="/rlhf", dependencies=[Depends(get_current_user)])
 except Exception as e:
     logger.warning(f"RLHF router mount failed (non-fatal): {e}")
+
+try:
+    from app.security.router import router as auth_router
+    from app.chat_router import router as chat_router
+    from app.insights_router import router as insights_router
+    app.include_router(auth_router)
+    app.include_router(chat_router)
+    app.include_router(insights_router)
+except Exception as e:
+    logger.warning(f"Auth/chat/insights router mount failed (non-fatal): {e}")
 
 # CORS middleware
 app.add_middleware(
@@ -192,6 +205,60 @@ class RetryRequest(BaseModel):
         json_schema_extra={"example": "Show me total sales by region for last 30 days"}
     )
 
+def _set_user_context(user: UserContext):
+    user_token = current_user.set(user)
+    cube_token = current_cube_token.set(create_cube_token(user))
+    return user_token, cube_token
+
+
+def _reset_user_context(tokens):
+    user_token, cube_token = tokens
+    current_cube_token.reset(cube_token)
+    current_user.reset(user_token)
+
+
+def _persist_query_side_effects(
+    user: UserContext,
+    query: str,
+    session_id: str,
+    response_dict: dict[str, Any],
+):
+    try:
+        success = bool(response_dict.get("success"))
+        err = response_dict.get("error") or {}
+        error_message = err.get("message") if isinstance(err, dict) else str(err) if err else None
+        log_audit(
+            user=user,
+            question=query,
+            cube_query=response_dict.get("cube_query"),
+            success=success,
+            error_message=error_message,
+            duration_ms=response_dict.get("duration_ms"),
+        )
+        save_chat_message(session_id, user, "user", query)
+        assistant_content = (
+            response_dict.get("refined_insights")
+            or response_dict.get("clarification_message")
+            or error_message
+            or "Query completed."
+        )
+        if not isinstance(assistant_content, str):
+            assistant_content = json.dumps(assistant_content, default=str)
+        save_chat_message(
+            session_id,
+            user,
+            "assistant",
+            assistant_content,
+            raw_data=response_dict,
+            metadata={
+                "request_id": response_dict.get("request_id"),
+                "stage": response_dict.get("stage"),
+                "success": success,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"Persistence side effects failed (non-fatal): {e}")
+
 # =============================================================================
 # HELPER: MAP PIPELINE STAGE TO HTTP STATUS
 # =============================================================================
@@ -233,7 +300,10 @@ async def health_check():
     summary="Execute natural language query",
     description="Process a natural language query and return analytics results from Cube.js",
 )
-async def execute_query(request: QueryRequest):
+async def execute_query(
+    request: QueryRequest,
+    user: Annotated[UserContext, Depends(get_current_user)],
+):
     """
     Execute a natural language query against the analytics system.
     
@@ -253,11 +323,16 @@ async def execute_query(request: QueryRequest):
         span.set_attribute("input.session_id", session_id)
         span.set_attribute("input.session_is_new", request.session_id is None)
 
-        # Delegate to orchestrator (does ALL the work)
-        response = run_pipeline(query, session_id=session_id)
+        tokens = _set_user_context(user)
+        try:
+            # Delegate to orchestrator (does ALL the work)
+            response = run_pipeline(query, session_id=session_id)
+        finally:
+            _reset_user_context(tokens)
 
         # Convert to dict for JSON response
         response_dict = response.to_dict()
+        _persist_query_side_effects(user, query, session_id, response_dict)
 
         # Check for clarification request - this is NOT an error, return 200
         if response.stage == Stage.CLARIFICATION_REQUESTED:
@@ -312,7 +387,7 @@ async def execute_query(request: QueryRequest):
 
 
 @app.get("/catalog/metrics", tags=["Catalog"])
-async def list_metrics():
+async def list_metrics(_: Annotated[UserContext, Depends(get_current_user)]):
     """List all available metrics."""
     metrics = app_state.catalog.list_metrics()
     return {
@@ -328,7 +403,7 @@ async def list_metrics():
 
 
 @app.get("/catalog/dimensions", tags=["Catalog"])
-async def list_dimensions():
+async def list_dimensions(_: Annotated[UserContext, Depends(get_current_user)]):
     """List all available dimensions."""
     dimensions = app_state.catalog.list_dimensions()
     return {
@@ -346,7 +421,7 @@ async def list_dimensions():
 
 
 @app.get("/catalog/time-windows", tags=["Catalog"])
-async def list_time_windows():
+async def list_time_windows(_: Annotated[UserContext, Depends(get_current_user)]):
     """List all available time windows."""
     windows = app_state.catalog.list_time_windows()
     return {
@@ -361,7 +436,10 @@ async def list_time_windows():
     }
 
 @app.post("/clarify", tags=["Query"], summary="Submit clarification answers")
-async def clarify_endpoint(req: ClarificationRequest):
+async def clarify_endpoint(
+    req: ClarificationRequest,
+    user: Annotated[UserContext, Depends(get_current_user)],
+):
     """
     Resume a paused pipeline by supplying answers to a clarification request.
 
@@ -376,7 +454,19 @@ async def clarify_endpoint(req: ClarificationRequest):
         span.set_attribute("input.answers", str(req.answers)[:500])
         span.set_attribute("input.value", json.dumps(req.answers, default=str))
 
-        response_dict = resume_query(req.request_id, req.answers, session_id=req.session_id)
+        tokens = _set_user_context(user)
+        try:
+            response_dict = resume_query(req.request_id, req.answers, session_id=req.session_id)
+        finally:
+            _reset_user_context(tokens)
+
+        if response_dict.get("session_id"):
+            _persist_query_side_effects(
+                user,
+                response_dict.get("effective_query") or response_dict.get("query") or req.request_id,
+                response_dict["session_id"],
+                response_dict,
+            )
 
         # Clarification requested again — not an error, return 200
         if response_dict.get("stage") == Stage.CLARIFICATION_REQUESTED:
@@ -422,7 +512,10 @@ async def clarify_endpoint(req: ClarificationRequest):
     summary="Retry query with modifications",
     description="Retry a previous query with modifications while maintaining session context",
 )
-async def retry_query_endpoint(request: RetryRequest):
+async def retry_query_endpoint(
+    request: RetryRequest,
+    user: Annotated[UserContext, Depends(get_current_user)],
+):
     """
     Retry a previous query with modifications while maintaining conversational context.
 
@@ -445,16 +538,21 @@ async def retry_query_endpoint(request: RetryRequest):
             "original_query": request.original_query
         }))
 
-        # Delegate to orchestrator (handles all retry logic)
-        response = execute_retry_query(
-            original_request_id=request.original_request_id,
-            modified_query=request.modified_query,
-            session_id=request.session_id,
-            original_query=request.original_query
-        )
+        tokens = _set_user_context(user)
+        try:
+            # Delegate to orchestrator (handles all retry logic)
+            response = execute_retry_query(
+                original_request_id=request.original_request_id,
+                modified_query=request.modified_query,
+                session_id=request.session_id,
+                original_query=request.original_query
+            )
+        finally:
+            _reset_user_context(tokens)
 
         # Convert to dict for JSON response
         response_dict = response.to_dict() if hasattr(response, "to_dict") else vars(response)
+        _persist_query_side_effects(user, request.modified_query, request.session_id, response_dict)
 
         # Check for clarification request - this is NOT an error, return 200
         if getattr(response, "stage", None) == Stage.CLARIFICATION_REQUESTED:

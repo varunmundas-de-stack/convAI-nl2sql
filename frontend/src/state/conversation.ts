@@ -93,6 +93,13 @@ export function useConversation() {
         setCompoundState(null);
     }
 
+    function replaceMessages(nextMessages: ConversationMessage[]) {
+        setMessages(nextMessages);
+        setPendingClarification(null);
+        setBackendResponse(null);
+        setCompoundState(null);
+    }
+
     return {
         messages,
         pendingClarification,
@@ -101,6 +108,7 @@ export function useConversation() {
         addUserMessage,
         handleResponse,
         clearMessages,
+        replaceMessages,
     };
 }
 

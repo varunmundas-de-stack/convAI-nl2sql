@@ -171,6 +171,16 @@ def configure_dspy_model() -> None:
         # Get model from environment or use default
         model_id = os.getenv("ANTHROPIC_MODEL_ID", "claude-haiku-4-5")
 
+        # Suppress LiteLLM logging spam
+        try:
+            import litellm
+            import logging
+            litellm.set_verbose = False
+            litellm.suppress_debug_info = True
+            logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+        except ImportError:
+            pass
+
         # Configure DSPy with Anthropic Claude via LiteLLM
         # LiteLLM handles the Anthropic API integration
         lm = dspy.LM(

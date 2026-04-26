@@ -1,8 +1,24 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { ArrowUp, Plus } from "lucide-react";
-import { sendQuery, clarify, healthCheck, getCurrentSessionId, resetSession, retryQuery } from "@/services/api";
+import { ArrowUp, LogOut, Plus } from "lucide-react";
+import {
+    sendQuery,
+    clarify,
+    healthCheck,
+    getCurrentSessionId,
+    setSessionId as setApiSessionId,
+    resetSession,
+    retryQuery,
+    login,
+    logout,
+    getAccessToken,
+    getMe,
+    getChatSessions,
+    getChatMessages,
+    getInsights,
+    markInsightRead,
+} from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
 import { parseClarificationAnswers } from "@/utils/clarificationParser";
@@ -13,6 +29,11 @@ export default function ChatWindow() {
     const [isLoading, setIsLoading] = useState(false);
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
+    const [user, setUser] = useState<any>(null);
+    const [loginError, setLoginError] = useState<string | null>(null);
+    const [loginForm, setLoginForm] = useState({ username: "nestle_admin", password: "admin123" });
+    const [sessions, setSessions] = useState<any[]>([]);
+    const [insights, setInsights] = useState<any[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const {
@@ -23,7 +44,32 @@ export default function ChatWindow() {
         addUserMessage,
         handleResponse,
         clearMessages,
+        replaceMessages,
     } = useConversation();
+
+    async function refreshUserData() {
+        try {
+            const [sessionResult, insightResult] = await Promise.all([
+                getChatSessions().catch(() => ({ sessions: [] })),
+                getInsights().catch(() => ({ insights: [] })),
+            ]);
+            setSessions(sessionResult.sessions || []);
+            setInsights(insightResult.insights || []);
+        } catch {
+            setSessions([]);
+            setInsights([]);
+        }
+    }
+
+    useEffect(() => {
+        if (!getAccessToken()) return;
+        getMe()
+            .then((data) => {
+                setUser(data.user);
+                refreshUserData();
+            })
+            .catch(() => logout());
+    }, []);
 
     // Check backend health on mount
     useEffect(() => {
@@ -59,7 +105,7 @@ export default function ChatWindow() {
     }, [sessionId]);
 
     async function onSend() {
-        if (!input.trim() || isLoading || !isBackendAvailable) return;
+        if (!input.trim() || isLoading || !isBackendAvailable || !user) return;
 
         const userInput = input.trim();
         addUserMessage(userInput);
@@ -98,6 +144,7 @@ export default function ChatWindow() {
             }
 
             handleResponse(result.response, result.raw);
+            refreshUserData();
         } catch (error) {
             handleResponse({
                 type: "error",
@@ -110,7 +157,7 @@ export default function ChatWindow() {
     }
 
     async function submitClarification(answerValue: string) {
-        if (isLoading || !isBackendAvailable || !pendingClarification) return;
+        if (isLoading || !isBackendAvailable || !pendingClarification || !user) return;
 
         // Show friendly message to user
         const displayValue = answerValue.replace(/_/g, " ");
@@ -143,6 +190,7 @@ export default function ChatWindow() {
             }
 
             handleResponse(result.response, result.raw);
+            refreshUserData();
         } catch (error) {
             handleResponse({
                 type: "error",
@@ -154,7 +202,7 @@ export default function ChatWindow() {
     }
 
     async function handleRetry(modifiedQuery: string, originalMessage: any) {
-        if (isLoading || !isBackendAvailable || !sessionId) return;
+        if (isLoading || !isBackendAvailable || !sessionId || !user) return;
 
         // Use the original_query from the backend response (not effective_query)
         // The original_query is what we want for RLHF logging
@@ -183,6 +231,7 @@ export default function ChatWindow() {
 
             // Handle the response
             handleResponse(result.response, result.raw);
+            refreshUserData();
         } catch (error) {
             handleResponse({
                 type: "error",
@@ -200,6 +249,48 @@ export default function ChatWindow() {
             setSessionId(null);
             clearMessages();
         }
+    }
+
+    async function handleLogin() {
+        setLoginError(null);
+        try {
+            const nextUser = await login(loginForm.username, loginForm.password);
+            setUser(nextUser);
+            await refreshUserData();
+        } catch (error) {
+            setLoginError(error instanceof Error ? error.message : "Login failed");
+        }
+    }
+
+    async function handleLogout() {
+        await logout();
+        setUser(null);
+        setSessionId(null);
+        setSessions([]);
+        setInsights([]);
+        clearMessages();
+    }
+
+    async function loadSession(sessionIdToLoad: string) {
+        const data = await getChatMessages(sessionIdToLoad);
+        setSessionId(sessionIdToLoad);
+        setApiSessionId(sessionIdToLoad);
+        replaceMessages((data.messages || []).map((m: any) => ({
+            id: m.message_id,
+            role: m.role,
+            content: m.content,
+            rawBackendData: m.raw_data || undefined,
+            responseData: m.raw_data?.visual_spec
+                ? { type: "chart", chartType: m.raw_data.visual_spec.chart_type || "bar", data: { visual_spec: m.raw_data.visual_spec, refined_insights: m.raw_data.refined_insights || null } }
+                : undefined,
+        })));
+    }
+
+    async function handleInsightClick(insight: any) {
+        if (insight.insight_id) {
+            markInsightRead(insight.insight_id).catch(() => null);
+        }
+        setInput(insight.suggested_query || "");
     }
 
     function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -223,6 +314,41 @@ export default function ChatWindow() {
         pendingClarification.allowed_values &&
         pendingClarification.allowed_values.length > 0
     );
+
+    if (!user) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-white px-4">
+                <div className="w-full max-w-sm border border-gray-200 rounded-lg p-6 shadow-sm">
+                    <h1 className="text-xl font-semibold text-gray-900 mb-5">Sign in</h1>
+                    <div className="space-y-3">
+                        <input
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                            value={loginForm.username}
+                            onChange={(e) => setLoginForm((f) => ({ ...f, username: e.target.value }))}
+                            placeholder="Username"
+                        />
+                        <input
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                            type="password"
+                            value={loginForm.password}
+                            onChange={(e) => setLoginForm((f) => ({ ...f, password: e.target.value }))}
+                            placeholder="Password"
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") handleLogin();
+                            }}
+                        />
+                        {loginError && <div className="text-sm text-red-600">{loginError}</div>}
+                        <button
+                            onClick={handleLogin}
+                            className="w-full bg-gray-900 text-white rounded-md py-2 text-sm hover:bg-gray-800"
+                        >
+                            Sign in
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-screen bg-white">
@@ -249,6 +375,16 @@ export default function ChatWindow() {
                                 </code>
                             </div>
                         )}
+                        <div className="text-xs text-gray-600">
+                            {user.full_name} · {user.client_name} · {user.role}
+                        </div>
+                        <button
+                            onClick={handleLogout}
+                            className="p-1.5 rounded-md border border-gray-200 hover:bg-gray-50"
+                            title="Sign out"
+                        >
+                            <LogOut size={14} />
+                        </button>
                         {/* Backend Status */}
                         <div className="flex items-center gap-2 ml-2">
                             <div
@@ -262,6 +398,35 @@ export default function ChatWindow() {
                     </div>
                 </div>
             </div>
+
+            <div className="flex-1 min-h-0 flex">
+                <aside className="hidden lg:block w-72 border-r border-gray-200 overflow-y-auto p-3">
+                    <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Conversations</div>
+                    <div className="space-y-1 mb-5">
+                        {sessions.map((s) => (
+                            <button
+                                key={s.session_id}
+                                onClick={() => loadSession(s.session_id)}
+                                className="w-full text-left text-sm px-2 py-2 rounded-md hover:bg-gray-100 truncate"
+                            >
+                                {s.title || "New conversation"}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Insights</div>
+                    <div className="space-y-2">
+                        {insights.map((insight) => (
+                            <button
+                                key={insight.insight_id}
+                                onClick={() => handleInsightClick(insight)}
+                                className="w-full text-left border border-gray-200 rounded-md p-2 hover:bg-gray-50"
+                            >
+                                <div className="text-sm font-medium text-gray-900">{insight.title}</div>
+                                <div className="text-xs text-gray-500 mt-1 line-clamp-2">{insight.description}</div>
+                            </button>
+                        ))}
+                    </div>
+                </aside>
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
@@ -319,6 +484,7 @@ export default function ChatWindow() {
                     <div className="h-24 shrink-0 w-full" />
                     <div ref={messagesEndRef} />
                 </div>
+            </div>
             </div>
 
             {/* Floating Input */}

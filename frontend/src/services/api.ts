@@ -93,7 +93,7 @@ export async function healthCheck() {
 /**
  * Transform backend response to frontend ChatResponse format
  */
-function transformBackendResponse(backendResponse: any): ChatResponse {
+export function transformBackendResponse(backendResponse: any): ChatResponse {
     // ADD DEBUG LINE
     console.log("🔍 Raw backend response:", JSON.stringify(backendResponse, null, 2));
 
@@ -387,6 +387,12 @@ export async function getCatalogTimeWindows() {
 export async function getChatSessions() {
     const res = await apiFetch("/chat/sessions");
     if (!res.ok) throw new Error("Failed to load sessions");
+    return res.json();
+}
+
+export async function deleteChatSession(sessionId: string) {
+    const res = await apiFetch(`/chat/sessions/${sessionId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Failed to delete session");
     return res.json();
 }
 

@@ -176,9 +176,11 @@ class QueryRequest(BaseModel):
     )
 
 class ClarificationRequest(BaseModel):
-    request_id: str
-    answers: dict[str, Any]
+    request_id: str | None = None
+    answers: dict[str, Any] | None = None
     session_id: str | None = None
+    compound_state: dict[str, Any] | None = None
+    clarification_answer: str | None = None
 
 class RetryRequest(BaseModel):
     """Request model for retrying a query with modifications."""
@@ -461,9 +463,10 @@ async def clarify_endpoint(
             _reset_user_context(tokens)
 
         if response_dict.get("session_id"):
+            answers_str = ", ".join(str(v).replace("_", " ") for v in req.answers.values()) if getattr(req, "answers", None) else getattr(req, "clarification_answer", getattr(req, "request_id", "Clarification"))
             _persist_query_side_effects(
                 user,
-                response_dict.get("effective_query") or response_dict.get("query") or req.request_id,
+                answers_str,
                 response_dict["session_id"],
                 response_dict,
             )

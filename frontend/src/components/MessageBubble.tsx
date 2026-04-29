@@ -53,11 +53,14 @@ export default function MessageBubble({
         responseData.type !== "clarification_required" &&
         rawBackendData?.request_id;
 
+    // Hide content if it's just raw JSON from the backend (which happens when refined_insights is dumped into the DB)
+    const isContentJson = !isUser && message.content && typeof message.content === 'string' && message.content.trim().startsWith('{') && message.content.trim().endsWith('}');
+
     return (
         <div className={`flex ${alignClasses} mb-6`}>
             <div className={containerClasses}>
                 {/* Text content */}
-                {message.content && (
+                {message.content && !isContentJson && (
                     <div className={`whitespace-pre-wrap break-words ${!isUser ? "text-lg leading-relaxed text-gray-800" : ""}`}>
                         {message.content}
                     </div>

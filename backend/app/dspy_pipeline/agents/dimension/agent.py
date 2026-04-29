@@ -167,17 +167,17 @@ class DimensionsModule(dspy.Module):
                 # -------------------------
                 # 3.5 Check Session Resolved Terms
                 # -------------------------
-                resolved_term_map = overrides.get("resolved_dimension_terms", {})
+                resolved_term_map = {k.lower(): v for k, v in overrides.get("resolved_dimension_terms", {}).items()}
                 dim_terms = [
                     t.term for t in classified_query.classified_terms
                     if t.role == "DIMENSION"
                 ]
 
                 # If all dimension terms are already resolved in the session, use them directly
-                if dim_terms and all(term in resolved_term_map for term in dim_terms):
+                if dim_terms and all(term.lower() in resolved_term_map for term in dim_terms):
                     resolved_dimensions = []
                     for term in dim_terms:
-                        resolved_name = resolved_term_map[term]
+                        resolved_name = resolved_term_map[term.lower()]
                         if resolved_name in valid_dims and resolved_name != "invoice_date":
                             resolved_dimensions.append(resolved_name)
                     if resolved_dimensions:

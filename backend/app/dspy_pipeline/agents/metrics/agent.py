@@ -123,17 +123,17 @@ class MetricsModule(dspy.Module):
                 # -------------------------
                 # 3.5 Check Session Resolved Terms
                 # -------------------------
-                resolved_term_map = overrides.get("resolved_metric_terms", {})
+                resolved_term_map = {k.lower(): v for k, v in overrides.get("resolved_metric_terms", {}).items()}
                 metric_terms = [
                     t.term for t in classified_query.classified_terms
                     if t.role == "METRIC"
                 ]
 
                 # If all metric terms are already resolved in the session, use them directly
-                if metric_terms and all(term in resolved_term_map for term in metric_terms):
+                if metric_terms and all(term.lower() in resolved_term_map for term in metric_terms):
                     resolved_metrics = []
                     for term in metric_terms:
-                        resolved_name = resolved_term_map[term]
+                        resolved_name = resolved_term_map[term.lower()]
                         if resolved_name in CATALOG_METRICS:
                             resolved_metrics.append(MetricSpec(
                                 name=resolved_name,

@@ -133,3 +133,120 @@ ON CONFLICT (username) DO UPDATE SET
   zsm_code = EXCLUDED.zsm_code,
   nsm_code = EXCLUDED.nsm_code,
   is_active = TRUE;
+
+-- insights 
+
+CREATE TABLE IF NOT EXISTS app_meta.user_interest_profiles (
+  profile_id    BIGSERIAL PRIMARY KEY,
+  user_id       BIGINT NOT NULL REFERENCES app_meta.users(user_id),
+  client_id     VARCHAR(64) NOT NULL,
+
+  -- Derived from chat history mining
+  top_kpis      JSONB,   
+  -- e.g. [{"kpi":"net_revenue","weight":0.92},
+  --        {"kpi":"returns_pct","weight":0.61}]
+  
+  top_entities  JSONB,   
+  -- e.g. [{"type":"zone","value":"West","weight":0.88},
+  --        {"type":"brand","value":"KitKat","weight":0.72}]
+  
+  top_dimensions JSONB,  
+  -- e.g. ["zone","brand","channel"]
+  
+  preferred_time_windows JSONB,  
+  -- e.g. ["last_7d","MTD"]
+  
+  -- Explicit user pins (from UI)
+  pinned_kpis     JSONB,
+  pinned_entities JSONB,
+
+  -- Metadata
+  chat_messages_analyzed  INTEGER DEFAULT 0,
+  last_computed_at        TIMESTAMP,
+  created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  UNIQUE(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS app_meta.intel_watch_configs (
+  watch_id      BIGSERIAL PRIMARY KEY,
+  user_id       BIGINT NOT NULL REFERENCES app_meta.users(user_id),
+  client_id     VARCHAR(64) NOT NULL,
+
+  kpi           VARCHAR(80) NOT NULL,    
+  -- "net_revenue", "returns_pct", "numeric_dist", "billing_count"
+  
+  dimension_filters JSONB,              
+  -- {"zone":"West","brand":"KitKat"}
+  
+  granularity   VARCHAR(16) NOT NULL DEFAULT 'daily',  
+  -- "hourly","daily","weekly"
+  
+  lookback_days INTEGER NOT NULL DEFAULT 30,
+
+  -- Alert thresholds
+  alert_on_pct_change   NUMERIC,        -- trigger if >X% change
+  alert_on_abs_value    NUMERIC,        -- trigger if drops below X
+  alert_on_rank_drop    INTEGER,        -- trigger if rank drops by N
+  alert_on_days_inactive INTEGER,       -- trigger if entity silent for N days
+
+  source          VARCHAR(20) DEFAULT 'system',  
+  -- "system" (auto-derived) or "user" (pinned)
+  
+  priority_score  NUMERIC DEFAULT 0.5,  -- 0.0 to 1.0
+  is_active       BOOLEAN DEFAULT TRUE,
+
+  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app_meta.intel_insight_feedback (
+  feedback_id   BIGSERIAL PRIMARY KEY,
+  insight_id    VARCHAR(160) NOT NULL REFERENCES app_meta.insights(insight_id),
+  user_id       BIGINT NOT NULL REFERENCES app_meta.users(user_id),
+
+  action        VARCHAR(32) NOT NULL,
+  -- "read" | "clicked_followup" | "dismissed" | "pinned" | "acted_on" | "not_relevant"
+
+  session_id    VARCHAR(80) REFERENCES app_meta.chat_sessions(session_id),
+  -- populated when action = "clicked_followup" (bridges back to chat)
+
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  UNIQUE(insight_id, user_id, action)
+);
+
+CREATE TABLE IF NOT EXISTS app_meta.intel_run_log (
+  run_id        BIGSERIAL PRIMARY KEY,
+  client_id     VARCHAR(64) NOT NULL,
+  triggered_by  VARCHAR(20) DEFAULT 'scheduler',  
+  -- "scheduler" | "manual" | "threshold_breach"
+
+  run_status    VARCHAR(16) NOT NULL,   
+  -- "running" | "completed" | "failed"
+
+  users_processed     INTEGER DEFAULT 0,
+  insights_generated  INTEGER DEFAULT 0,
+  insights_suppressed INTEGER DEFAULT 0,  -- deduped/low-quality ones
+  error_detail        TEXT,
+
+  started_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  completed_at  TIMESTAMP
+);
+
+ALTER TABLE app_meta.insights
+  ADD COLUMN IF NOT EXISTS watch_id BIGINT,
+  -- links back to which watch_config triggered this
+
+  ADD COLUMN IF NOT EXISTS detection_method VARCHAR(40),
+  -- "anomaly" | "trend" | "target_gap" | "rank_shift" 
+  -- | "contribution_shift" | "inactivity" | "peer_comparison"
+
+  ADD COLUMN IF NOT EXISTS period_start DATE,
+  ADD COLUMN IF NOT EXISTS period_end   DATE,
+  -- exact data window this insight covers
+
+  ADD COLUMN IF NOT EXISTS insight_hash VARCHAR(64) UNIQUE;
+  -- SHA hash of (tenant+user+kpi+dimension+window+method)
+  -- used for deduplication — ON CONFLICT DO NOTHING

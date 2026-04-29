@@ -238,12 +238,18 @@ def _persist_query_side_effects(
             duration_ms=response_dict.get("duration_ms"),
         )
         save_chat_message(session_id, user, "user", query)
-        assistant_content = (
-            response_dict.get("refined_insights")
-            or response_dict.get("clarification_message")
-            or error_message
-            or "Query completed."
-        )
+        
+        # Build assistant content: success messages show actual data, failures show static message
+        if response_dict.get("refined_insights"):
+            assistant_content = response_dict.get("refined_insights")
+        elif response_dict.get("clarification_message"):
+            assistant_content = response_dict.get("clarification_message")
+        elif success:
+            assistant_content = "Query completed."
+        else:
+            # Pipeline failed: save static message to DB instead of actual error details
+            assistant_content = "Unable to process your request"
+        
         if not isinstance(assistant_content, str):
             assistant_content = json.dumps(assistant_content, default=str)
         save_chat_message(

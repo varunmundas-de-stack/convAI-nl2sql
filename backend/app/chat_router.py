@@ -34,3 +34,9 @@ async def patch_session(
 ):
     update_session(user, session_id, payload.title, payload.is_active)
     return {"success": True}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, user: Annotated[UserContext, Depends(get_current_user)]):
+    update_session(user, session_id, None, False)
+    return {"success": True}

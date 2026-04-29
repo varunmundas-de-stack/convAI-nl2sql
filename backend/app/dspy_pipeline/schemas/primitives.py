@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Literal, Optional, Union, List
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal, Optional, Union, List, Any
 TermRole = Literal[
     "METRIC",           # net_value, billed_qty, count, gross_value, tax_value
     "DIMENSION",        # zone, brand, category, state, distributor_name...
@@ -87,6 +87,20 @@ class FilterCondition(BaseModel):
     value: Union[str, List[str]] = Field(
         description="Filter value(s). Use List[str] only with 'in'/'not_in' operators."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_sloppy_input(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # LLMs often output 'values' instead of 'value'
+            if "values" in data and "value" not in data:
+                data["value"] = data.pop("values")
+            # Filter out any other unexpected keys that might cause validation to fail
+            valid_keys = {"dimension", "operator", "value"}
+            for key in list(data.keys()):
+                if key not in valid_keys:
+                    data.pop(key, None)
+        return data
  
     model_config = ConfigDict(extra="forbid")
 

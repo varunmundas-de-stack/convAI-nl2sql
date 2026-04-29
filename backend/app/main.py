@@ -252,12 +252,19 @@ def _persist_query_side_effects(
         
         if not isinstance(assistant_content, str):
             assistant_content = json.dumps(assistant_content, default=str)
+            
+        # Do not save detailed error messages to the DB
+        db_raw_data = response_dict.copy()
+        if not success and "error" in db_raw_data:
+            # Replace the detailed error with a generic one or remove it completely
+            db_raw_data["error"] = "Unable to process your request"
+            
         save_chat_message(
             session_id,
             user,
             "assistant",
             assistant_content,
-            raw_data=response_dict,
+            raw_data=db_raw_data,
             metadata={
                 "request_id": response_dict.get("request_id"),
                 "stage": response_dict.get("stage"),

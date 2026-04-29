@@ -147,10 +147,40 @@ export function transformBackendResponse(backendResponse: any): ChatResponse {
     }
 
     // Handle error
+    let errorMsg = "An error occurred";
+    let isError = false;
+
     if (backendResponse.success === false || backendResponse.error) {
+        isError = true;
+        const errObj = backendResponse.error;
+        if (typeof errObj === "string") {
+            errorMsg = errObj;
+        } else if (errObj && typeof errObj === "object") {
+            errorMsg = errObj.message || errObj.error_type || "Unknown error";
+        }
+    } else if (backendResponse.detail) {
+        isError = true;
+        const detail = backendResponse.detail;
+        if (typeof detail === "string") {
+            errorMsg = detail;
+        } else if (detail && typeof detail === "object") {
+            if (detail.error) {
+                const errObj = detail.error;
+                if (typeof errObj === "string") {
+                    errorMsg = errObj;
+                } else if (errObj && typeof errObj === "object") {
+                    errorMsg = errObj.message || errObj.error_type || "Unknown error";
+                }
+            } else if (detail.message) {
+                errorMsg = detail.message;
+            }
+        }
+    }
+
+    if (isError) {
         return {
             type: "error",
-            message: backendResponse.error || "An error occurred",
+            message: errorMsg,
         };
     }
 

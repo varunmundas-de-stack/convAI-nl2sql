@@ -16,7 +16,7 @@ class SubQueryItem(BaseModel):
     intent_hint: Optional[str] = Field(default=None, description="Suggested intent type")
     dependencies: List[int] = Field(default_factory=list, description="Indices of sub-queries this depends on")
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 class DecomposedQuery(BaseModel):
@@ -54,7 +54,7 @@ class DecomposedQuery(BaseModel):
             }
         return data
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 # =============================================================================
@@ -109,7 +109,7 @@ class ClassifiedQuery(BaseModel):
         )
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 # =============================================================================
@@ -124,7 +124,7 @@ class ScopeResult(BaseModel):
         description="Resolved sales scope. Null if unable to determine."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
  
@@ -182,7 +182,7 @@ class TimeResult(BaseModel):
         """Derived — True if any time constraint is present."""
         return any([self.time_window, self.start_date, self.end_date])
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
  
@@ -255,7 +255,7 @@ class MetricsResult(BaseModel):
             "aggregations": aggregations
         }
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
  
 
@@ -291,7 +291,7 @@ class DimensionsResult(BaseModel):
         description="Filter conditions to apply. Null if no filters."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
 
 
@@ -307,10 +307,22 @@ class RankingConfig(BaseModel):
         default=None,
         description="Number of results. Default to 10 if not specified."
     )
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def normalize_order(cls, v):
+        """Normalize ascending/descending to asc/desc."""
+        if isinstance(v, str):
+            v_lower = v.lower().strip()
+            if v_lower in ("ascending", "asc"):
+                return "asc"
+            elif v_lower in ("descending", "desc"):
+                return "desc"
+        return v
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
- 
+
 class ComparisonConfig(BaseModel):
     """Comparison specification within post-processing."""
     type: Literal["period", "dimension"]
@@ -326,7 +338,7 @@ class ComparisonConfig(BaseModel):
             return None  # coerce invalid values to null instead of crashing
         return v
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 class PostProcessingResult(BaseModel):
     """
@@ -396,7 +408,7 @@ class PostProcessingResult(BaseModel):
 
             return data
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
  
 

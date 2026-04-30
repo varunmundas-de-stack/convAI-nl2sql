@@ -24,6 +24,7 @@ class ResolvePostProcessing(dspy.Signature):
     post_processing_result: PostProcessingResult = dspy.OutputField(
     desc=(
         "Return PostProcessingResult with: "
+        "ranking.order MUST be 'asc' or 'desc' (not 'ascending'/'descending'). "
         "ranking (enabled/order/limit), "
         "comparison.comparison_window must be one of: "
         "'today','yesterday','last_7_days','last_30_days','last_90_days','month_to_date',"

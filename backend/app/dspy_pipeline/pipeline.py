@@ -502,14 +502,25 @@ class AssemblerModule:
                 filters = dimensions_result.filters if dimensions_result else None
 
                 if not filters and classified_query.filter_hints:
-                    filters = [
-                        FilterCondition(
-                            dimension=hint.dimension,
-                            operator="equals",
-                            value=hint.value,
-                        )
-                        for hint in classified_query.filter_hints
-                    ]
+                    from app.services.helpers.catalog_manager import CatalogManager
+                    catalog_manager = CatalogManager()
+                    valid_filters = []
+                    for hint in classified_query.filter_hints:
+                        # Validate that the dimension exists in the catalog
+                        try:
+                            if catalog_manager.is_valid_dimension(hint.dimension):
+                                valid_filters.append(
+                                    FilterCondition(
+                                        dimension=hint.dimension,
+                                        operator="equals",
+                                        value=hint.value,
+                                    )
+                                )
+                            else:
+                                logger.warning(f"[DSPy Assembler] Skipping invalid filter dimension '{hint.dimension}' (not in catalog)")
+                        except Exception as e:
+                            logger.warning(f"[DSPy Assembler] Skipping filter dimension '{hint.dimension}': {e}")
+                    filters = valid_filters if valid_filters else None
 
                 # -------------------------
                 # Final Intent

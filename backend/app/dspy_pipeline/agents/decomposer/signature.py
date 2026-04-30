@@ -55,5 +55,11 @@ class DecomposeQuery(dspy.Signature):
     session_context: str = dspy.InputField(desc="Session memory", default="")
 
     decomposed_query: DecomposedQuery = dspy.OutputField(
-        desc="List of independent sub-queries with clear scope separation"
+        desc=(
+            "Structured output containing: "
+            "'sub_queries' (list of query objects with index, text, dependencies), "
+            "'is_compound' (boolean). "
+            "Return ONLY the JSON object, not wrapped in a 'decomposed_query' key. "
+            "Example: {\"sub_queries\": [{\"index\": 0, \"text\": \"...\", \"dependencies\": []}], \"is_compound\": true}"
+        )
     )

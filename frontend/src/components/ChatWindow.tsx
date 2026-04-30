@@ -426,7 +426,7 @@ export default function ChatWindow() {
                             </div>
                         )} */}
                         <div className="text-xs text-gray-600">
-                            {user.full_name} · {user.client_name} · {user.role}
+                            {user.full_name} · {user.client_name}
                         </div>
                         <button
                             onClick={handleLogout}

@@ -444,6 +444,26 @@ export async function markInsightRead(insightId: string) {
     return res.json();
 }
 
+export async function postInsightFeedback(
+    insightId: string,
+    action: "read" | "clicked_followup" | "dismissed" | "pinned" | "acted_on" | "not_relevant",
+    sessionId?: string
+) {
+    const res = await apiFetch(`/insights/${insightId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, session_id: sessionId ?? null }),
+    });
+    if (!res.ok) throw new Error("Failed to post insight feedback");
+    return res.json();
+}
+
+export async function triggerIntelRun(): Promise<{ success: boolean; insights_generated: number; insights_suppressed: number; users_processed: number; errors: string[] }> {
+    const res = await apiFetch("/insights/intel/run", { method: "POST" });
+    if (!res.ok) throw new Error("Failed to trigger intel run");
+    return res.json();
+}
+
 // =============================================================================
 // RLHF ADMIN API
 // =============================================================================

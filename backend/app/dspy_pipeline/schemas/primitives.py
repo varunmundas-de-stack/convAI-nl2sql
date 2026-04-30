@@ -48,7 +48,7 @@ class ClassifiedTerm(BaseModel):
         description="The scope implied by this term (e.g., 'secondary sales' implies SECONDARY). Null if not applicable."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
 
 
@@ -67,7 +67,7 @@ class FilterHint(BaseModel):
         description="Exact filter value as mentioned in the query."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
 
 class FilterCondition(BaseModel):
@@ -102,7 +102,7 @@ class FilterCondition(BaseModel):
                     data.pop(key, None)
         return data
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 class MetricSpec(BaseModel):
@@ -110,4 +110,4 @@ class MetricSpec(BaseModel):
     name: str
     aggregation: Literal["sum", "count", "avg"]
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")

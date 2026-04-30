@@ -9,14 +9,21 @@ class ClassifyQuery(dspy.Signature):
 
     # Output the complete classified query as JSON
     classified_query: ClassifiedQuery = dspy.OutputField(
-        desc="JSON object with ClassifiedQuery structure containing: "
-             "original_query (string), "
-             "classified_terms (array of objects with term, role, catalog_match, scope), "
-             "query_intent (SNAPSHOT|DISTRIBUTION|RANKING|TREND|COMPARISON|DRILL_DOWN|MINIMAL_MESSAGE|STRUCTURAL), "
-             "filter_hints (array of objects with dimension and value), "
-             "explicit_scope (PRIMARY|SECONDARY or null). "
-             "Intent type MUST be determined based on the query structure and terms. "
-             "SNAPSHOT = single aggregated value with no breakdown. "
-             "DO NOT guess catalog_match for generic/vague terms like 'region', 'location', 'product'. Leave catalog_match null if ambiguous. "
-             "Use roles: METRIC, DIMENSION, TIME_RANGE, TIME_GRANULARITY, FILTER_VALUE, RANKING, SCOPE, COMPARISON, TREND"
+        desc=(
+            "JSON object with ClassifiedQuery structure containing: "
+            "original_query (string), "
+            "classified_terms (array of objects with term, role, catalog_match, scope), "
+            "query_intent (SNAPSHOT|DISTRIBUTION|RANKING|TREND|COMPARISON|DRILL_DOWN|MINIMAL_MESSAGE|STRUCTURAL), "
+            "filter_hints (array of objects with dimension and value), "
+            "explicit_scope (PRIMARY|SECONDARY or null). "
+            "\n"
+            "CRITICAL RULES:\n"
+            "- SCOPE indicators (PRIMARY, SECONDARY): Assign role=SCOPE. DO NOT create filter_hints for these — they only populate explicit_scope.\n"
+            "- FILTER_VALUE terms: Are actual dimension values like 'north', 'delhi', 'coca-cola' — these create filter_hints with a real dimension.\n"
+            "- DO NOT create filters for scope keywords or generic dimensions — only specific dimension values.\n"
+            "- Intent type MUST be determined based on the query structure and terms.\n"
+            "- SNAPSHOT = single aggregated value with no breakdown.\n"
+            "- DO NOT guess catalog_match for generic/vague terms like 'region', 'location', 'product'. Leave catalog_match null if ambiguous.\n"
+            "- Use roles: METRIC, DIMENSION, TIME_RANGE, TIME_GRANULARITY, FILTER_VALUE, RANKING, SCOPE, COMPARISON, TREND"
+        )
     )

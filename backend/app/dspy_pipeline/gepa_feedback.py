@@ -14,7 +14,14 @@ containing both numerical scores and textual feedback for optimization.
 import logging
 from typing import Any, Dict, List, Optional, Union
 from dspy import Example, Prediction
-from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback, DSPyTrace
+from dataclasses import dataclass
+
+@dataclass
+class ScoreWithFeedback:
+    score: float
+    feedback: str
+
+DSPyTrace = Any
 
 from .schemas import (
     ClassifiedQuery,

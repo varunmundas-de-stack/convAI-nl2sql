@@ -502,14 +502,25 @@ class AssemblerModule:
                 filters = dimensions_result.filters if dimensions_result else None
 
                 if not filters and classified_query.filter_hints:
-                    filters = [
-                        FilterCondition(
-                            dimension=hint.dimension,
-                            operator="equals",
-                            value=hint.value,
-                        )
-                        for hint in classified_query.filter_hints
-                    ]
+                    from app.services.helpers.catalog_manager import CatalogManager
+                    catalog_manager = CatalogManager()
+                    valid_filters = []
+                    for hint in classified_query.filter_hints:
+                        # Validate that the dimension exists in the catalog
+                        try:
+                            if catalog_manager.is_valid_dimension(hint.dimension):
+                                valid_filters.append(
+                                    FilterCondition(
+                                        dimension=hint.dimension,
+                                        operator="equals",
+                                        value=hint.value,
+                                    )
+                                )
+                            else:
+                                logger.warning(f"[DSPy Assembler] Skipping invalid filter dimension '{hint.dimension}' (not in catalog)")
+                        except Exception as e:
+                            logger.warning(f"[DSPy Assembler] Skipping filter dimension '{hint.dimension}': {e}")
+                    filters = valid_filters if valid_filters else None
 
                 # -------------------------
                 # Final Intent
@@ -1167,6 +1178,8 @@ class IntentExtractionPipeline(dspy.Module):
             completed_subqueries = []
 
         pending_subqueries = []
+        failed_indices = set()
+        newly_completed = 0
 
         # Process each sub-query that's ready to be processed
         for sub_query in decomposed.sub_queries:
@@ -1206,6 +1219,7 @@ class IntentExtractionPipeline(dspy.Module):
                 # Mark as completed in compound state
                 result_data = intent.model_dump()
                 compound_state.completed_indices.append(sub_query.index)
+                newly_completed += 1
 
                 # Ensure completed_results list is large enough
                 while len(compound_state.completed_results) <= sub_query.index:
@@ -1237,6 +1251,7 @@ class IntentExtractionPipeline(dspy.Module):
             except Exception as e:
                 # Non-clarification errors: record and continue
                 logger.error(f"[DSPy Pipeline] Sub-query {sub_query.index} failed: {type(e).__name__}: {e}")
+                failed_indices.add(sub_query.index)
                 pending_subqueries.append({
                     "index": sub_query.index,
                     "query": sub_query.text,
@@ -1266,12 +1281,12 @@ class IntentExtractionPipeline(dspy.Module):
         # Check for remaining processable sub-queries after dependency resolution
         remaining_processable = []
         for sq in decomposed.sub_queries:
-            if sq.index not in compound_state.completed_indices:
+            if sq.index not in compound_state.completed_indices and sq.index not in failed_indices:
                 # Check if dependencies are satisfied
                 if not sq.dependencies or all(dep in compound_state.completed_indices for dep in sq.dependencies):
                     remaining_processable.append(sq)
 
-        if remaining_processable:
+        if remaining_processable and newly_completed > 0:
             # Recursively process remaining sub-queries
             logger.info(f"[DSPy Pipeline] Processing {len(remaining_processable)} additional sub-queries")
             try:

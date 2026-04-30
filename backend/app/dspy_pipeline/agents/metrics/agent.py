@@ -120,10 +120,34 @@ class MetricsModule(dspy.Module):
                 # 4. Ambiguity handling
                 # -------------------------
 
+                # -------------------------
+                # 3.5 Check Session Resolved Terms
+                # -------------------------
+                resolved_term_map = {k.lower(): v for k, v in overrides.get("resolved_metric_terms", {}).items()}
                 metric_terms = [
                     t.term for t in classified_query.classified_terms
                     if t.role == "METRIC"
                 ]
+
+                # If all metric terms are already resolved in the session, use them directly
+                if metric_terms and all(term.lower() in resolved_term_map for term in metric_terms):
+                    resolved_metrics = []
+                    for term in metric_terms:
+                        resolved_name = resolved_term_map[term.lower()]
+                        if resolved_name in CATALOG_METRICS:
+                            resolved_metrics.append(MetricSpec(
+                                name=resolved_name,
+                                aggregation=self._agg_map.get(resolved_name, "sum")
+                            ))
+                    if resolved_metrics:
+                        final_result = MetricsResult(
+                            metrics=resolved_metrics,
+                            aggregations=[self._agg_map.get(m.name, "sum") for m in resolved_metrics],
+                        )
+                        duration_ms = int((time.monotonic() - start_time) * 1000)
+                        _span_set(span, output_source="session_resolved_terms", output_metrics=str([m.name for m in resolved_metrics]))
+                        logger.debug(f"[DSPy Metrics] Resolved using session terms: {[m.name for m in resolved_metrics]}")
+                        return final_result
 
                 # ❗ No valid metric → ask user
                 if len(valid_metrics) == 0:

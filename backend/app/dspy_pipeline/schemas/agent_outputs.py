@@ -16,16 +16,45 @@ class SubQueryItem(BaseModel):
     intent_hint: Optional[str] = Field(default=None, description="Suggested intent type")
     dependencies: List[int] = Field(default_factory=list, description="Indices of sub-queries this depends on")
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 class DecomposedQuery(BaseModel):
     """Output of QueryDecomposerModule."""
-    original_query: str
+    original_query: str = Field(default="")
     sub_queries: List[SubQueryItem]
     is_compound: bool = Field(description="True if query was split, False if single query")
 
-    model_config = ConfigDict(extra="forbid")
+    @model_validator(mode="before")
+    @classmethod
+    def handle_list_input(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            import json
+            cleaned = data.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+                if cleaned.rfind("```") != -1:
+                    cleaned = cleaned[:cleaned.rfind("```")]
+            try:
+                data = json.loads(cleaned.strip())
+            except Exception:
+                pass
+
+        if isinstance(data, list):
+            # LLM returned a list of string queries.
+            # Convert to the structured DecomposedQuery format
+            sub_queries = [
+                {"index": i, "text": text if isinstance(text, str) else str(text), "dependencies": []}
+                for i, text in enumerate(data)
+            ]
+            return {
+                "original_query": "", # Cannot reliably know original query here
+                "sub_queries": sub_queries,
+                "is_compound": len(sub_queries) > 1
+            }
+        return data
+
+    model_config = ConfigDict(extra="ignore")
 
 
 # =============================================================================
@@ -80,7 +109,7 @@ class ClassifiedQuery(BaseModel):
         )
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 # =============================================================================
@@ -90,11 +119,12 @@ class ClassifiedQuery(BaseModel):
 class ScopeResult(BaseModel):
     """Output of ScopeAgent."""
  
-    sales_scope: Literal["PRIMARY", "SECONDARY"] = Field(
-        description="Resolved sales scope. SECONDARY is the default."
+    sales_scope: Optional[Literal["PRIMARY", "SECONDARY"]] = Field(
+        default=None,
+        description="Resolved sales scope. Null if unable to determine."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
  
@@ -152,7 +182,7 @@ class TimeResult(BaseModel):
         """Derived — True if any time constraint is present."""
         return any([self.time_window, self.start_date, self.end_date])
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
  
@@ -180,8 +210,52 @@ class MetricsResult(BaseModel):
             "count→'count', all others→'sum'."
         )
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_list_input(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            import json
+            cleaned = data.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+                if cleaned.rfind("```") != -1:
+                    cleaned = cleaned[:cleaned.rfind("```")]
+            try:
+                data = json.loads(cleaned.strip())
+            except Exception:
+                pass
+
+        if isinstance(data, list):
+            metrics_list = data
+        elif isinstance(data, dict):
+            metrics_list = data.get("metrics", [])
+            # Handle if LLM returned a single MetricSpec directly instead of a wrapper
+            if not metrics_list and "name" in data:
+                metrics_list = [data]
+        else:
+            return data
+
+        metrics = []
+        aggregations = []
+        for item in metrics_list:
+            if isinstance(item, dict):
+                name = item.get("name", "net_value")
+                agg = item.get("aggregation", "sum")
+                metrics.append({"name": name, "aggregation": agg})
+                aggregations.append(agg)
+        
+        if not metrics:
+            # Fallback if list was empty
+            metrics.append({"name": "net_value", "aggregation": "sum"})
+            aggregations.append("sum")
+            
+        return {
+            "metrics": metrics,
+            "aggregations": aggregations
+        }
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
  
 
@@ -217,7 +291,7 @@ class DimensionsResult(BaseModel):
         description="Filter conditions to apply. Null if no filters."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
 
 
@@ -233,10 +307,22 @@ class RankingConfig(BaseModel):
         default=None,
         description="Number of results. Default to 10 if not specified."
     )
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def normalize_order(cls, v):
+        """Normalize ascending/descending to asc/desc."""
+        if isinstance(v, str):
+            v_lower = v.lower().strip()
+            if v_lower in ("ascending", "asc"):
+                return "asc"
+            elif v_lower in ("descending", "desc"):
+                return "desc"
+        return v
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
- 
+
 class ComparisonConfig(BaseModel):
     """Comparison specification within post-processing."""
     type: Literal["period", "dimension"]
@@ -252,7 +338,7 @@ class ComparisonConfig(BaseModel):
             return None  # coerce invalid values to null instead of crashing
         return v
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 class PostProcessingResult(BaseModel):
     """
@@ -280,8 +366,49 @@ class PostProcessingResult(BaseModel):
             "mom_growth/yoy_growth require a comparison_window — use 'none' if absent."
         )
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_sloppy_input(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            import json
+            cleaned = data.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+                if cleaned.rfind("```") != -1:
+                    cleaned = cleaned[:cleaned.rfind("```")]
+            try:
+                data = json.loads(cleaned.strip())
+            except Exception:
+                pass
+
+        if isinstance(data, dict):
+            # Clean up ranking
+            ranking = data.get("ranking")
+            if isinstance(ranking, dict):
+                if not ranking.get("enabled", True) or ranking.get("order") is None:
+                    data["ranking"] = None
+
+            # Clean up comparison
+            comparison = data.get("comparison")
+            if isinstance(comparison, dict):
+                # If LLM put derived_metric inside comparison, move it out
+                if "derived_metric" in comparison and "derived_metric" not in data:
+                    data["derived_metric"] = comparison.pop("derived_metric")
+                
+                # If comparison isn't actually configured properly, drop it
+                if not comparison.get("enabled", True) or comparison.get("type") not in ("period", "dimension"):
+                    data["comparison"] = None
+
+            # Remove any hallucinated keys not in the valid schema
+            valid_keys = {"ranking", "comparison", "derived_metric"}
+            for key in list(data.keys()):
+                if key not in valid_keys:
+                    data.pop(key, None)
+
+            return data
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
  
 
@@ -302,3 +429,58 @@ class RefinedInsights(BaseModel):
         description="Numbered keys '1','2','3'. Format: '[verb] [what] to [goal]'. Always populate with actionable steps for frontline reps."
     )
  
+    @model_validator(mode="before")
+    @classmethod
+    def handle_sloppy_insights(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            import json
+            cleaned = data.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+                if cleaned.rfind("```") != -1:
+                    cleaned = cleaned[:cleaned.rfind("```")]
+            try:
+                data = json.loads(cleaned.strip())
+            except Exception:
+                pass
+
+        if isinstance(data, dict):
+            # 1. Executive Summary: Convert dict to string if needed
+            exec_sum = data.get("executive_summary", "")
+            if isinstance(exec_sum, dict):
+                data["executive_summary"] = " ".join(str(v) for v in exec_sum.values())
+            elif not isinstance(exec_sum, str):
+                data["executive_summary"] = str(exec_sum)
+                
+            # Grab all keys the LLM provided that aren't the schema keys
+            valid_keys = {"executive_summary", "key_risks", "possible_drivers", "recommendations"}
+            extra_keys = [k for k in data.keys() if k not in valid_keys]
+            
+            # Helper to extract or fallback
+            def get_or_fallback(key):
+                val = data.get(key)
+                if isinstance(val, dict) and len(val) >= 2:
+                    return val
+                
+                # Try to salvage from extra keys
+                salvaged = {}
+                if extra_keys:
+                    salvage_key = extra_keys.pop(0)
+                    salvage_val = data.get(salvage_key)
+                    if isinstance(salvage_val, dict):
+                        salvaged = {str(k): str(v) for k, v in salvage_val.items()}
+                    elif isinstance(salvage_val, list):
+                        salvaged = {str(i+1): str(v) for i, v in enumerate(salvage_val)}
+                    else:
+                        salvaged = {"1": str(salvage_val)}
+                        
+                while len(salvaged) < 2:
+                    salvaged[str(len(salvaged) + 1)] = f"No specific {key.replace('_', ' ')} identified."
+                    
+                data[key] = salvaged
+
+            get_or_fallback("key_risks")
+            get_or_fallback("possible_drivers")
+            get_or_fallback("recommendations")
+            
+        return data

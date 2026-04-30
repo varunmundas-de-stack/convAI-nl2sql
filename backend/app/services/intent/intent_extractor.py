@@ -256,6 +256,8 @@ def extract_intent(
             "dspy_clarification_request_id": e.clarification.request_id,
             "dspy_clarification_options": e.clarification.options
         }
+        if e.clarification.clarifying_term:
+            partial_intent["dspy_clarification_term"] = e.clarification.clarifying_term
 
         # Convert to IntentIncompleteError format that orchestrator expects
         raise IntentIncompleteError(
@@ -295,8 +297,10 @@ def extract_intent(
 
             partial_intent.update({
                 "dspy_clarification_request_id": clarification.request_id,
-                "dspy_clarification_options": clarification.options
+                "dspy_clarification_options": clarification.options,
             })
+            if clarification.clarifying_term:
+                partial_intent["dspy_clarification_term"] = clarification.clarifying_term
         else:
             missing_fields = ["unknown"]
             clarification_message = "Compound query requires clarification"

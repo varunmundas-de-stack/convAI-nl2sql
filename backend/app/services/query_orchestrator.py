@@ -44,6 +44,48 @@ __all__ = ["execute_query", "execute_query_dict", "resume_query", "execute_retry
 
 
 # =============================================================================
+# CLARIFICATION TERM HELPERS
+# =============================================================================
+
+def _extract_term_mapping(field_name: str) -> tuple[str | None, str | None]:
+    """
+    Extract (term_type, original_term) from a clarification field key.
+
+    Supported formats:
+    - metric_term_<original_term>
+    - dimension_term_<original_term>
+    """
+    if field_name.startswith("metric_term_"):
+        return "metric", field_name[len("metric_term_"):]
+    if field_name.startswith("dimension_term_"):
+        return "dimension", field_name[len("dimension_term_"):]
+    return None, None
+
+
+def _store_session_resolved_terms(
+    session_id: str,
+    missing_fields: list[str],
+    clarification_answers: Dict[str, Any],
+) -> None:
+    """Persist term-level clarifications so follow-up queries don't re-ask them."""
+    from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
+
+    for field, answer in clarification_answers.items():
+        if field not in missing_fields:
+            continue
+
+        term_type, original_term = _extract_term_mapping(field)
+        if not term_type or not original_term:
+            # Only persist term-scoped clarifications; generic fields (metrics/group_by)
+            # are not stable keys for future term matching.
+            continue
+
+        resolved_value = str(answer).strip() if not isinstance(answer, list) else str(answer[0]).strip()
+        _ct.store_resolved_term(session_id, term_type, original_term, resolved_value)
+        logger.debug(f"Stored resolved term for session {session_id}: {original_term} -> {resolved_value}")
+
+
+# =============================================================================
 # PUBLIC API
 # =============================================================================
 
@@ -191,24 +233,19 @@ def resume_query(
 
             try:
                 resolved = getattr(state, "resolved_clarifications", {}) or {}
+                if state.intent.get("dspy_clarification_request_id"):
+                    resolved["dspy_clarification_request_id"] = state.intent.get("dspy_clarification_request_id")
+                if state.intent.get("dspy_clarification_term"):
+                    resolved["dspy_clarification_term"] = state.intent.get("dspy_clarification_term")
 
                 # Store resolved terms in session-level clarification tool for DSPy clarifications
                 if resolved_session_id:
                     try:
-                        from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
-                        for f, answer in clarification_answers.items():
-                            if f in state.missing_fields:
-                                # Determine term type from field name
-                                if "metric" in f.lower():
-                                    term_type = "metric"
-                                elif "dimension" in f.lower() or "group_by" in f.lower():
-                                    term_type = "dimension"
-                                else:
-                                    term_type = f  # Use field name as term type
-
-                                resolved_value = str(answer).strip() if not isinstance(answer, list) else str(answer[0]).strip()
-                                _ct.store_resolved_term(resolved_session_id, term_type, f, resolved_value)
-                                logger.debug(f"Stored DSPy resolved term: {f} -> {resolved_value}")
+                        _store_session_resolved_terms(
+                            resolved_session_id,
+                            state.missing_fields or [],
+                            clarification_answers,
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to store DSPy resolved clarification terms: {e}")
 
@@ -252,22 +289,11 @@ def resume_query(
         # Store resolved terms in session-level clarification tool
         if resolved_session_id:
             try:
-                from app.dspy_pipeline.clarification_tool import clarification_tool as _ct
-                for field, answer in clarification_answers.items():
-                    if field in state.missing_fields:
-                        # Determine term type from field name
-                        if "metric" in field.lower():
-                            term_type = "metric"
-                        elif "dimension" in field.lower() or "group_by" in field.lower():
-                            term_type = "dimension"
-                        else:
-                            term_type = field  # Use field name as term type
-
-                        # For now, store the field mapping (this could be enhanced to extract original terms)
-                        # The resolved answer becomes the resolved value
-                        resolved_value = answer if isinstance(answer, str) else str(answer)
-                        _ct.store_resolved_term(resolved_session_id, term_type, field, resolved_value)
-                        logger.debug(f"Stored resolved term: {field} -> {resolved_value}")
+                _store_session_resolved_terms(
+                    resolved_session_id,
+                    state.missing_fields or [],
+                    clarification_answers,
+                )
             except Exception as e:
                 logger.warning(f"Failed to store resolved clarification terms: {e}")
 

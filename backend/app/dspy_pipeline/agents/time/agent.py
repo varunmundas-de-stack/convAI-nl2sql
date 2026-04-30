@@ -230,9 +230,9 @@ class TimeModule(dspy.Module):
                     return result
 
                 # -------------------------
-                # 7. Rule 4 — KPI / DISTRIBUTION / RANKING
+                # 7. Rule 4 — SNAPSHOT / DISTRIBUTION / RANKING
                 # -------------------------
-                if intent in ["KPI", "DISTRIBUTION", "RANKING"]:
+                if intent in ["SNAPSHOT", "DISTRIBUTION", "RANKING"]:
 
                     # explicit handled already
                     # fallback to context
@@ -256,7 +256,7 @@ class TimeModule(dspy.Module):
                                 output_duration_ms=duration_ms,
                                 output_value=context_result.model_dump() if hasattr(context_result, "model_dump") else str(context_result)
                             )
-                            logger.debug(f"[DSPy Time] KPI/DIST/RANK from context - completed in {duration_ms}ms")
+                            logger.debug(f"[DSPy Time] SNAPSHOT/DIST/RANK from context - completed in {duration_ms}ms")
                             return context_result
 
                     # still nothing → ask
@@ -268,7 +268,7 @@ class TimeModule(dspy.Module):
                             clarification_field="time",
                             clarification_reason="kpi_missing_window"
                         )
-                        logger.debug(f"[DSPy Time] Clarification required for KPI/DIST/RANK without window")
+                        logger.debug(f"[DSPy Time] Clarification required for SNAPSHOT/DIST/RANK without window")
                         raise ClarificationRequired(
                             build_time_clarification(
                                 ambiguous_expression="time period",
@@ -283,7 +283,7 @@ class TimeModule(dspy.Module):
                         output_duration_ms=duration_ms,
                         output_value=result.model_dump() if hasattr(result, "model_dump") else str(result)
                     )
-                    logger.debug(f"[DSPy Time] KPI/DIST/RANK with window - completed in {duration_ms}ms")
+                    logger.debug(f"[DSPy Time] SNAPSHOT/DIST/RANK with window - completed in {duration_ms}ms")
                     return result
 
                 # -------------------------

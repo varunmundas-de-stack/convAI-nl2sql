@@ -421,7 +421,10 @@ class IntentValidator:
             InvalidFilterError: If filter dimension not in catalog
         """
         for idx, flt in enumerate(filters):
-            if not self.catalog.is_valid_dimension(flt.dimension):
+            is_valid_dim = self.catalog.is_valid_dimension(flt.dimension)
+            is_valid_time_dim = self.catalog.is_valid_time_dimension(flt.dimension)
+            
+            if not (is_valid_dim or is_valid_time_dim):
                 raise InvalidFilterError(
                     f"Unknown filter dimension: '{flt.dimension}'",
                     filter_index=idx,

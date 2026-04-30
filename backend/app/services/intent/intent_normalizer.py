@@ -152,6 +152,10 @@ DIMENSION_MAP = {
         "PRIMARY": "fact_primary_sales.invoice_id",
         "SECONDARY": "fact_secondary_sales.invoice_id",
     },
+    "invoice_date": {
+        "PRIMARY": "fact_primary_sales.invoice_date",
+        "SECONDARY": "fact_secondary_sales.invoice_date",
+    },
 }
 
 
@@ -238,15 +242,37 @@ def normalize_intent(raw_intent: dict) -> dict:
             intent["filters"] = [intent["filters"]]
             
         if isinstance(intent["filters"], list):
+            valid_filters = []
             for f in intent["filters"]:
                 if isinstance(f, dict):
                     dim = f.get("dimension")
+                    # Time dimensions are handled by the 'time' spec; drop from filters to prevent Cube errors
+                    if dim in TIME_DIMENSION_MAP or dim in ("invoice_date", "time_period", "time", "date", "period"):
+                        logger.info(f"Dropping time dimension '{dim}' from filters array (handled by time spec)")
+                        continue
+                    
+                    # Scope pseudo-dimensions are handled by the 'sales_scope' field
+                    if dim in ("source_type", "scope", "sales_scope", "source"):
+                        logger.info(f"Dropping scope dimension '{dim}' from filters array (handled by sales_scope)")
+                        continue
+                        
                     if dim in DIMENSION_MAP:
                         f["dimension"] = resolve_dimension(dim, scope)
+                    valid_filters.append(f)
                 else:
                     dim = getattr(f, "dimension", None)
+                    if dim in TIME_DIMENSION_MAP or dim in ("invoice_date", "time_period", "time", "date", "period"):
+                        logger.info(f"Dropping time dimension '{dim}' from filters array (handled by time spec)")
+                        continue
+                    
+                    if dim in ("source_type", "scope", "sales_scope", "source"):
+                        logger.info(f"Dropping scope dimension '{dim}' from filters array (handled by sales_scope)")
+                        continue
+                        
                     if dim and dim in DIMENSION_MAP:
                         f.dimension = resolve_dimension(dim, scope)
+                    valid_filters.append(f)
+            intent["filters"] = valid_filters
 
     # -------------------------------------------------------------------------
     # Time — new unified TimeSpec field {dimension, granularity, window, ...}

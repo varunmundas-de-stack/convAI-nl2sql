@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Literal, Optional, Union, List
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal, Optional, Union, List, Any
 TermRole = Literal[
     "METRIC",           # net_value, billed_qty, count, gross_value, tax_value
     "DIMENSION",        # zone, brand, category, state, distributor_name...
@@ -10,6 +10,7 @@ TermRole = Literal[
     "SCOPE",            # Primary, Secondary
     "COMPARISON",       # vs, compared to, versus, growth, change
     "TREND",            # trend, trending, over time, trajectory
+    "QUERY_TYPE",       # show, what is, list, tell me
 ]
  
 QueryIntent = Literal[
@@ -47,7 +48,7 @@ class ClassifiedTerm(BaseModel):
         description="The scope implied by this term (e.g., 'secondary sales' implies SECONDARY). Null if not applicable."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
 
 
@@ -66,7 +67,7 @@ class FilterHint(BaseModel):
         description="Exact filter value as mentioned in the query."
     )
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  
 
 class FilterCondition(BaseModel):
@@ -86,8 +87,22 @@ class FilterCondition(BaseModel):
     value: Union[str, List[str]] = Field(
         description="Filter value(s). Use List[str] only with 'in'/'not_in' operators."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_sloppy_input(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # LLMs often output 'values' instead of 'value'
+            if "values" in data and "value" not in data:
+                data["value"] = data.pop("values")
+            # Filter out any other unexpected keys that might cause validation to fail
+            valid_keys = {"dimension", "operator", "value"}
+            for key in list(data.keys()):
+                if key not in valid_keys:
+                    data.pop(key, None)
+        return data
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
 
 class MetricSpec(BaseModel):
@@ -95,4 +110,4 @@ class MetricSpec(BaseModel):
     name: str
     aggregation: Literal["sum", "count", "avg"]
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")

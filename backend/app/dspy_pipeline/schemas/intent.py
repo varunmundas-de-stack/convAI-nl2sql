@@ -13,7 +13,7 @@ class TimeSpec(BaseModel):
     end_date: Optional[str] = Field(default=None)
     granularity: Optional[Literal["day", "week", "month", "quarter", "year"]] = Field(default=None)
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
  
  
@@ -39,5 +39,5 @@ class Intent(BaseModel):
     time: Optional[TimeSpec] = Field(default=None)
     post_processing: Optional[PostProcessingResult] = Field(default=None)
  
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
  

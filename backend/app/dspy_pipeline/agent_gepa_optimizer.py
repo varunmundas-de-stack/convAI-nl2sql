@@ -16,7 +16,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 import dspy
 from dspy import Example
-from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
+@dataclass
+class ScoreWithFeedback:
+    score: float
+    feedback: str
+
 
 from app.models.intent import Intent as CanonicalIntent
 from app.models.intent import derive_intent_type

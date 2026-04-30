@@ -1,9 +1,63 @@
 import { ChatResponse } from "@/types/chat";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+const TOKEN_KEY = "nl2sql_access_token";
 
 // Store session ID in memory for the current conversation
 let currentSessionId: string | null = null;
+
+export function getAccessToken(): string | null {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setAccessToken(token: string): void {
+    if (typeof window !== "undefined") {
+        localStorage.setItem(TOKEN_KEY, token);
+    }
+}
+
+export function clearAccessToken(): void {
+    if (typeof window !== "undefined") {
+        localStorage.removeItem(TOKEN_KEY);
+    }
+}
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+    const token = getAccessToken();
+    const headers = new Headers(extra);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return headers;
+}
+
+async function apiFetch(path: string, init: RequestInit = {}) {
+    const headers = authHeaders(init.headers);
+    return fetch(`${API_BASE}${path}`, { ...init, headers });
+}
+
+export async function login(username: string, password: string) {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Login failed");
+    setAccessToken(data.access_token);
+    return data.user;
+}
+
+export async function getMe() {
+    const res = await apiFetch("/auth/me");
+    if (!res.ok) throw new Error("Not authenticated");
+    return res.json();
+}
+
+export async function logout() {
+    await apiFetch("/auth/logout", { method: "POST" }).catch(() => null);
+    clearAccessToken();
+    resetSession();
+}
 
 /**
  * Get the current session ID (if any)
@@ -39,7 +93,7 @@ export async function healthCheck() {
 /**
  * Transform backend response to frontend ChatResponse format
  */
-function transformBackendResponse(backendResponse: any): ChatResponse {
+export function transformBackendResponse(backendResponse: any): ChatResponse {
     // ADD DEBUG LINE
     console.log("🔍 Raw backend response:", JSON.stringify(backendResponse, null, 2));
 
@@ -93,10 +147,40 @@ function transformBackendResponse(backendResponse: any): ChatResponse {
     }
 
     // Handle error
+    let errorMsg = "An error occurred";
+    let isError = false;
+
     if (backendResponse.success === false || backendResponse.error) {
+        isError = true;
+        const errObj = backendResponse.error;
+        if (typeof errObj === "string") {
+            errorMsg = errObj;
+        } else if (errObj && typeof errObj === "object") {
+            errorMsg = errObj.message || errObj.error_type || "Unknown error";
+        }
+    } else if (backendResponse.detail) {
+        isError = true;
+        const detail = backendResponse.detail;
+        if (typeof detail === "string") {
+            errorMsg = detail;
+        } else if (detail && typeof detail === "object") {
+            if (detail.error) {
+                const errObj = detail.error;
+                if (typeof errObj === "string") {
+                    errorMsg = errObj;
+                } else if (errObj && typeof errObj === "object") {
+                    errorMsg = errObj.message || errObj.error_type || "Unknown error";
+                }
+            } else if (detail.message) {
+                errorMsg = detail.message;
+            }
+        }
+    }
+
+    if (isError) {
         return {
             type: "error",
-            message: backendResponse.error || "An error occurred",
+            message: errorMsg,
         };
     }
 
@@ -186,7 +270,7 @@ export async function sendQuery(query: string): Promise<{
         console.log(`[Session] Sending first query - backend will generate session_id`);
     }
 
-    const res = await fetch(`${API_BASE}/query`, {
+    const res = await apiFetch(`/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -219,7 +303,7 @@ export async function retryQuery(
 }> {
     console.log(`[Session] Sending retry for request_id: ${originalRequestId} with session_id: ${sessionId}`);
 
-    const res = await fetch(`${API_BASE}/retry`, {
+    const res = await apiFetch(`/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -259,7 +343,7 @@ export async function clarify(payload: {
     if (payload.compound_state && payload.clarification_answer !== undefined) {
         console.log(`[Session] Sending compound clarification for request_id: ${payload.compound_state.request_id}`);
 
-        const res = await fetch(`${API_BASE}/clarify`, {
+        const res = await apiFetch(`/clarify`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -293,7 +377,7 @@ export async function clarify(payload: {
 
     console.log(`[Session] Sending clarification for request_id: ${payload.request_id}`);
 
-    const res = await fetch(`${API_BASE}/clarify`, {
+    const res = await apiFetch(`/clarify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -319,15 +403,65 @@ export async function clarify(payload: {
 }
 
 export async function getCatalogMetrics() {
-    return fetch(`${API_BASE}/catalog/metrics`).then((r) => r.json());
+    return apiFetch(`/catalog/metrics`).then((r) => r.json());
 }
 
 export async function getCatalogDimensions() {
-    return fetch(`${API_BASE}/catalog/dimensions`).then((r) => r.json());
+    return apiFetch(`/catalog/dimensions`).then((r) => r.json());
 }
 
 export async function getCatalogTimeWindows() {
-    return fetch(`${API_BASE}/catalog/time-windows`).then((r) => r.json());
+    return apiFetch(`/catalog/time-windows`).then((r) => r.json());
+}
+
+export async function getChatSessions() {
+    const res = await apiFetch("/chat/sessions");
+    if (!res.ok) throw new Error("Failed to load sessions");
+    return res.json();
+}
+
+export async function deleteChatSession(sessionId: string) {
+    const res = await apiFetch(`/chat/sessions/${sessionId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Failed to delete session");
+    return res.json();
+}
+
+export async function getChatMessages(sessionId: string) {
+    const res = await apiFetch(`/chat/sessions/${sessionId}/messages`);
+    if (!res.ok) throw new Error("Failed to load messages");
+    return res.json();
+}
+
+export async function getInsights() {
+    const res = await apiFetch("/insights");
+    if (!res.ok) throw new Error("Failed to load insights");
+    return res.json();
+}
+
+export async function markInsightRead(insightId: string) {
+    const res = await apiFetch(`/insights/${insightId}/read`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to mark insight read");
+    return res.json();
+}
+
+export async function postInsightFeedback(
+    insightId: string,
+    action: "read" | "clicked_followup" | "dismissed" | "pinned" | "acted_on" | "not_relevant",
+    sessionId?: string
+) {
+    const res = await apiFetch(`/insights/${insightId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, session_id: sessionId ?? null }),
+    });
+    if (!res.ok) throw new Error("Failed to post insight feedback");
+    return res.json();
+}
+
+export async function triggerIntelRun(): Promise<{ success: boolean; insights_generated: number; insights_suppressed: number; users_processed: number; errors: string[] }> {
+    const res = await apiFetch("/insights/intel/run", { method: "POST" });
+    if (!res.ok) throw new Error("Failed to trigger intel run");
+    return res.json();
 }
 
 // =============================================================================
@@ -335,13 +469,13 @@ export async function getCatalogTimeWindows() {
 // =============================================================================
 
 export async function getPromptVersions(): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/prompt-versions`);
+    const res = await apiFetch(`/rlhf/prompt-versions`);
     if (!res.ok) throw new Error(`Failed to fetch prompt versions: ${res.status}`);
     return res.json();
 }
 
 export async function getAbStatus(): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/ab-status`);
+    const res = await apiFetch(`/rlhf/ab-status`);
     if (!res.ok) throw new Error(`Failed to fetch A/B status: ${res.status}`);
     return res.json();
 }
@@ -351,7 +485,7 @@ export async function createAbTest(payload: {
     version_b: string;
     traffic_split: number;
 }): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/ab-test`, {
+    const res = await apiFetch(`/rlhf/ab-test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -361,13 +495,13 @@ export async function createAbTest(payload: {
 }
 
 export async function stopAbTest(): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/ab-stop`, { method: "POST" });
+    const res = await apiFetch(`/rlhf/ab-stop`, { method: "POST" });
     if (!res.ok) throw new Error(`Failed to stop A/B test: ${res.status}`);
     return res.json();
 }
 
 export async function triggerRefinement(version: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/refine?version=${version}`, { method: "POST" });
+    const res = await apiFetch(`/rlhf/refine?version=${version}`, { method: "POST" });
     if (!res.ok) throw new Error(`Refinement failed: ${res.status}`);
     return res.json();
 }
@@ -382,19 +516,19 @@ export async function runRefinementCycle(
         min_ratings: String(minRatings),
         min_improvement: String(minImprovement),
     });
-    const res = await fetch(`${API_BASE}/rlhf/run-cycle?${params}`, { method: "POST" });
+    const res = await apiFetch(`/rlhf/run-cycle?${params}`, { method: "POST" });
     if (!res.ok) throw new Error(`Run cycle failed: ${res.status}`);
     return res.json();
 }
 
 export async function promoteVersion(version: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/promote?version=${version}`, { method: "POST" });
+    const res = await apiFetch(`/rlhf/promote?version=${version}`, { method: "POST" });
     if (!res.ok) throw new Error(`Promote failed: ${res.status}`);
     return res.json();
 }
 
 export async function rollbackVersion(version: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/rollback?version=${version}`, { method: "POST" });
+    const res = await apiFetch(`/rlhf/rollback?version=${version}`, { method: "POST" });
     if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         throw new Error(detail?.detail || `Rollback failed: ${res.status}`);
@@ -403,13 +537,13 @@ export async function rollbackVersion(version: string): Promise<any> {
 }
 
 export async function compareVersions(versionA: string, versionB: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/compare?version_a=${versionA}&version_b=${versionB}`);
+    const res = await apiFetch(`/rlhf/compare?version_a=${versionA}&version_b=${versionB}`);
     if (!res.ok) throw new Error(`Compare failed: ${res.status}`);
     return res.json();
 }
 
 export async function getPreferencePairs(version: string, minGap: number = 2): Promise<any> {
-    const res = await fetch(`${API_BASE}/rlhf/preference-pairs?version=${version}&min_gap=${minGap}`);
+    const res = await apiFetch(`/rlhf/preference-pairs?version=${version}&min_gap=${minGap}`);
     if (!res.ok) throw new Error(`Failed to fetch preference pairs: ${res.status}`);
     return res.json();
 }
@@ -425,7 +559,7 @@ export async function submitFeedback(payload: {
     full_response?: string | null;
     sql_query?: string | null;
 }): Promise<void> {
-    const res = await fetch(`${API_BASE}/rlhf/feedback`, {
+    const res = await apiFetch(`/rlhf/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

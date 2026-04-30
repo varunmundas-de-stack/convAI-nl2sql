@@ -10,7 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./cube/data/01_source_db.sql:/docker-entrypoint-initdb.d/01_source_db.sql
+      - ./cube/data:/docker-entrypoint-initdb.d
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d sales_analytics" ]
       interval: 5s
@@ -29,6 +29,7 @@ services:
         condition: service_healthy
     volumes:
       - ./cube/model:/cube/conf/model
+      - ./cube/cube.js:/cube/conf/cube.js
     environment:
       CUBEJS_DEV_MODE: "true"
       CUBEJS_DB_TYPE: postgres
@@ -37,7 +38,7 @@ services:
       CUBEJS_DB_NAME: sales_analytics
       CUBEJS_DB_USER: postgres
       CUBEJS_DB_PASS: postgres
-      CUBEJS_API_SECRET: mysecretkey123
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:-mysecretkey123}
       CUBEJS_DB_CONNECT_TIMEOUT: 120000
       CUBEJS_LOG_LEVEL: "trace"
       CUBESTORE_LOG_LEVEL: "debug"

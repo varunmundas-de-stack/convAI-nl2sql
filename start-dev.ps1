@@ -104,18 +104,22 @@ try {
     
     # 🆕 Populate database
     Write-Host "📊 Populating database..." -ForegroundColor Cyan
-    $sqlFile = ".\cube\data\02_populate_data.sql"
     
-    if (Test-Path $sqlFile) {
-        Get-Content $sqlFile | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Database populated successfully" -ForegroundColor Green
-        } else {
-            Write-Warning "Database population failed (non-critical, continuing...)"
+    $sqlFiles = Get-ChildItem -Path ".\cube\data" -Filter "*.sql" | Sort-Object Name
+    if ($sqlFiles.Count -gt 0) {
+        foreach ($file in $sqlFiles) {
+            Write-Host "  Executing $($file.Name)..." -NoNewline
+            Get-Content $file.FullName | docker exec -i nl2sql-postgres psql -U postgres -d sales_analytics 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host " ✓" -ForegroundColor Green
+            } else {
+                Write-Host " ✗ (Failed, continuing...)" -ForegroundColor Yellow
+            }
         }
+        Write-Host "✓ Database scripts executed successfully" -ForegroundColor Green
     } else {
-        Write-Warning "SQL file not found: $sqlFile (skipping population)"
+        Write-Warning "No SQL files found in .\cube\data (skipping population)"
     }
     
     # Start FastAPI

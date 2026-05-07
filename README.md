@@ -271,12 +271,18 @@ cp .env.example .env
 ### Full Local Development (Windows)
 
 ```bash
-# Start all services (Docker + FastAPI with hot-reload)
+# Start backend services (Docker + FastAPI with hot-reload)
 .\start-dev.ps1
 
 # Stop all services and cleanup
 # Ctrl+C will trigger automatic cleanup
+
+# Frontend
+cd frontend
+npm run dev
+
 ```
+
 
 ### Manual Development Setup
 

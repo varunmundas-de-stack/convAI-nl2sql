@@ -1,0 +1,77 @@
+# FastAPI + server
+fastapi==0.129.0
+uvicorn[standard]==0.41.0
+starlette==0.52.1
+
+# Pydantic
+pydantic==2.12.5
+
+# Auth
+PyJWT==2.8.0
+bcrypt==4.1.3
+python-dotenv==1.2.1
+
+# Database
+psycopg2-binary==2.9.11
+sqlalchemy==2.0.46
+alembic==1.18.4
+
+# Redis
+redis==7.2.0
+
+# HTTP clients
+httpx==0.28.1
+aiohttp==3.13.5
+requests==2.32.5
+
+# LLM providers
+anthropic==0.82.0
+openai==2.32.0
+litellm
+
+# DSPy
+dspy==2.5.7
+
+# OpenTelemetry
+opentelemetry-api==1.39.1
+opentelemetry-sdk==1.39.1
+opentelemetry-exporter-otlp-proto-http==1.39.1
+opentelemetry-exporter-otlp-proto-grpc==1.39.1
+opentelemetry-instrumentation==0.60b1
+opentelemetry-semantic-conventions==0.60b1
+openinference-instrumentation==0.1.44
+openinference-instrumentation-anthropic==0.1.20
+openinference-semantic-conventions==0.1.26
+
+# Data
+pandas==3.0.2
+numpy==2.4.4
+pyarrow==23.0.1
+
+# ML / optimization
+optuna==4.8.0
+datasets==4.8.4
+huggingface-hub==1.10.2
+tokenizers==0.22.2
+tiktoken==0.12.0
+
+# Scheduler
+apscheduler==3.10.4
+
+# Utilities
+pyyaml==6.0.3
+colorlog==6.10.1
+loguru==0.7.3
+structlog==25.5.0
+backoff==2.2.1
+diskcache==5.6.3
+typer==0.24.1
+rich==14.3.3
+ujson==5.12.0
+xxhash==3.6.0
+dill==0.4.1
+multiprocess==0.70.19
+joblib==1.5.3
+
+# Arize / tracing
+arize-otel

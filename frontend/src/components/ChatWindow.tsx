@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, KeyboardEvent } from "react";
-import { ArrowUp, LogOut, Plus, PanelLeftClose, PanelLeft, Trash2, Lightbulb } from "lucide-react";
+import { ArrowUp, LogOut, Plus, PanelLeftClose, PanelLeft, Trash2, Lightbulb, BarChart2 } from "lucide-react";
 import Link from "next/link";
 import {
     sendQuery,
@@ -65,6 +65,15 @@ export default function ChatWindow() {
                 refreshUserData();
             })
             .catch(() => logout());
+    }, []);
+
+    // Clear session token when the browser tab/window is closed
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            localStorage.removeItem("nl2sql_access_token");
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return () => window.removeEventListener("beforeunload", handleBeforeUnload);
     }, []);
 
     // Check backend health on mount
@@ -350,8 +359,8 @@ export default function ChatWindow() {
 
     if (!user) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-white px-4">
-                <div className="w-full max-w-sm border border-gray-200 rounded-lg p-6 shadow-sm">
+            <div className="flex min-h-screen items-center justify-center bg-[#1a3a6b] px-4">
+                <div className="w-full max-w-sm bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
                     <h1 className="text-xl font-semibold text-gray-900 mb-5">Sign in</h1>
                     <div className="space-y-3">
                         <input
@@ -384,21 +393,28 @@ export default function ChatWindow() {
     }
 
     return (
-        <div className="flex flex-col h-screen bg-white">
+        <div className="flex flex-col h-screen bg-[#1a3a6b]">
             {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm z-10">
+            <div className="bg-[#1a3a6b] border-b border-[#2a4a8b] px-6 py-4 shadow-sm z-10">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <button
                             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                            className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-md transition-colors hidden lg:block"
+                            className="p-1.5 text-blue-200 hover:bg-[#2a4a8b] rounded-md transition-colors hidden lg:block"
                             title="Toggle Sidebar"
                         >
                             {isSidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
                         </button>
-                        <h1 className="text-xl font-semibold text-gray-900">NL2SQL Chat</h1>
+                        <h1 className="text-xl font-semibold text-white">NL2SQL Chat</h1>
                     </div>
                     <div className="flex items-center gap-4">
+                        <Link
+                            href="/dashboard"
+                            className="flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+                            title="View Dashboard"
+                        >
+                            <BarChart2 size={14} /> Dashboard
+                        </Link>
                         <Link
                             href="/insights"
                             className="flex items-center gap-1.5 text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-3 py-1.5 rounded-lg hover:bg-yellow-100 transition-colors"
@@ -409,7 +425,7 @@ export default function ChatWindow() {
                         </Link>
                         <button
                             onClick={handleNewConversation}
-                            className="flex items-center gap-1.5 text-xs bg-gray-100 text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+                            className="flex items-center gap-1.5 text-xs bg-[#2a4a8b] text-white px-3 py-1.5 rounded-lg hover:bg-[#3a5a9b] transition-colors"
                             title="Start a new conversation"
                         >
                             <Plus size={14} />
@@ -425,12 +441,12 @@ export default function ChatWindow() {
                                 </code>
                             </div>
                         )} */}
-                        <div className="text-xs text-gray-600">
+                        <div className="text-xs text-blue-200">
                             {user.full_name} · {user.client_name}
                         </div>
                         <button
                             onClick={handleLogout}
-                            className="p-1.5 rounded-md border border-gray-200 hover:bg-gray-50"
+                            className="p-1.5 rounded-md border border-[#2a4a8b] text-blue-200 hover:bg-[#2a4a8b]"
                             title="Sign out"
                         >
                             <LogOut size={14} />
@@ -451,14 +467,14 @@ export default function ChatWindow() {
 
             <div className="flex-1 min-h-0 flex relative">
                 {isSidebarOpen && (
-                    <aside className="hidden lg:block w-72 border-r border-gray-200 overflow-y-auto p-3 shrink-0 bg-white">
-                        <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Recent Chats</div>
+                    <aside className="hidden lg:block w-72 border-r border-[#2a4a8b] overflow-y-auto p-3 shrink-0 bg-[#1a3a6b]">
+                        <div className="text-xs font-semibold text-blue-200 uppercase mb-2">Recent Chats</div>
                         <div className="space-y-1 mb-5">
                             {sessions.map((s) => (
                                 <div key={s.session_id} className="flex items-center gap-1 w-full group">
                                     <button
                                         onClick={() => loadSession(s.session_id)}
-                                        className={`flex-1 text-left text-sm px-2 py-2 rounded-md truncate transition-colors ${sessionId === s.session_id ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                                        className={`flex-1 text-left text-sm px-2 py-2 rounded-md truncate transition-colors ${sessionId === s.session_id ? "bg-[#2a4a8b] text-white font-medium" : "text-blue-100 hover:bg-[#2a4a8b]"}`}
                                     >
                                         {s.title || "New conversation"}
                                     </button>
@@ -479,13 +495,29 @@ export default function ChatWindow() {
                 )}
 
                 {/* Main Chat Area */}
-                <div className="flex-1 flex flex-col relative min-w-0 bg-white">
+                <div className="flex-1 flex flex-col relative min-w-0 bg-[#1a3a6b]">
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
                         <div className="w-full max-w-5xl flex flex-col h-full">
                             {messages.length === 0 && (
                                 <div className="flex flex-col items-center justify-center h-full">
-                                    <h2 className="text-4xl font-semibold text-gray-800 mb-8 tracking-tight">What do you want to know?</h2>
+                                    <h2 className="text-4xl font-semibold text-white mb-8 tracking-tight">What do you want to know?</h2>
+                                    <div className="flex flex-wrap gap-3 justify-center max-w-2xl">
+                                        {[
+                                            "Show net sales by zone for last 30 days",
+                                            "Top 5 products by revenue this month",
+                                            "Sales performance by region vs target",
+                                            "Which SKUs had the highest growth last quarter?",
+                                        ].map((suggestion) => (
+                                            <button
+                                                key={suggestion}
+                                                onClick={() => setInput(suggestion)}
+                                                className="bg-[#2a4a8b] text-white text-sm px-4 py-2 rounded-full hover:bg-[#3a5a9b] cursor-pointer transition-colors"
+                                            >
+                                                {suggestion}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 

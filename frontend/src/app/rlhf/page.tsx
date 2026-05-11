@@ -372,32 +372,32 @@ export default function RLHFDashboard() {
     const versionTags = versions.map((v) => v.version_tag);
 
     return (
-        <div className="min-h-screen bg-gray-50 text-gray-900">
+        <div className="min-h-screen bg-[#1a3a6b] text-gray-900">
             <Toasts toasts={toasts} remove={removeToast} />
 
             {/* Top Nav */}
-            <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+            <header className="bg-[#1a3a6b] border-b border-[#2a4a8b] sticky top-0 z-30">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <Link href="/" className="flex items-center gap-2 text-gray-500 hover:text-gray-800 transition-colors text-sm">
+                        <Link href="/" className="flex items-center gap-2 text-blue-200 hover:text-white transition-colors text-sm">
                             <ArrowLeft size={16} />
                             Chat
                         </Link>
-                        <div className="w-px h-5 bg-gray-200" />
+                        <div className="w-px h-5 bg-[#2a4a8b]" />
                         <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center">
-                                <Cpu size={14} className="text-white" />
+                            <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
+                                <Cpu size={14} className="text-[#1a3a6b]" />
                             </div>
                             <div>
-                                <h1 className="text-sm font-semibold text-gray-900">RLHF Dashboard</h1>
-                                <p className="text-[11px] text-gray-400">Prompt management & feedback loop</p>
+                                <h1 className="text-sm font-semibold text-white">RLHF Dashboard</h1>
+                                <p className="text-[11px] text-blue-300">Prompt management & feedback loop</p>
                             </div>
                         </div>
                     </div>
                     <button
                         onClick={loadData}
                         disabled={loadingMain}
-                        className="flex items-center gap-2 text-xs text-gray-600 hover:text-gray-900 border border-gray-200 px-3 py-1.5 rounded-lg hover:border-gray-400 transition-all disabled:opacity-50"
+                        className="flex items-center gap-2 text-xs text-blue-200 hover:text-white border border-[#2a4a8b] px-3 py-1.5 rounded-lg hover:border-blue-300 transition-all disabled:opacity-50"
                     >
                         <RefreshCw size={13} className={loadingMain ? "animate-spin" : ""} />
                         Refresh

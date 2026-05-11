@@ -2,17 +2,16 @@ services:
   postgres:
     image: postgres:15
     container_name: nl2sql-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: sales_analytics
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./cube/data:/docker-entrypoint-initdb.d
+      - ../cube/data:/docker-entrypoint-initdb.d
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d sales_analytics" ]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sales_analytics"]
       interval: 5s
       timeout: 10s
       retries: 30
@@ -21,12 +20,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: nl2sql-redis
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
     volumes:
       - redis_data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -34,38 +32,32 @@ services:
   cube:
     image: cubejs/cube:latest
     container_name: nl2sql-cube
-    restart: always
-    ports:
-      - "4000:4000"
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - ./cube/model:/cube/conf/model
-      - ./cube/cube.js:/cube/conf/cube.js
+      - ../cube/model:/cube/conf/model
+      - ../cube/cube.js:/cube/conf/cube.js
     environment:
-      CUBEJS_DEV_MODE: "true"
+      CUBEJS_DEV_MODE: "false"
       CUBEJS_DB_TYPE: postgres
       CUBEJS_DB_HOST: postgres
       CUBEJS_DB_PORT: 5432
       CUBEJS_DB_NAME: sales_analytics
       CUBEJS_DB_USER: postgres
-      CUBEJS_DB_PASS: postgres
+      CUBEJS_DB_PASS: ${POSTGRES_PASSWORD:-postgres}
       CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:-mysecretkey123}
-      CUBEJS_DB_CONNECT_TIMEOUT: 120000
-      CUBEJS_LOG_LEVEL: "trace"
-      CUBESTORE_LOG_LEVEL: "debug"
-      CUBEJS_CACHE_MODE: "no-cache"
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     image: nl2sql-backend:latest
     container_name: nl2sql-backend
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,31 +66,25 @@ services:
       cube:
         condition: service_started
     environment:
-      # Database
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: sales_analytics
       DB_USER: postgres
-      DB_PASS: postgres
+      DB_PASS: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: sales_analytics
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      # Cube.js (internal Docker network)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       CUBE_API_URL: http://cube:4000/cubejs-api/v1
       CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:-mysecretkey123}
-      # Redis
       REDIS_URL: redis://redis:6379
-      # Auth
-      APP_JWT_SECRET: ${APP_JWT_SECRET:-mysecretkey123}
-      # LLM
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-changeme-prod-secret}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_MODEL_ID: ${ANTHROPIC_MODEL_ID:-claude-haiku-4-5-20251001}
-      # Logging
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: INFO
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -106,18 +92,15 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: frontend/Dockerfile
       args:
-        # NEXT_PUBLIC_* vars must be set at BUILD time so Next.js bakes them in.
-        # Browser requests go from the user's machine → host → container,
-        # so localhost:8000 is correct (backend is port-mapped on the host).
-        NEXT_PUBLIC_API_BASE: http://localhost:8000
+        NEXT_PUBLIC_API_BASE: http://${EC2_PUBLIC_IP}:8000
     image: nl2sql-frontend:latest
     container_name: nl2sql-frontend
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       backend:
         condition: service_healthy

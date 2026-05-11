@@ -1,15 +1,46 @@
-venv/*
-cube/.cubestore/
-plan.txt
-__pycache__/*
-__pycache__
-GEMINI.md
+# Secrets — NEVER commit
 .env
+.env.local
+.env.*.local
+*.pem
+*.key
+aws-deploy/.env
+
+# Python
+venv/
+venv_nl2sql/
+.venv/
+__pycache__/
+*.pyc
+
+# Node / Next.js
+node_modules/
+.next/
+npm-debug.log*
+
+# Cube
+cube/.cubestore/
+
+# Logs
+logs/
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.planning/
+.opencode/
+.claude/
+.github/
+plan.txt
 data.json
-logs/*
-.planning/*
-.opencode/*
-.claude/*
-.github/*
-start-claude.ps1
+GEMINI.md
 CLAUDE.md
+start-claude.ps1
+
+# Temp
+*.tmp
+*.bak
+*.old
+*.orig
+screen_shots/

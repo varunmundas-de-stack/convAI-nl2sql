@@ -503,7 +503,9 @@ class AssemblerModule:
 
                 if not filters and classified_query.filter_hints:
                     from app.services.helpers.catalog_manager import CatalogManager
-                    catalog_manager = CatalogManager()
+                    from pathlib import Path
+                    _catalog_path = Path(__file__).parent.parent.parent / "catalog" / "catalog.yaml"
+                    catalog_manager = CatalogManager(str(_catalog_path))
                     valid_filters = []
                     for hint in classified_query.filter_hints:
                         # Validate that the dimension exists in the catalog

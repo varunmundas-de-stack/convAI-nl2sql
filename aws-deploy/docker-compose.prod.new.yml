@@ -51,8 +51,8 @@ services:
 
   backend:
     build:
-      context: ..
-      dockerfile: backend/Dockerfile
+      context: ../backend
+      dockerfile: Dockerfile
     image: nl2sql-backend:latest
     container_name: nl2sql-backend
     restart: unless-stopped
@@ -92,8 +92,8 @@ services:
 
   frontend:
     build:
-      context: ..
-      dockerfile: frontend/Dockerfile
+      context: ../frontend
+      dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_BASE: http://${EC2_PUBLIC_IP}:8000
     image: nl2sql-frontend:latest

@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { ChatMessage, ChatResponse } from "@/types/chat";
 
+function generateId(): string {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 export interface ConversationMessage extends ChatMessage {
     responseData?: ChatResponse;
     rawBackendData?: any;  // Raw backend response for RLHF feedback (request_id, prompt_version, etc.)
@@ -15,14 +20,14 @@ export function useConversation() {
     function addUserMessage(content: string) {
         setMessages((m) => [
             ...m,
-            { id: crypto.randomUUID(), role: "user", content },
+            { id: generateId(), role: "user", content },
         ]);
     }
 
     function addAssistantMessage(content: string, responseData?: ChatResponse, rawBackendData?: any) {
         setMessages((m) => [
             ...m,
-            { id: crypto.randomUUID(), role: "assistant", content, responseData, rawBackendData },
+            { id: generateId(), role: "assistant", content, responseData, rawBackendData },
         ]);
     }
 

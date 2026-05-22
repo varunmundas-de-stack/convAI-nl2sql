@@ -318,7 +318,7 @@ def resume_query(
         )
 
         # BUG-01 FIX: do NOT delete state here — only after full success
-        ctx = run_pipeline(ctx, start_step=3)
+        ctx = run_pipeline(ctx, start_step=6)  # step 6 = intent.validate (shifted +3 by cache stages)
 
         if ctx.stage == Stage.CLARIFICATION_REQUESTED:
             save_state(PersistedState(

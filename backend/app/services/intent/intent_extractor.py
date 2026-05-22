@@ -193,21 +193,58 @@ def extract_intent(
         if previous_context_str:
             logger.debug(f" [DSPy Integration] Previous context length: {len(previous_context_str)} characters")
 
+        # Inject persistent user memory context (built by Stage 0c) if available.
+        # This reduces DSPy clarification round-trips by providing prior query history.
+        # Token saving: fewer clarification loops → ~300 tokens saved per disambiguation.
+        from app.services.tools.cache_tool import _MEMORY_CONTEXT_KEY
+        if overrides and _MEMORY_CONTEXT_KEY in overrides:
+            memory_ctx = overrides[_MEMORY_CONTEXT_KEY]
+            if memory_ctx:
+                previous_context_str = (
+                    previous_context_str + "\n\n" + memory_ctx
+                    if previous_context_str
+                    else memory_ctx
+                )
+                logger.debug(f" [DSPy Integration] Memory context injected: {len(memory_ctx)} chars")
+
         # Process overrides for sequential clarification handling
         processed_overrides = _process_clarification_overrides(overrides) if overrides else None
 
-        # Call DSPy pipeline - pass both QCO object and string context
+        # Call DSPy pipeline with retry on Anthropic overloaded_error (529).
+        # LiteLLM num_retries in dspy.LM config handles this at the HTTP level,
+        # but we also guard here in case an older DSPy version doesn't forward kwargs.
         logger.info(" [DSPy Integration] Calling DSPy pipeline...")
         if processed_overrides:
             logger.info(f" [DSPy Integration] Using processed overrides: {processed_overrides}")
-        result = pipeline(
-            query=query,
-            previous_context=previous_qco,  # Pass the QCO object for drill detection
-            current_date=date.today().isoformat(),
-            overrides=processed_overrides,
-            request_id=request_id,
-            session_id=session_id,
-        )
+
+        _max_retries = 3
+        _retry_delays = [2, 5, 10]  # seconds between retries
+        result = None
+        for _attempt in range(_max_retries):
+            try:
+                result = pipeline(
+                    query=query,
+                    previous_context=previous_qco,
+                    current_date=date.today().isoformat(),
+                    overrides=processed_overrides,
+                    request_id=request_id,
+                    session_id=session_id,
+                )
+                break  # success
+            except Exception as _e:
+                _estr = str(_e).lower()
+                _is_overloaded = "overloaded" in _estr or "529" in _estr or "overloaded_error" in _estr
+                _is_rate = "rate_limit" in _estr or "429" in _estr
+                if (_is_overloaded or _is_rate) and _attempt < _max_retries - 1:
+                    _delay = _retry_delays[_attempt]
+                    logger.warning(
+                        f" [DSPy Integration] Anthropic overloaded/rate-limited "
+                        f"(attempt {_attempt + 1}/{_max_retries}), retrying in {_delay}s..."
+                    )
+                    time.sleep(_delay)
+                else:
+                    raise  # re-raise on final attempt or non-retryable error
+        # result is guaranteed non-None here (raised above otherwise)
 
         # Check if this is a compound query result (including partial results)
         if isinstance(result, dict) and result.get("type") in ["compound_query_results", "compound_partial_results"]:
@@ -374,10 +411,22 @@ def extract_intent(
         duration_ms = int((time.monotonic() - start_time) * 1000)
         logger.error(" [DSPy Integration] ======================================")
         logger.error(f" [DSPy Integration] DSPy extraction failed after {duration_ms}ms")
-        logger.error(f" [DSPy Integration] Error: {str(e)}")
+        logger.error(f" [DSPy Integration] Error type: {type(e).__name__}")
+        logger.error(f" [DSPy Integration] Error: {str(e)[:300]}")
         logger.error(" [DSPy Integration] ======================================")
-        # Convert to extraction error for consistent error handling
-        if "timeout" in str(e).lower():
-            raise LLMTimeoutError(f"DSPy pipeline timeout: {e}") from e
+
+        err_str = str(e).lower()
+        if "timeout" in err_str:
+            raise LLMTimeoutError("The AI service timed out. Please try again.") from e
+        elif "overloaded" in err_str or "529" in err_str or "overloaded_error" in err_str:
+            # Anthropic 529 overloaded — num_retries on the LM already tried 3 times.
+            # Raise with a clean user-facing message (no raw litellm JSON).
+            raise LLMCallError(
+                "The AI service is temporarily busy. Please wait a moment and try again."
+            ) from e
+        elif "rate_limit" in err_str or "429" in err_str:
+            raise LLMCallError(
+                "Rate limit reached. Please wait a moment and try again."
+            ) from e
         else:
             raise LLMCallError(f"DSPy pipeline error: {e}") from e

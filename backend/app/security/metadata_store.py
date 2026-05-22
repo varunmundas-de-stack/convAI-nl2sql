@@ -161,14 +161,18 @@ def log_audit(
     success: bool,
     error_message: str | None,
     duration_ms: int | None,
+    cache_hit: bool = False,
+    cache_tier: str | None = None,
+    tokens_used: int | None = None,
 ) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO app_meta.audit_log
-                  (user_id, username, client_id, question, cube_query, success, error_message, duration_ms)
-                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                  (user_id, username, client_id, question, cube_query, success,
+                   error_message, duration_ms, cache_hit, cache_tier, tokens_used)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user.user_id,
@@ -179,6 +183,9 @@ def log_audit(
                     success,
                     error_message,
                     duration_ms,
+                    cache_hit,
+                    cache_tier,
+                    tokens_used,
                 ),
             )
 

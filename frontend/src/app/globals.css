@@ -1,34 +1,149 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
 
 :root {
-  --background: #1a3a6b;
-  --foreground: #0a0a0a;
+  --background: #F9FAFB;
+  --foreground: #111827;
+  --card: #FFFFFF;
+  --border: #E5E7EB;
+  --muted: #6B7280;
+  --accent-orange: #F97316;
+  --accent-indigo: #4F46E5;
+  --accent-orange-light: #FFF7ED;
+  --accent-indigo-light: #EEF2FF;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-mono: var(--font-geist-mono);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "Courier New", Courier, monospace;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
   font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-input,
-button,
-textarea,
-select {
+code, pre, .font-mono {
+  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+}
+
+input, button, textarea, select {
   font-size: 1rem;
+  font-family: inherit;
 }
 
-.delay-100 {
-  animation-delay: 0.1s;
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
 }
 
-.delay-200 {
-  animation-delay: 0.2s;
+.btn-primary {
+  background: linear-gradient(135deg, #F97316 0%, #EA580C 100%);
+  color: white;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  border: none;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.1s ease;
 }
+.btn-primary:hover {
+  box-shadow: 0 4px 14px 0 rgb(249 115 22 / 0.4);
+  transform: translateY(-1px);
+}
+.btn-primary:active { transform: translateY(0); }
+
+.btn-indigo {
+  background: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
+  color: white;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  border: none;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.1s ease;
+}
+.btn-indigo:hover {
+  box-shadow: 0 4px 14px 0 rgb(79 70 229 / 0.4);
+  transform: translateY(-1px);
+}
+
+.card-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  box-shadow: 0 8px 24px 0 rgb(0 0 0 / 0.1);
+  transform: translateY(-2px);
+}
+
+.nav-active {
+  border-left: 3px solid #F97316;
+  background: #FFF7ED;
+  color: #EA580C;
+  font-weight: 600;
+}
+
+@keyframes meshShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.gradient-mesh {
+  background: linear-gradient(135deg, #F97316, #EA580C, #4F46E5, #6366F1, #F97316);
+  background-size: 300% 300%;
+  animation: meshShift 8s ease infinite;
+}
+
+.dot-grid {
+  background-image: radial-gradient(circle, #E5E7EB 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.input-field {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid #E5E7EB;
+  border-radius: 0.5rem;
+  background: #F9FAFB;
+  color: #111827;
+  font-size: 0.9375rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+.input-field:focus {
+  border-color: #F97316;
+  box-shadow: 0 0 0 3px rgb(249 115 22 / 0.15);
+  background: #FFFFFF;
+}
+
+.sql-block {
+  background: #1E1E2E;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.875rem;
+  color: #CDD6F4;
+  position: relative;
+  overflow-x: auto;
+}
+
+.trend-up   { background: #DCFCE7; color: #15803D; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 9999px; }
+.trend-down { background: #FEE2E2; color: #DC2626; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 9999px; }

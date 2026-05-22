@@ -166,17 +166,23 @@ def initialize_pipeline():
         from app.services.tools import intent_tool
         from app.services.tools import query_tool
         from app.services.tools import insights_tool
+        from app.services.tools import cache_tool  # 3-tier cache + memory
 
-        # Register steps in order
-        register_step(qco_tool.step_load_qco)        # 0
-        register_step(intent_tool.step_extract_intent)  # 1
-        register_step(intent_tool.step_drill_merge)     # 2
-        register_step(intent_tool.step_validate_intent) # 3
-        register_step(query_tool.step_build_query)      # 4
-        register_step(query_tool.step_execute_query)    # 5
-        register_step(insights_tool.step_gen_insights)  # 6
-        register_step(qco_tool.step_resolve_qco)        # 7
-        register_step(qco_tool.step_complete)           # 8
+        # Stage 0 — cache + memory pre-checks (injected before existing Stage 1)
+        register_step(cache_tool.step_golden_cache)        # 0a: Tier-1 FAISS golden cache
+        register_step(cache_tool.step_semantic_cache)      # 0b: Tier-2 Redis semantic cache
+        register_step(cache_tool.step_load_memory_context) # 0c: inject user memory into DSPy
+        # Existing stages — indices shifted by 3
+        register_step(qco_tool.step_load_qco)              # 3  (was 0)
+        register_step(intent_tool.step_extract_intent)     # 4  (was 1)
+        register_step(intent_tool.step_drill_merge)        # 5  (was 2)
+        register_step(intent_tool.step_validate_intent)    # 6  (was 3)
+        register_step(query_tool.step_build_query)         # 7  (was 4)
+        register_step(query_tool.step_execute_query)       # 8  (was 5)
+        register_step(insights_tool.step_gen_insights)     # 9  (was 6)
+        register_step(qco_tool.step_resolve_qco)           # 10 (was 7)
+        register_step(qco_tool.step_complete)              # 11 (was 8)
+        register_step(cache_tool.step_store_cache_and_memory)  # 12: Stage 9b — persist to cache + memory
 
         logger.info(f"Pipeline initialized with {len(PIPELINE_STEPS)} steps")
     except ImportError as e:

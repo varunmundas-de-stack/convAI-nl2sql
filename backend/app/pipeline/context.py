@@ -170,4 +170,7 @@ class PipelineContext:
             "is_partial": self.is_compound_partial,
             "has_compound_clarification_state": self.compound_clarification_state is not None,
             "error": self.error.to_dict() if self.error else None,
+            # Cache observability fields — set by cache_tool stages
+            "cache_hit": bool((self.resolved_clarifications or {}).get("__cache_hit__", False)),
+            "cache_tier": (self.resolved_clarifications or {}).get("__cache_tier__"),
         }

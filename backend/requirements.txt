@@ -75,3 +75,8 @@ joblib==1.5.3
 
 # Arize / tracing
 arize-otel
+
+# 3-tier semantic cache + user memory (install separately after base image build)
+# faiss-cpu==1.11.0
+# sentence-transformers==3.4.1
+# Pinned compatible version: sentence-transformers 2.7.0 works with huggingface-hub<1.0

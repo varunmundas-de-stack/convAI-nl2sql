@@ -42,8 +42,18 @@ CREATE TABLE IF NOT EXISTS app_meta.audit_log (
   success BOOLEAN NOT NULL,
   error_message TEXT,
   duration_ms INTEGER,
+  cache_hit BOOLEAN NOT NULL DEFAULT FALSE,
+  cache_tier VARCHAR(16),
+  tokens_used INTEGER,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- Idempotent column additions for existing deployments
+DO $$ BEGIN
+  ALTER TABLE app_meta.audit_log ADD COLUMN IF NOT EXISTS cache_hit BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE app_meta.audit_log ADD COLUMN IF NOT EXISTS cache_tier VARCHAR(16);
+  ALTER TABLE app_meta.audit_log ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS app_meta.chat_sessions (
   session_id VARCHAR(80) PRIMARY KEY,

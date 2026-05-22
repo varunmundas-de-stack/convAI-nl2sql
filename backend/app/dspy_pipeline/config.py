@@ -187,13 +187,17 @@ def configure_dspy_model() -> None:
             model=f"anthropic/{model_id}",  # Use anthropic/ prefix for LiteLLM
             api_key=anthropic_api_key,
             max_tokens=4096,
-            temperature=0.1  # Low temperature for structured output
+            temperature=0.1,  # Low temperature for structured output
+            # Retry on overloaded_error — Anthropic returns 529 during peak load.
+            # 3 retries with exponential backoff prevents cascade failures and
+            # avoids surfacing raw litellm errors to the user.
+            num_retries=3,
         )
 
         dspy.configure(lm=lm)
         _dspy_configured = True
 
-        logger.info("DSPy configured with Anthropic Claude via LiteLLM")
+        logger.info("DSPy configured with Anthropic Claude via LiteLLM (num_retries=3)")
 
     except Exception as e:
         logger.error(f"Failed to configure DSPy: {e}")

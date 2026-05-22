@@ -1,0 +1,89 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: SSH deploy → cpg-sales-demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Write SSH key ───────────────────────────────────────────────────
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/cpg-sales-key.pem
+          chmod 600 ~/.ssh/cpg-sales-key.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # ── 3. Write .env on server (secrets never in git) ─────────────────────
+      - name: Push .env to server
+        run: |
+          ssh -i ~/.ssh/cpg-sales-key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "mkdir -p ~/nl2sql"
+          cat > /tmp/deploy.env << 'ENVEOF'
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL_ID=${{ secrets.ANTHROPIC_MODEL_ID || 'claude-haiku-4-5-20251001' }}
+          CUBEJS_API_SECRET=${{ secrets.CUBEJS_API_SECRET }}
+          APP_JWT_SECRET=${{ secrets.APP_JWT_SECRET }}
+          LOG_LEVEL=INFO
+          ENVEOF
+          scp -i ~/.ssh/cpg-sales-key.pem /tmp/deploy.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/nl2sql/.env
+
+      # ── 4. Rsync project files ─────────────────────────────────────────────
+      - name: Sync project files
+        run: |
+          rsync -avz --delete \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='*.pem' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='.venv/' \
+            --exclude='venv_nl2sql/' \
+            --exclude='node_modules/' \
+            --exclude='.next/' \
+            --exclude='screen_shots/' \
+            -e "ssh -i ~/.ssh/cpg-sales-key.pem" \
+            ./ \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/nl2sql/
+
+      # ── 5. Build + restart on server ──────────────────────────────────────
+      - name: Build and restart stack
+        run: |
+          ssh -i ~/.ssh/cpg-sales-key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+            cd ~/nl2sql
+
+            # Build only changed services (--no-deps avoids rebuilding dependencies)
+            docker compose build backend frontend
+
+            # Bring stack up (recreates only changed containers)
+            docker compose up -d
+
+            # Wait for backend health
+            echo "Waiting for backend..."
+            for i in $(seq 1 12); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ Backend healthy"
+                break
+              fi
+              echo "  attempt $i/12..."
+              sleep 5
+            done
+          EOF
+
+      # ── 6. Smoke test ─────────────────────────────────────────────────────
+      - name: Smoke test
+        run: |
+          curl -sf http://${{ secrets.EC2_HOST }}:8000/health | grep healthy
+          echo "✅ Deploy successful"

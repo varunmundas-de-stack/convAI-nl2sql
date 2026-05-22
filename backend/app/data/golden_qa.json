@@ -1,0 +1,2102 @@
+[
+  {
+    "id": "gqa-sales-trend-001",
+    "intent": "sales_trend",
+    "question_variants": [
+      "What are the total net sales for last month?",
+      "Show me net sales for the previous month",
+      "What was last month's revenue?",
+      "Give me total sales figures for last month",
+      "Net sales summary for last 30 days"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-002",
+    "intent": "sales_trend",
+    "question_variants": [
+      "Show me week on week sales trend",
+      "What is the weekly sales growth trend?",
+      "Compare this week's sales to last week",
+      "Weekly sales comparison for current vs previous week",
+      "How are sales trending week over week?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "week", "dateRange": "last 2 weeks"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-003",
+    "intent": "sales_trend",
+    "question_variants": [
+      "What is the year on year sales growth?",
+      "Show YoY growth for net sales",
+      "Compare this year's sales to last year",
+      "Year over year sales performance",
+      "Annual sales growth rate"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.net_sales_growth_yoy"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "year", "dateRange": "last 2 years"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-004",
+    "intent": "sales_trend",
+    "question_variants": [
+      "Show top 10 SKUs by net sales",
+      "What are the best performing products by revenue?",
+      "Top performing SKUs ranked by net sales",
+      "Which products have the highest sales?",
+      "List top 10 products by revenue"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 30 days"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-005",
+    "intent": "sales_trend",
+    "question_variants": [
+      "What is sales performance by zone?",
+      "Show net sales broken down by zone",
+      "Zone-wise sales summary",
+      "Sales by geographic zone",
+      "Which zones have the highest sales?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 30 days"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-006",
+    "intent": "sales_trend",
+    "question_variants": [
+      "Sales by channel for last quarter",
+      "Show revenue by distribution channel",
+      "Channel-wise sales breakdown",
+      "Which channel contributes most to sales?",
+      "Compare sales across channels"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-007",
+    "intent": "sales_trend",
+    "question_variants": [
+      "Monthly sales trend for the current year",
+      "Show me month by month sales for this year",
+      "How have monthly sales changed this year?",
+      "Year to date monthly sales breakdown",
+      "Current year sales by month"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "this year"}],
+      "filters": [],
+      "limit": 12
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-008",
+    "intent": "sales_trend",
+    "question_variants": [
+      "Top 5 regions by sales growth",
+      "Which regions are growing the fastest?",
+      "Show sales growth rate by region",
+      "Fastest growing regions",
+      "Region-wise growth performance"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.net_sales_growth_mom"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.region"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 2 months"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-009",
+    "intent": "sales_trend",
+    "question_variants": [
+      "What is the daily sales trend for the past week?",
+      "Show day by day sales for last 7 days",
+      "Daily sales figures for the past week",
+      "How did sales vary day by day last week?",
+      "Last 7 days daily sales breakdown"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "day", "dateRange": "last 7 days"}],
+      "filters": [],
+      "limit": 7
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-sales-trend-010",
+    "intent": "sales_trend",
+    "question_variants": [
+      "What are the bottom 10 SKUs by sales?",
+      "Show worst performing products",
+      "Lowest selling SKUs last month",
+      "Which products have the least sales?",
+      "Bottom performers by net sales"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-001",
+    "intent": "market_share",
+    "question_variants": [
+      "What is our market share in the North zone?",
+      "Show our market share for North zone",
+      "Market share performance in North zone",
+      "What percentage of market do we hold in North?",
+      "Our share of market in the northern region"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [{"member": "{{DIMENSION_PREFIX}}.zone", "operator": "equals", "values": ["North"]}],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-002",
+    "intent": "market_share",
+    "question_variants": [
+      "What is our overall market share?",
+      "Show total market share across all zones",
+      "National market share summary",
+      "What is our all-India market share?",
+      "Overall share of market"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-003",
+    "intent": "market_share",
+    "question_variants": [
+      "How has our market share changed over the last 6 months?",
+      "Market share trend for last 6 months",
+      "Show market share evolution over 6 months",
+      "Half year market share trend",
+      "Market share movement last 6 months"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "last 6 months"}],
+      "filters": [],
+      "limit": 6
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-004",
+    "intent": "market_share",
+    "question_variants": [
+      "What is category-wise market share?",
+      "Show market share by product category",
+      "Category share of market breakdown",
+      "Market share split by category",
+      "Which category has the most market share?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-005",
+    "intent": "market_share",
+    "question_variants": [
+      "Which zones have below average market share?",
+      "Show zones where we are losing market share",
+      "Underperforming zones by market share",
+      "Where is our market share lowest?",
+      "Zones with declining market share"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct", "{{MEASURE_PREFIX}}.market_share_change_mom"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 2 months"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-006",
+    "intent": "market_share",
+    "question_variants": [
+      "What is our modern trade market share?",
+      "Show market share in modern trade channel",
+      "Modern trade channel share",
+      "Our share in supermarkets and hypermarkets",
+      "Market share in organized retail"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [{"member": "{{DIMENSION_PREFIX}}.channel", "operator": "equals", "values": ["Modern Trade"]}],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-007",
+    "intent": "market_share",
+    "question_variants": [
+      "Show market share by SKU for top brands",
+      "SKU level market share breakdown",
+      "Which SKUs have the highest market share?",
+      "Market share at product level",
+      "Top SKUs by share of market"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name", "{{DIMENSION_PREFIX}}.brand"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-008",
+    "intent": "market_share",
+    "question_variants": [
+      "Compare market share between general trade and modern trade",
+      "Market share GT vs MT channel comparison",
+      "How does our share differ between general and modern trade?",
+      "Channel-wise market share comparison",
+      "General trade vs modern trade market share"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-009",
+    "intent": "market_share",
+    "question_variants": [
+      "What is our market share in premium segment?",
+      "Show share in premium price tier",
+      "Premium segment market share",
+      "Our position in premium category",
+      "Market share for premium SKUs"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.price_tier"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [{"member": "{{DIMENSION_PREFIX}}.price_tier", "operator": "equals", "values": ["Premium"]}],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-market-share-010",
+    "intent": "market_share",
+    "question_variants": [
+      "Market share trend year on year",
+      "How has our share changed compared to last year?",
+      "YoY market share change",
+      "Year over year share of market trend",
+      "Annual market share comparison"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "year", "dateRange": "last 2 years"}],
+      "filters": [],
+      "limit": 2
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-001",
+    "intent": "inventory",
+    "question_variants": [
+      "What is the current inventory level?",
+      "Show current stock across all warehouses",
+      "Total inventory on hand right now",
+      "Current stock position summary",
+      "How much inventory do we have?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_units", "{{MEASURE_PREFIX}}.days_of_supply"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "today"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-002",
+    "intent": "inventory",
+    "question_variants": [
+      "Which SKUs are out of stock?",
+      "Show out of stock products",
+      "What products have zero inventory?",
+      "OOS SKUs list",
+      "Products with stockout situation"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_units", "{{MEASURE_PREFIX}}.oos_count"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "today"}],
+      "filters": [{"member": "{{MEASURE_PREFIX}}.inventory_units", "operator": "equals", "values": ["0"]}],
+      "limit": 50
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-003",
+    "intent": "inventory",
+    "question_variants": [
+      "What is the days of supply for all SKUs?",
+      "Show DOS for all products",
+      "Days of inventory coverage by SKU",
+      "How many days of stock do we have?",
+      "Inventory coverage in days"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.days_of_supply"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "today"}],
+      "filters": [],
+      "limit": 50
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-004",
+    "intent": "inventory",
+    "question_variants": [
+      "Inventory fill rate by warehouse",
+      "Show fill rate across distribution centres",
+      "Warehouse-wise fill rate summary",
+      "How well are warehouses fulfilling orders?",
+      "Fill rate performance by DC"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.fill_rate_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.warehouse"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 7 days"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-005",
+    "intent": "inventory",
+    "question_variants": [
+      "Which products need replenishment?",
+      "Show SKUs with low stock that need reorder",
+      "Replenishment alerts for low inventory",
+      "Products below reorder level",
+      "What needs to be restocked?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_units", "{{MEASURE_PREFIX}}.reorder_point", "{{MEASURE_PREFIX}}.days_of_supply"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "today"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-006",
+    "intent": "inventory",
+    "question_variants": [
+      "Zone-wise out of stock summary",
+      "OOS by zone breakdown",
+      "Which zones have the most stockouts?",
+      "Out of stock rate by zone",
+      "Zone level inventory availability"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.oos_count", "{{MEASURE_PREFIX}}.oos_rate_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 7 days"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-007",
+    "intent": "inventory",
+    "question_variants": [
+      "What is the stock ageing for slow moving items?",
+      "Show aged inventory by SKU",
+      "Slow moving stock analysis",
+      "Inventory ageing report",
+      "Which products have old stock?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_units", "{{MEASURE_PREFIX}}.stock_age_days"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "today"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-008",
+    "intent": "inventory",
+    "question_variants": [
+      "What is the inventory turnover ratio?",
+      "Show stock turn for top SKUs",
+      "Inventory turns by product",
+      "How fast is inventory moving?",
+      "Stock turnover performance"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_turnover_ratio"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-009",
+    "intent": "inventory",
+    "question_variants": [
+      "What is the total value of inventory on hand?",
+      "Show inventory value in rupees",
+      "Total stock value across all locations",
+      "Inventory worth as of today",
+      "Current inventory valuation"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_value"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "today"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-inventory-010",
+    "intent": "inventory",
+    "question_variants": [
+      "How has inventory level changed over last month?",
+      "Show inventory trend for last 30 days",
+      "Month long inventory movement",
+      "Inventory level over last 30 days",
+      "Daily inventory position for past month"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.inventory_units"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "day", "dateRange": "last 30 days"}],
+      "filters": [],
+      "limit": 30
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-001",
+    "intent": "promo_lift",
+    "question_variants": [
+      "What is the sales uplift from the current promotion?",
+      "Show promo lift for the ongoing campaign",
+      "How much has the promotion increased sales?",
+      "Promotion impact on net sales",
+      "Current scheme sales uplift"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.promo_lift_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.promotion_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 30 days"}],
+      "filters": [{"member": "{{DIMENSION_PREFIX}}.is_on_promotion", "operator": "equals", "values": ["true"]}],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-002",
+    "intent": "promo_lift",
+    "question_variants": [
+      "Which promotions had the highest ROI?",
+      "Show return on investment for all promotions",
+      "Best performing promotions by ROI",
+      "Promotion efficiency analysis",
+      "Which schemes gave best returns?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_roi_pct", "{{MEASURE_PREFIX}}.promo_spend", "{{MEASURE_PREFIX}}.promo_lift_value"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.promotion_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-003",
+    "intent": "promo_lift",
+    "question_variants": [
+      "What is the incremental volume from promotions?",
+      "Show promo-driven incremental units sold",
+      "Incremental sales due to promotions",
+      "How many extra units did promotions sell?",
+      "Volume lift from promotional activity"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.incremental_units", "{{MEASURE_PREFIX}}.base_units"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.promotion_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-004",
+    "intent": "promo_lift",
+    "question_variants": [
+      "Compare promo lift by zone",
+      "Which zone benefited most from promotions?",
+      "Zone-wise promotion effectiveness",
+      "How does promo lift vary by geography?",
+      "Region-wise campaign performance"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_lift_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-005",
+    "intent": "promo_lift",
+    "question_variants": [
+      "What is post-promotion dip analysis?",
+      "Show sales dip after promotion ends",
+      "Post-scheme cannibalization effect",
+      "How do sales fall after promotions?",
+      "Post promotion demand hangover"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "week", "dateRange": "last 6 weeks"}],
+      "filters": [],
+      "limit": 6
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-006",
+    "intent": "promo_lift",
+    "question_variants": [
+      "Which SKUs respond best to promotions?",
+      "Show most promotion-responsive products",
+      "Top SKUs by promo lift percentage",
+      "Products with highest promotion sensitivity",
+      "Best promoted SKUs by uplift"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_lift_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-007",
+    "intent": "promo_lift",
+    "question_variants": [
+      "What is the total promotion spend this quarter?",
+      "Show trade promotion investment for this quarter",
+      "How much did we spend on promotions?",
+      "Total BTL spend for the quarter",
+      "Promotion budget utilisation this quarter"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_spend"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "this quarter"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-008",
+    "intent": "promo_lift",
+    "question_variants": [
+      "Category-wise promotion effectiveness",
+      "Show promo lift by product category",
+      "Which category responds best to promotions?",
+      "Promotion ROI by category",
+      "Category level campaign performance"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_lift_pct", "{{MEASURE_PREFIX}}.promo_roi_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-009",
+    "intent": "promo_lift",
+    "question_variants": [
+      "What is modern trade vs general trade promo effectiveness?",
+      "Compare channel promotion lift",
+      "Which channel benefits more from promotions?",
+      "Promo efficiency across channels",
+      "Channel wise campaign ROI comparison"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_lift_pct", "{{MEASURE_PREFIX}}.promo_roi_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-promo-lift-010",
+    "intent": "promo_lift",
+    "question_variants": [
+      "What is the payback period for our promotions?",
+      "How long to recover promotion investment?",
+      "Promotion payback analysis",
+      "When do our promotions break even?",
+      "Return on promotion spend timeline"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.promo_roi_pct", "{{MEASURE_PREFIX}}.promo_spend", "{{MEASURE_PREFIX}}.incremental_net_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.promotion_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-001",
+    "intent": "distribution",
+    "question_variants": [
+      "What is our numeric distribution?",
+      "Show numeric distribution across outlets",
+      "How many outlets stock our products?",
+      "Current numeric distribution score",
+      "Number of outlets carrying our SKUs"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-002",
+    "intent": "distribution",
+    "question_variants": [
+      "What is weighted distribution for key SKUs?",
+      "Show weighted distribution performance",
+      "Weighted distribution score by product",
+      "Key SKU weighted distribution",
+      "Value weighted distribution for top products"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.weighted_distribution_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-003",
+    "intent": "distribution",
+    "question_variants": [
+      "Which zones have the lowest distribution reach?",
+      "Show distribution gaps by zone",
+      "Zones with poor coverage",
+      "Where is our distribution weakest?",
+      "Distribution coverage by geography"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-004",
+    "intent": "distribution",
+    "question_variants": [
+      "Distribution trend for last 6 months",
+      "How has distribution coverage changed?",
+      "Show 6 month distribution performance",
+      "Distribution expansion trend",
+      "Monthly distribution growth"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "last 6 months"}],
+      "filters": [],
+      "limit": 6
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-005",
+    "intent": "distribution",
+    "question_variants": [
+      "SKU-wise distribution coverage report",
+      "Show distribution for each product",
+      "Which SKUs have highest distribution?",
+      "Product availability across outlets",
+      "SKU reach in the market"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct", "{{MEASURE_PREFIX}}.outlet_count"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-006",
+    "intent": "distribution",
+    "question_variants": [
+      "What is the new outlet addition this month?",
+      "Show net new outlets added",
+      "How many new stores started stocking us?",
+      "New outlet acquisition this month",
+      "Monthly new outlet addition"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.new_outlets_added"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "this month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-007",
+    "intent": "distribution",
+    "question_variants": [
+      "What is the distribution gap for new launches?",
+      "Show distribution achievement for new products",
+      "New SKU distribution target vs achievement",
+      "How well are new products distributed?",
+      "Launch SKU distribution coverage"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct", "{{MEASURE_PREFIX}}.distribution_target_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name", "{{DIMENSION_PREFIX}}.launch_date"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 3 months"}],
+      "filters": [{"member": "{{DIMENSION_PREFIX}}.is_new_launch", "operator": "equals", "values": ["true"]}],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-008",
+    "intent": "distribution",
+    "question_variants": [
+      "Distribution by outlet type breakdown",
+      "Show coverage by store format",
+      "Outlet type distribution performance",
+      "Supermarket vs kirana distribution split",
+      "Channel type distribution coverage"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.outlet_type"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-009",
+    "intent": "distribution",
+    "question_variants": [
+      "Which territories are below distribution target?",
+      "Show territories missing distribution targets",
+      "Distribution target achievement by territory",
+      "Where are we behind on distribution targets?",
+      "Territory-wise distribution gap analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct", "{{MEASURE_PREFIX}}.distribution_target_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.territory"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-distribution-010",
+    "intent": "distribution",
+    "question_variants": [
+      "What is the lapsed outlet count?",
+      "Show outlets that stopped buying from us",
+      "Churned outlets analysis",
+      "How many outlets became inactive?",
+      "Outlet attrition report"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.lapsed_outlet_count"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-001",
+    "intent": "pricing",
+    "question_variants": [
+      "What is the average net realization per case?",
+      "Show average selling price per case",
+      "Net price realization analysis",
+      "Average trade price for our products",
+      "What price are we realizing at trade?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_realization_per_case"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-002",
+    "intent": "pricing",
+    "question_variants": [
+      "What is the average trade discount given?",
+      "Show trade discount percentage by SKU",
+      "Discount levels across products",
+      "Average discount extended to trade",
+      "Trade margin analysis by product"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.trade_discount_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-003",
+    "intent": "pricing",
+    "question_variants": [
+      "Price gap vs competition",
+      "How does our price compare to competitors?",
+      "Competitive price gap analysis",
+      "Price index versus competitors",
+      "Price positioning relative to competition"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.price_index_vs_competition"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-004",
+    "intent": "pricing",
+    "question_variants": [
+      "Price elasticity by product",
+      "Which products are most price sensitive?",
+      "How does price affect demand for our SKUs?",
+      "Price elasticity analysis for key products",
+      "Price sensitivity of top SKUs"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.price_elasticity"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 6 months"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-005",
+    "intent": "pricing",
+    "question_variants": [
+      "What is the gross margin by category?",
+      "Show margin by product category",
+      "Category-wise gross margin analysis",
+      "Which categories are most profitable?",
+      "Margin performance by category"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.gross_margin_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-006",
+    "intent": "pricing",
+    "question_variants": [
+      "Show MRP compliance by zone",
+      "Which zones have MRP violations?",
+      "MRP adherence at retail level",
+      "Are retailers selling above MRP?",
+      "Maximum retail price compliance"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.mrp_compliance_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-007",
+    "intent": "pricing",
+    "question_variants": [
+      "What is the channel-wise net realization?",
+      "Price realization by distribution channel",
+      "How does realization vary across channels?",
+      "Net price by channel",
+      "Channel-wise price performance"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_realization_per_case"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-008",
+    "intent": "pricing",
+    "question_variants": [
+      "Show price trend for the past 12 months",
+      "How has pricing changed over the year?",
+      "Annual price movement analysis",
+      "12 month net realization trend",
+      "Year-long price evolution"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_realization_per_case"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "last 12 months"}],
+      "filters": [],
+      "limit": 12
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-009",
+    "intent": "pricing",
+    "question_variants": [
+      "What is the discount leakage?",
+      "Show unauthorized or excess discounts given",
+      "Discount exceptions by salesperson",
+      "Where is discount leakage happening?",
+      "Off-invoice discount analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.excess_discount_value", "{{MEASURE_PREFIX}}.trade_discount_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.salesperson", "{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-pricing-010",
+    "intent": "pricing",
+    "question_variants": [
+      "Show pack size price architecture",
+      "Price per gram or ml by pack size",
+      "Pack size pricing analysis",
+      "Which pack gives best value to consumer?",
+      "Price per unit across pack sizes"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.price_per_unit"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.pack_size", "{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-001",
+    "intent": "competitor",
+    "question_variants": [
+      "How do our sales compare to our top competitor?",
+      "Show our performance vs competition",
+      "Sales comparison with competitors",
+      "Our share versus leading competitor",
+      "Competitive performance benchmark"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.competitor_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-002",
+    "intent": "competitor",
+    "question_variants": [
+      "Competitor price comparison by category",
+      "How do competitor prices compare to ours?",
+      "Competitive pricing analysis by category",
+      "Price parity with competition",
+      "Where are competitors priced against us?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.our_price", "{{MEASURE_PREFIX}}.competitor_avg_price"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category", "{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-003",
+    "intent": "competitor",
+    "question_variants": [
+      "Show competitor distribution vs our distribution",
+      "How does our reach compare to competitors?",
+      "Distribution comparison with competition",
+      "Competitor distribution coverage benchmark",
+      "Our distribution vs top competitor"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.numeric_distribution_pct", "{{MEASURE_PREFIX}}.competitor_distribution_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-004",
+    "intent": "competitor",
+    "question_variants": [
+      "Zones where competitor is outperforming us",
+      "Where is competition gaining over us?",
+      "Competitor winning zones analysis",
+      "Which geographies is competition stronger?",
+      "Competitive threat areas by zone"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct", "{{MEASURE_PREFIX}}.competitor_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone", "{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-005",
+    "intent": "competitor",
+    "question_variants": [
+      "Competitor new product launches this quarter",
+      "What new products did competitors launch?",
+      "Show competitor NPD activity",
+      "New SKU launches by competition",
+      "Competitive new product intelligence"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.competitor_new_sku_count"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-006",
+    "intent": "competitor",
+    "question_variants": [
+      "Show competitor shelf share vs ours",
+      "How much shelf space do competitors have?",
+      "Share of shelf comparison",
+      "Our shelf share vs competition",
+      "Shelf space distribution competitive analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.shelf_share_pct", "{{MEASURE_PREFIX}}.competitor_shelf_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-007",
+    "intent": "competitor",
+    "question_variants": [
+      "Competitor growth rate vs our growth rate",
+      "How fast is competition growing versus us?",
+      "Comparative growth rate analysis",
+      "Our growth vs competitor growth",
+      "Who is growing faster, us or competition?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales_growth_yoy", "{{MEASURE_PREFIX}}.competitor_growth_yoy"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last year"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-008",
+    "intent": "competitor",
+    "question_variants": [
+      "Which competitor SKUs are gaining share?",
+      "Show competitor products gaining traction",
+      "Competitor SKUs with rising market share",
+      "Growing competitor products",
+      "Competitive threats at product level"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.competitor_share_pct", "{{MEASURE_PREFIX}}.competitor_share_change_mom"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.competitor_name", "{{DIMENSION_PREFIX}}.competitor_sku"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last 3 months"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-009",
+    "intent": "competitor",
+    "question_variants": [
+      "Channel-wise competitive landscape",
+      "How does competition differ across channels?",
+      "Competitive share by channel",
+      "Which channels are most competitive?",
+      "Channel level competitive analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.market_share_pct", "{{MEASURE_PREFIX}}.competitor_share_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel", "{{DIMENSION_PREFIX}}.competitor_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 15
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-competitor-010",
+    "intent": "competitor",
+    "question_variants": [
+      "What is the competitive intensity index?",
+      "Show competitive pressure by market",
+      "How intense is competition in each region?",
+      "Competitive intensity by zone",
+      "Market competitiveness score by area"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.competitive_intensity_index"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-001",
+    "intent": "forecast",
+    "question_variants": [
+      "What are the projected sales for next month?",
+      "Show next month's sales forecast",
+      "Expected revenue for next month",
+      "Sales prediction for upcoming month",
+      "Next month sales projection"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-002",
+    "intent": "forecast",
+    "question_variants": [
+      "What is the Q4 sales forecast?",
+      "Show projected sales for next quarter",
+      "Q4 revenue projection",
+      "Next quarter sales estimate",
+      "Quarterly sales forecast"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next quarter"}],
+      "filters": [],
+      "limit": 3
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-003",
+    "intent": "forecast",
+    "question_variants": [
+      "Zone-wise sales forecast for next month",
+      "What are projected sales by zone next month?",
+      "Zone level revenue forecast",
+      "Next month forecast by geography",
+      "Regional sales projection next month"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_net_sales"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-004",
+    "intent": "forecast",
+    "question_variants": [
+      "What is the annual sales target vs forecast?",
+      "Show annual plan vs forecast comparison",
+      "Target vs projected sales for the year",
+      "Annual revenue target achievement forecast",
+      "Will we hit annual targets?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.annual_sales_target", "{{MEASURE_PREFIX}}.forecasted_net_sales"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "this year"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-005",
+    "intent": "forecast",
+    "question_variants": [
+      "SKU-wise demand forecast for next 3 months",
+      "Show product level sales prediction",
+      "3-month demand forecast by SKU",
+      "What volumes will each product sell?",
+      "SKU forecast for next quarter"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_units"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next 3 months"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-006",
+    "intent": "forecast",
+    "question_variants": [
+      "What is the inventory requirement forecast?",
+      "Show projected inventory needs",
+      "How much stock do we need to order?",
+      "Demand-based inventory planning",
+      "Forward-looking inventory requirement"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_units", "{{MEASURE_PREFIX}}.current_inventory"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-007",
+    "intent": "forecast",
+    "question_variants": [
+      "Seasonal demand forecast for summer",
+      "How will sales change in summer season?",
+      "Seasonal projection for peak period",
+      "Demand forecast for upcoming season",
+      "Seasonal sales prediction"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_net_sales", "{{MEASURE_PREFIX}}.seasonality_index"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "next 3 months"}],
+      "filters": [],
+      "limit": 3
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-008",
+    "intent": "forecast",
+    "question_variants": [
+      "What is the forecast accuracy for last month?",
+      "Show MAPE for last month's forecasts",
+      "How accurate were our sales predictions?",
+      "Forecast vs actual variance analysis",
+      "Prediction accuracy review"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecast_accuracy_pct", "{{MEASURE_PREFIX}}.mape"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-009",
+    "intent": "forecast",
+    "question_variants": [
+      "What is the market growth forecast for next year?",
+      "Industry growth prediction for next 12 months",
+      "Expected market size next year",
+      "Annual market growth projection",
+      "Future market opportunity forecast"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_market_size", "{{MEASURE_PREFIX}}.market_growth_rate"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next year"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-forecast-010",
+    "intent": "forecast",
+    "question_variants": [
+      "Revenue forecast confidence interval",
+      "Show range for sales forecast",
+      "Best case and worst case sales projection",
+      "Sales forecast with uncertainty range",
+      "High low sales scenario forecast"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.forecasted_net_sales", "{{MEASURE_PREFIX}}.forecast_upper_bound", "{{MEASURE_PREFIX}}.forecast_lower_bound"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "next month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-001",
+    "intent": "product_mix",
+    "question_variants": [
+      "What is the sales mix by brand?",
+      "Show revenue contribution by brand",
+      "Brand-wise sales mix analysis",
+      "What percentage of sales does each brand contribute?",
+      "Brand portfolio sales split"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.brand"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-002",
+    "intent": "product_mix",
+    "question_variants": [
+      "Show premium vs mass product mix",
+      "What is the mix between premium and mass segments?",
+      "Premium to mass ratio in our portfolio",
+      "Portfolio mix by price tier",
+      "Premium segment contribution to sales"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.price_tier"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-003",
+    "intent": "product_mix",
+    "question_variants": [
+      "How is the pack size mix trending?",
+      "Sales contribution by pack size",
+      "Pack mix analysis for last quarter",
+      "Which pack sizes are growing in mix?",
+      "Pack size portfolio trend"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.pack_size"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-004",
+    "intent": "product_mix",
+    "question_variants": [
+      "Category contribution to total sales",
+      "Sales mix by product category",
+      "Revenue share by category",
+      "How much does each category contribute?",
+      "Category portfolio sales breakdown"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-005",
+    "intent": "product_mix",
+    "question_variants": [
+      "New product contribution to portfolio",
+      "Sales mix for new launches vs established SKUs",
+      "How much do new products contribute to sales?",
+      "NPD share in total portfolio",
+      "Innovation SKU sales contribution"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_age_group"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 5
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-006",
+    "intent": "product_mix",
+    "question_variants": [
+      "Flavour or variant mix analysis",
+      "What is the mix across product variants?",
+      "Variant-wise sales breakdown",
+      "Product flavour contribution to sales",
+      "SKU variant portfolio mix"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.variant"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 15
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-007",
+    "intent": "product_mix",
+    "question_variants": [
+      "Pareto analysis of SKU contribution to sales",
+      "Top 20% SKUs contributing 80% of sales",
+      "Which SKUs drive the bulk of revenue?",
+      "Pareto analysis for portfolio",
+      "Key SKUs driving disproportionate sales"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.cumulative_sales_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 50
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-008",
+    "intent": "product_mix",
+    "question_variants": [
+      "How has mix shifted from last year to this year?",
+      "Year on year product mix change",
+      "Mix evolution between this year and last",
+      "What changed in portfolio mix YoY?",
+      "Annual portfolio mix shift analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "year", "dateRange": "last 2 years"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-009",
+    "intent": "product_mix",
+    "question_variants": [
+      "Zone-wise product mix comparison",
+      "How does product mix differ by zone?",
+      "Regional product mix analysis",
+      "Zone level portfolio contribution",
+      "Geography-specific mix breakdown"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone", "{{DIMENSION_PREFIX}}.category"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 30
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-product-mix-010",
+    "intent": "product_mix",
+    "question_variants": [
+      "Which products should be rationalized?",
+      "Show tail SKUs for portfolio cleanup",
+      "Low volume SKUs for discontinuation",
+      "Portfolio rationalization candidates",
+      "Underperforming SKUs for delisting"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.unit_volume", "{{MEASURE_PREFIX}}.cumulative_sales_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.sku_name"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 30
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-001",
+    "intent": "customer_segment",
+    "question_variants": [
+      "What is the sales contribution by customer segment?",
+      "Show revenue by shopper type",
+      "Customer segment sales breakdown",
+      "Which segments contribute most to sales?",
+      "Shopper segment revenue analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.customer_segment"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-002",
+    "intent": "customer_segment",
+    "question_variants": [
+      "What is the basket size by customer type?",
+      "Show average basket value by shopper segment",
+      "Customer basket analysis",
+      "Average order value per segment",
+      "Shopper spend by category"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.avg_basket_value", "{{MEASURE_PREFIX}}.basket_size_units"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.customer_segment"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-003",
+    "intent": "customer_segment",
+    "question_variants": [
+      "Show channel mix sales breakdown",
+      "Sales contribution by channel type",
+      "Modern trade vs general trade vs ecommerce",
+      "Revenue split across channels",
+      "Channel-wise sales contribution"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.net_sales", "{{MEASURE_PREFIX}}.sales_mix_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.channel"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-004",
+    "intent": "customer_segment",
+    "question_variants": [
+      "What is the repeat purchase rate by segment?",
+      "Show customer loyalty by shopper type",
+      "Repeat buyer analysis by segment",
+      "Which segments show highest loyalty?",
+      "Retention rate by customer category"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.repeat_purchase_rate_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.customer_segment"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-005",
+    "intent": "customer_segment",
+    "question_variants": [
+      "New customer acquisition this month",
+      "How many new customers did we add?",
+      "First time buyer acquisition",
+      "New buyer count for current month",
+      "Customer acquisition rate this month"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.new_customer_count"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "this month"}],
+      "filters": [],
+      "limit": 1
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-006",
+    "intent": "customer_segment",
+    "question_variants": [
+      "What is the churn rate by customer segment?",
+      "Show customer attrition by segment",
+      "Segment-wise customer churn",
+      "Which segments are churning most?",
+      "Customer loss rate by type"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.churn_rate_pct"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.customer_segment"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-007",
+    "intent": "customer_segment",
+    "question_variants": [
+      "Ecommerce customer growth trend",
+      "How is online channel customer base growing?",
+      "D2C customer acquisition trend",
+      "Digital customer growth over time",
+      "Online buyer growth analysis"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.active_customer_count", "{{MEASURE_PREFIX}}.new_customer_count"],
+      "dimensions": [],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "granularity": "month", "dateRange": "last 6 months"}],
+      "filters": [{"member": "{{DIMENSION_PREFIX}}.channel", "operator": "equals", "values": ["Ecommerce"]}],
+      "limit": 6
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-008",
+    "intent": "customer_segment",
+    "question_variants": [
+      "What is the customer lifetime value by segment?",
+      "Show CLV for top customer segments",
+      "High value customer segment analysis",
+      "Customer lifetime value breakdown",
+      "Which segment has highest LTV?"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.customer_lifetime_value"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.customer_segment"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last year"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-009",
+    "intent": "customer_segment",
+    "question_variants": [
+      "Purchase frequency by customer segment",
+      "How often do customers in each segment buy?",
+      "Buying frequency analysis by type",
+      "Segment-wise purchase interval",
+      "Customer order frequency by category"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.avg_purchase_frequency"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.customer_segment"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last quarter"}],
+      "filters": [],
+      "limit": 10
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  },
+  {
+    "id": "gqa-customer-segment-010",
+    "intent": "customer_segment",
+    "question_variants": [
+      "What is the geographic distribution of customers?",
+      "Show customer count by region",
+      "Where are our customers located?",
+      "Regional customer base breakdown",
+      "Zone-wise active customer count"
+    ],
+    "canonical_cube_query": {
+      "measures": ["{{MEASURE_PREFIX}}.active_customer_count"],
+      "dimensions": ["{{DIMENSION_PREFIX}}.zone", "{{DIMENSION_PREFIX}}.region"],
+      "timeDimensions": [{"dimension": "{{MEASURE_PREFIX}}.date", "dateRange": "last month"}],
+      "filters": [],
+      "limit": 20
+    },
+    "prebuilt_answer": "PENDING_REFRESH",
+    "hit_count": 0,
+    "last_refreshed": null
+  }
+]

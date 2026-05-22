@@ -95,11 +95,11 @@ async def lifespan(app: FastAPI):
     """Initialize services on startup, cleanup on shutdown."""
     # Startup
     logger.info("Starting NL2SQL API...")
-    
+
     # Load catalog (for catalog endpoints)
     logger.info(f"Loading catalog from: {CATALOG_PATH}")
     app_state.catalog = CatalogManager(str(CATALOG_PATH))
-    
+
     # Initialize RLHF database and register v1
     try:
         from app.rlhf.db import init_db
@@ -109,11 +109,27 @@ async def lifespan(app: FastAPI):
         logger.info("RLHF subsystem initialized")
     except Exception as e:
         logger.warning(f"RLHF initialization failed (non-fatal): {e}")
-    
+
+    # Initialize user memory SQLite DB
+    try:
+        from app.services.memory_manager import init_memory_db
+        init_memory_db()
+        logger.info("User memory DB initialized")
+    except Exception as e:
+        logger.warning(f"Memory DB initialization failed (non-fatal): {e}")
+
+    # Warm up Tier-1 golden cache (FAISS index built from golden_qa.json)
+    try:
+        from app.services.cache_manager import golden_cache
+        golden_cache.load()
+        logger.info("Tier-1 golden cache loaded")
+    except Exception as e:
+        logger.warning(f"Golden cache initialization failed (non-fatal): {e}")
+
     logger.info("NL2SQL API started successfully")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down NL2SQL API...")
 
@@ -229,6 +245,9 @@ def _persist_query_side_effects(
         success = bool(response_dict.get("success"))
         err = response_dict.get("error") or {}
         error_message = err.get("message") if isinstance(err, dict) else str(err) if err else None
+        # Cache metadata surfaced from cache_tool stages via to_dict()
+        cache_hit = bool(response_dict.get("cache_hit", False))
+        cache_tier = response_dict.get("cache_tier")
         log_audit(
             user=user,
             question=query,
@@ -236,6 +255,8 @@ def _persist_query_side_effects(
             success=success,
             error_message=error_message,
             duration_ms=response_dict.get("duration_ms"),
+            cache_hit=cache_hit,
+            cache_tier=cache_tier,
         )
         save_chat_message(session_id, user, "user", query)
         
@@ -623,6 +644,55 @@ async def retry_query_endpoint(
 
         # Success - return full response
         return JSONResponse(content=response_dict)
+
+
+# =============================================================================
+# CACHE + MEMORY ENDPOINTS
+# =============================================================================
+
+@app.get("/cache/stats", tags=["Cache"])
+async def get_cache_stats(_: Annotated[UserContext, Depends(get_current_user)]):
+    """Return cache hit statistics and token savings estimate."""
+    from app.services.cache_manager import get_cache_stats
+    return get_cache_stats()
+
+
+@app.post("/cache/clear/{user_id}", tags=["Cache"])
+async def clear_user_cache(
+    user_id: str,
+    current: Annotated[UserContext, Depends(get_current_user)],
+):
+    """Clear all Tier-2 Redis semantic cache entries for a user."""
+    from app.services.cache_manager import semantic_cache
+    deleted = semantic_cache.clear_user(user_id)
+    return {"user_id": user_id, "deleted_entries": deleted}
+
+
+@app.get("/user/{user_id}/memory", tags=["Memory"])
+async def get_user_memory(
+    user_id: str,
+    n: int = 10,
+    _: Annotated[UserContext, Depends(get_current_user)] = None,
+):
+    """Return the last N memory turns for a user."""
+    from app.services.memory_manager import get_turns
+    turns = get_turns(user_id, n=n)
+    return {"user_id": user_id, "turns": turns, "count": len(turns)}
+
+
+@app.post("/golden-qa/refresh", tags=["Cache"])
+async def refresh_golden_qa(_: Annotated[UserContext, Depends(get_current_user)]):
+    """Re-run all canonical SQL queries and update prebuilt answers."""
+    from app.services.cache_manager import golden_cache
+    result = await golden_cache.refresh_all()
+    return result
+
+
+@app.get("/golden-qa/list", tags=["Cache"])
+async def list_golden_qa(_: Annotated[UserContext, Depends(get_current_user)]):
+    """Return all golden Q&A entries with metadata and hit counts."""
+    from app.services.cache_manager import golden_cache
+    return {"entries": golden_cache.list_entries(), "total": len(golden_cache.list_entries())}
 
 
 # =============================================================================

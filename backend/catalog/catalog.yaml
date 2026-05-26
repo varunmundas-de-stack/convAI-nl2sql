@@ -1,4 +1,5 @@
 metrics:
+  # Fully-qualified Cube.js keys
   fact_primary_sales.count: true
   fact_primary_sales.billed_qty: true
   fact_primary_sales.gross_value: true
@@ -9,7 +10,15 @@ metrics:
   fact_secondary_sales.gross_value: true
   fact_secondary_sales.net_value: true
   fact_secondary_sales.tax_value: true
+  # Short semantic aliases (extracted by Claude/DSPy)
+  count: true
+  billed_qty: true
+  gross_value: true
+  net_value: true
+  tax_value: true
+
 dimensions:
+  # --- fact_primary_sales fully-qualified ---
   fact_primary_sales.asm_name: true
   fact_primary_sales.brand: true
   fact_primary_sales.category: true
@@ -30,6 +39,7 @@ dimensions:
   fact_primary_sales.uom: true
   fact_primary_sales.zone: true
   fact_primary_sales.zsm_name: true
+  # --- fact_secondary_sales fully-qualified ---
   fact_secondary_sales.asm_name: true
   fact_secondary_sales.brand: true
   fact_secondary_sales.category: true
@@ -55,6 +65,70 @@ dimensions:
   fact_secondary_sales.uom: true
   fact_secondary_sales.zone: true
   fact_secondary_sales.zsm_name: true
+  # --- Short semantic aliases (what Claude/DSPy extracts) ---
+  zone: true
+  state: true
+  city: true
+  brand: true
+  category: true
+  sub_category: true
+  pack_size: true
+  sku_code: true
+  product_desc: true
+  distributor_code: true
+  distributor_name: true
+  asm_name: true
+  zsm_name: true
+  so_name: true
+  retailer_code: true
+  retailer_name: true
+  retailer_type: true
+  route_code: true
+  route_name: true
+  salesrep_code: true
+  salesrep_name: true
+  currency: true
+  uom: true
+  companywh_code: true
+  companywh_name: true
+  # --- Star schema semantic aliases (from catalog.py COMMON_DIMENSIONS) ---
+  geo_zone: true
+  geo_state: true
+  geo_city: true
+  geo_territory: true
+  geo_level: true
+  prod_category: true
+  prod_sub_category: true
+  prod_brand: true
+  prod_sku_code: true
+  org_zsm: true
+  org_asm: true
+  org_so: true
+  period_year: true
+  period_quarter: true
+  period_month: true
+  period_week: true
+  # --- dim_* fully-qualified paths (post-normalization) ---
+  dim_geography.zone: true
+  dim_geography.state: true
+  dim_geography.city: true
+  dim_geography.territory: true
+  dim_geography.geo_level: true
+  dim_product.category: true
+  dim_product.sub_category: true
+  dim_product.brand: true
+  dim_product.sku_code: true
+  dim_product.pack_size: true
+  dim_product.product_desc: true
+  dim_period.fiscal_year: true
+  dim_period.fiscal_quarter: true
+  dim_period.fiscal_month: true
+  dim_period.fiscal_week: true
+  dim_salesorg.zsm_name: true
+  dim_salesorg.asm_name: true
+  dim_salesorg.so_code: true
+  dim_customer.channel_type: true
+
 time_dimensions:
   fact_primary_sales.created_at:
     granularities:
@@ -84,6 +158,7 @@ time_dimensions:
     - month
     - quarter
     - year
+
 time_windows:
   today: true
   yesterday: true

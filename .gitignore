@@ -4,6 +4,7 @@
 .env.*.local
 *.pem
 *.key
+.bashrc
 aws-deploy/.env
 
 # Python

@@ -1,0 +1,72 @@
+{
+  "sales_performance": [
+    {"label": "top_5_skus", "question": "What are the top 5 SKUs by net sales this month?"},
+    {"label": "regional_breakdown", "question": "Show me sales breakdown by zone for the last quarter"},
+    {"label": "target_achievement", "question": "Are we on track to meet this year's sales target?"},
+    {"label": "trend_analysis", "question": "What's the trend in our primary vs secondary sales?"},
+    {"label": "comparison_yoy", "question": "How do current sales compare to the same period last year?"},
+    {"label": "top_customers", "question": "Who are our top 10 customers by revenue?"},
+    {"label": "product_mix", "question": "What percentage of sales comes from each product category?"},
+    {"label": "growth_rate", "question": "What's our overall growth rate this year?"},
+    {"label": "regional_performance", "question": "Which zone is performing best this quarter?"},
+    {"label": "distributor_analysis", "question": "How are our top distributors performing?"},
+    {"label": "monthly_trends", "question": "What were the sales trends month-over-month this year?"},
+    {"label": "channel_mix", "question": "How much of our business comes from each sales channel?"},
+    {"label": "seasonal_patterns", "question": "What seasonal patterns do we see in our sales data?"},
+    {"label": "market_share", "question": "What's our estimated market share in each region?"},
+    {"label": "revenue_forecast", "question": "Based on current trends, what's our revenue forecast for next quarter?"}
+  ],
+  "sku_product": [
+    {"label": "sku_performance", "question": "Which SKUs are underperforming this month?"},
+    {"label": "brand_comparison", "question": "How are different brands performing against each other?"},
+    {"label": "category_trends", "question": "What's the trend in packaged goods category sales?"},
+    {"label": "new_sku_adoption", "question": "How quickly are new SKUs being adopted?"},
+    {"label": "sku_margins", "question": "Which SKUs have the highest profit margins?"},
+    {"label": "promotion_impact", "question": "What's the impact of our recent promotion on SKU sales?"},
+    {"label": "inventory_levels", "question": "Which SKUs are overstocked or understocked?"},
+    {"label": "pack_size_analysis", "question": "How are different pack sizes performing?"},
+    {"label": "sub_category_breakdown", "question": "Show me the breakdown by sub-category"},
+    {"label": "sku_availability", "question": "Which SKUs have availability issues?"},
+    {"label": "competing_skus", "question": "How are our SKUs competing against private labels?"},
+    {"label": "discontinuation_impact", "question": "What's the impact of discontinuing SKU X?"},
+    {"label": "bundle_performance", "question": "How are bundled offerings performing?"},
+    {"label": "sku_growth", "question": "Which SKUs have the highest growth rate?"},
+    {"label": "price_sensitivity", "question": "How price-sensitive are our customers for different SKUs?"}
+  ],
+  "regional_zone": [
+    {"label": "zone_ranking", "question": "Rank zones by sales performance"},
+    {"label": "state_comparison", "question": "How do states within a zone compare?"},
+    {"label": "city_analysis", "question": "Which cities are driving most of the zone's sales?"},
+    {"label": "territory_coverage", "question": "What's our sales coverage by territory?"},
+    {"label": "zone_growth", "question": "Which zones have the highest growth rate?"},
+    {"label": "penetration_analysis", "question": "What's our market penetration in each zone?"},
+    {"label": "competitive_pressure", "question": "Where is competitive pressure highest?"},
+    {"label": "distribution_gaps", "question": "Where do we have distribution gaps?"},
+    {"label": "regional_preferences", "question": "What are regional preferences for products?"},
+    {"label": "zone_potential", "question": "Which zones have the most untapped potential?"},
+    {"label": "demographic_analysis", "question": "How do demographics vary across zones?"},
+    {"label": "transportation_costs", "question": "What are transportation costs by zone?"},
+    {"label": "retailer_density", "question": "What's the retailer density by zone?"},
+    {"label": "seasonal_variation", "question": "How do seasonal patterns vary by zone?"},
+    {"label": "next_expansion", "question": "Which zone should we expand into next?"}
+  ],
+  "target_vs_actual": [
+    {"label": "variance_analysis", "question": "What's our variance between target and actual sales?"},
+    {"label": "missed_targets", "question": "Which regions missed their Q3 targets?"},
+    {"label": "over_performance", "question": "Which zones exceeded their targets?"},
+    {"label": "variance_reasons", "question": "What are the main reasons for target variances?"},
+    {"label": "forecast_accuracy", "question": "How accurate were our sales forecasts this quarter?"},
+    {"label": "target_adjustment", "question": "Should we adjust targets for next quarter?"},
+    {"label": "kpi_tracking", "question": "Are we on track for all KPIs?"},
+    {"label": "revised_forecast", "question": "What's our revised forecast given current performance?"},
+    {"label": "achievement_trend", "question": "Is our target achievement improving or declining?"},
+    {"label": "regional_variance", "question": "Which regions show the highest variances?"}
+  ],
+  "risk_anomaly": [
+    {"label": "revenue_dip", "question": "Why did sales dip significantly last week?"},
+    {"label": "customer_churn", "question": "What's causing recent customer churn?"},
+    {"label": "supplier_issues", "question": "Are there supply chain disruptions affecting us?"},
+    {"label": "market_threats", "question": "What market threats should we be aware of?"},
+    {"label": "anomaly_detection", "question": "Identify any anomalies in the sales data"}
+  ]
+}

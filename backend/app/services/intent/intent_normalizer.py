@@ -147,6 +147,33 @@ DIMENSION_MAP = {
     "route_code": "fact_secondary_sales.route_code",
     "route_name": "fact_secondary_sales.route_name",
 
+    # Star schema hierarchy dimensions (geo_* via dim_geography join)
+    "geo_zone":      "dim_geography.zone",
+    "geo_state":     "dim_geography.state",
+    "geo_city":      "dim_geography.city",
+    "geo_territory": "dim_geography.territory",
+    "geo_level":     "dim_geography.geo_level",
+
+    # Product hierarchy (prod_* via dim_product join)
+    "prod_category":     "dim_product.category",
+    "prod_sub_category": "dim_product.sub_category",
+    "prod_brand":        "dim_product.brand",
+    "prod_sku_code":     "dim_product.sku_code",
+
+    # Sales org hierarchy (org_* via dim_salesorg join)
+    "org_zsm": "dim_salesorg.zsm_name",
+    "org_asm": "dim_salesorg.asm_name",
+    "org_so":  "dim_salesorg.so_code",
+
+    # Period hierarchy (period_* via dim_period join)
+    "period_year":    "dim_period.fiscal_year",
+    "period_quarter": "dim_period.fiscal_quarter",
+    "period_month":   "dim_period.fiscal_month",
+    "period_week":    "dim_period.fiscal_week",
+
+    # Customer channel (secondary only, via dim_customer join)
+    "dim_channel_type": "dim_customer.channel_type",
+
     # Invoice
     "invoice_id": {
         "PRIMARY": "fact_primary_sales.invoice_id",

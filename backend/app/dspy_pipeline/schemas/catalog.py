@@ -38,13 +38,19 @@ CATALOG_METRICS = frozenset(m["name"] for m in METRICS_CATALOG)
 COMMON_DIMENSIONS = frozenset({
     "city", "state", "zone",
     "distributor_code", "distributor_name",
-    "brand", "category", "sub_category", "pack_size", "sku_code"
+    "brand", "category", "sub_category", "pack_size", "sku_code",
+    # Star schema hierarchy dimensions
+    "geo_zone", "geo_state", "geo_city", "geo_territory", "geo_level",
+    "prod_category", "prod_sub_category", "prod_brand", "prod_sku_code",
+    "org_zsm", "org_asm", "org_so",
+    "period_year", "period_quarter", "period_month", "period_week",
 })
 
 # Dimensions only available in SECONDARY scope
 SECONDARY_ONLY_DIMENSIONS = frozenset({
     "retailer_code", "retailer_name", "retailer_type",
-    "route_code", "route_name"
+    "route_code", "route_name",
+    "dim_channel_type",
 })
 
 # All valid dimensions

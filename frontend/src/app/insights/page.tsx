@@ -374,7 +374,7 @@ export default function InsightsPage() {
     ];
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen" style={{ backgroundColor: "#0F2044", backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)", backgroundSize: "28px 28px" }}>
 
             {/* Header */}
             <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
@@ -491,7 +491,7 @@ export default function InsightsPage() {
                 </div>
 
                 {unreadCount > 0 && (
-                    <button onClick={markAllRead} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-sky-600 transition-colors font-medium">
+                    <button onClick={markAllRead} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-sky-400 transition-colors font-medium">
                         <CheckCheck size={13} /> Mark all as read
                     </button>
                 )}
@@ -500,14 +500,14 @@ export default function InsightsPage() {
                 {loading ? (
                     <div className="flex flex-col items-center justify-center h-60 gap-4">
                         <div className="w-10 h-10 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-                        <p className="text-sm text-gray-400">Loading intelligence…</p>
+                        <p className="text-sm text-slate-300">Loading intelligence…</p>
                     </div>
                 ) : visible.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-52 gap-3">
-                        <div className="w-16 h-16 rounded-2xl bg-gray-100 border border-gray-200 flex items-center justify-center">
-                            <Lightbulb size={26} className="text-gray-300" />
+                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ backgroundColor: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                            <Lightbulb size={26} className="text-slate-400" />
                         </div>
-                        <p className="text-sm text-gray-400">No insights for this filter.</p>
+                        <p className="text-sm text-slate-300">No insights for this filter.</p>
                         <button onClick={handleGenerate} disabled={generating}
                             className="text-xs text-orange-500 hover:text-orange-600 flex items-center gap-1 font-medium transition-colors">
                             <Zap size={11} /> Generate new insights
@@ -522,7 +522,7 @@ export default function InsightsPage() {
                         )}
                         {pinned.map(i => <InsightCard key={i.insight_id} insight={i} onAction={onAction} onAskInChat={onAskInChat} onDrillDown={onDrillDown} />)}
                         {pinned.length > 0 && rest.length > 0 && (
-                            <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mt-1 flex items-center gap-1.5">
+                            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mt-1 flex items-center gap-1.5">
                                 <Activity size={11} /> Active
                             </p>
                         )}
@@ -530,7 +530,7 @@ export default function InsightsPage() {
                     </div>
                 )}
 
-                <div className="flex items-center justify-between text-[11px] text-gray-400 pt-2 border-t border-gray-100">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-white/10">
                     <span>{visible.length} insight{visible.length !== 1 ? "s" : ""} shown</span>
                     {insights[0]?.created_at && <span>Last updated {timeAgo(insights[0].created_at)}</span>}
                 </div>

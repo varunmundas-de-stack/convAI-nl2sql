@@ -154,13 +154,27 @@ except Exception as e:
 
 try:
     from app.security.router import router as auth_router
-    from app.chat_router import router as chat_router
-    from app.insights_router import router as insights_router
     app.include_router(auth_router)
+except Exception as e:
+    logger.warning(f"Auth router mount failed: {e}")
+
+try:
+    from app.chat_router import router as chat_router
     app.include_router(chat_router)
+except Exception as e:
+    logger.warning(f"Chat router mount failed: {e}")
+
+try:
+    from app.insights_router import router as insights_router
     app.include_router(insights_router)
 except Exception as e:
-    logger.warning(f"Auth/chat/insights router mount failed (non-fatal): {e}")
+    logger.warning(f"Insights router mount failed: {e}")
+
+try:
+    from app.questions_router import router as questions_router
+    app.include_router(questions_router)
+except Exception as e:
+    logger.warning(f"Questions router mount failed (non-fatal): {e}")
 
 # CORS middleware
 app.add_middleware(
@@ -189,6 +203,11 @@ class QueryRequest(BaseModel):
         default=None,
         description="Optional session ID for conversational context. Enables follow-up queries.",
         json_schema_extra={"example": "sess_abc123"}
+    )
+    clarification_answers: dict[str, Any] | None = Field(
+        default=None,
+        description="Answers to clarification questions from a previous response.",
+        json_schema_extra={"example": {"time_period": "last 30 days", "region": "North"}}
     )
 
 class ClarificationRequest(BaseModel):
@@ -259,7 +278,14 @@ def _persist_query_side_effects(
             cache_tier=cache_tier,
         )
         save_chat_message(session_id, user, "user", query)
-        
+
+        # Cache turn in Redis for fast retrieval by intent_router
+        try:
+            from app.services.redis_session import append_session_turn
+            append_session_turn(user.user_id, session_id, "user", query)
+        except Exception:
+            pass
+
         # Build assistant content: success messages show actual data, failures show static message
         if response_dict.get("refined_insights"):
             assistant_content = response_dict.get("refined_insights")
@@ -292,6 +318,12 @@ def _persist_query_side_effects(
                 "success": success,
             },
         )
+        # Cache assistant turn in Redis
+        try:
+            from app.services.redis_session import append_session_turn
+            append_session_turn(user.user_id, session_id, "assistant", assistant_content)
+        except Exception:
+            pass
     except Exception as e:
         logger.warning(f"Persistence side effects failed (non-fatal): {e}")
 
@@ -362,7 +394,7 @@ async def execute_query(
         tokens = _set_user_context(user)
         try:
             # Delegate to orchestrator (does ALL the work)
-            response = run_pipeline(query, session_id=session_id)
+            response = run_pipeline(query, session_id=session_id, _resolved_clarifications=request.clarification_answers or None)
         finally:
             _reset_user_context(tokens)
 

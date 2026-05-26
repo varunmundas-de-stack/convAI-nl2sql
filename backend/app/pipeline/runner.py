@@ -167,6 +167,10 @@ def initialize_pipeline():
         from app.services.tools import query_tool
         from app.services.tools import insights_tool
         from app.services.tools import cache_tool  # 3-tier cache + memory
+        from app.services.tools import intent_router_tool  # intent classifier
+
+        # Stage -1 — intent classifier (bypasses SQL pipeline for non-data queries)
+        register_step(intent_router_tool.step_intent_router)  # -1: intent routing
 
         # Stage 0 — cache + memory pre-checks (injected before existing Stage 1)
         register_step(cache_tool.step_golden_cache)        # 0a: Tier-1 FAISS golden cache

@@ -16,6 +16,18 @@ from typing import Any
 
 from app.models.intent import Intent, IntentType
 from datetime import date, timedelta
+from app.services.intent.intent_normalizer import DIMENSION_MAP as _DIMENSION_MAP
+
+def _build_valid_dimensions() -> frozenset[str]:
+    ids: set[str] = set()
+    for val in _DIMENSION_MAP.values():
+        if isinstance(val, str):
+            ids.add(val)
+        else:
+            ids.update(val.values())
+    return frozenset(ids)
+
+_VALID_DIMENSIONS: frozenset[str] = _build_valid_dimensions()
 
 
 # =============================================================================
@@ -60,6 +72,8 @@ def _build_dimensions(intent: Intent) -> list[str] | None:
     for dim in intent.group_by:
         if "." not in dim:
             raise ValueError(f"CubeQueryBuilder received non-normalized dimension: {dim}")
+        if dim not in _VALID_DIMENSIONS:
+            raise ValueError(f"CubeQueryBuilder received unknown cube dimension: {dim!r}")
         dims.append(dim)
 
     return dims

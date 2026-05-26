@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, KeyboardEvent } from "react";
 import {
     ArrowUp, LogOut, Plus, PanelLeftClose, PanelLeft, Trash2,
     Lightbulb, BarChart2, TrendingUp, Package, Target, Settings,
-    ChevronDown, Zap
+    ChevronDown, Zap, MapPin, X
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -25,9 +25,19 @@ export default function ChatWindow() {
     const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
     const [user, setUser] = useState<any>(null);
     const [loginError, setLoginError] = useState<string | null>(null);
-    const [loginForm, setLoginForm] = useState({ username: "nestle_admin", password: "admin123" });
+    const [loginForm, setLoginForm] = useState({ username: "", password: "" });
     const [sessions, setSessions] = useState<any[]>([]);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [scopeZone, setScopeZone] = useState<string | null>(null);
+    const [scopeCity, setScopeCity] = useState<string | null>(null);
+    const [zoneInput, setZoneInput] = useState("");
+    const [cityInput, setCityInput] = useState("");
+    const [editingScope, setEditingScope] = useState<"zone" | "city" | null>(null);
+    const [suggestions, setSuggestions] = useState<{ label: string; question: string; category: string }[]>([]);
+    const [suggestionsLoading, setSuggestionsLoading] = useState(true);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const zoneInputRef = useRef<HTMLInputElement>(null);
+    const cityInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const {
@@ -45,6 +55,15 @@ export default function ChatWindow() {
     useEffect(() => {
         if (!getAccessToken()) return;
         getMe().then((data) => { setUser(data.user); refreshUserData(); }).catch(() => logout());
+    }, []);
+
+    useEffect(() => {
+        const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+        fetch(`${API_BASE}/api/questions?category=all&limit=4`)
+            .then((r) => r.json())
+            .then((d) => { if (d.questions?.length) setSuggestions(d.questions); })
+            .catch(() => {})
+            .finally(() => setSuggestionsLoading(false));
     }, []);
 
     useEffect(() => {
@@ -80,6 +99,44 @@ export default function ChatWindow() {
         return () => clearInterval(interval);
     }, [sessionId]);
 
+    useEffect(() => {
+        if (editingScope === "zone") zoneInputRef.current?.focus();
+        if (editingScope === "city") cityInputRef.current?.focus();
+    }, [editingScope]);
+
+    function commitZone() {
+        const v = zoneInput.trim();
+        if (v) { setScopeZone(v); setScopeCity(null); setCityInput(""); }
+        setEditingScope(null);
+        setZoneInput("");
+    }
+
+    function commitCity() {
+        const v = cityInput.trim();
+        if (v) setScopeCity(v);
+        setEditingScope(null);
+        setCityInput("");
+    }
+
+    function resetToNational() {
+        setScopeZone(null); setScopeCity(null);
+        setZoneInput(""); setCityInput(""); setEditingScope(null);
+    }
+
+    function buildScopePrefix(): string {
+        if (!scopeZone && !scopeCity) return "";
+        const parts: string[] = [];
+        if (scopeZone) parts.push(`Zone: ${scopeZone}`);
+        if (scopeCity) parts.push(`City: ${scopeCity}`);
+        return `Filter results for: ${parts.join(", ")}.`;
+    }
+
+    function onSendDebounced() {
+        if (debounceRef.current) return; // already pending
+        debounceRef.current = setTimeout(() => { debounceRef.current = null; }, 300);
+        onSend();
+    }
+
     async function onSend() {
         if (!input.trim() || isLoading || !isBackendAvailable || !user) return;
         const userInput = input.trim();
@@ -96,7 +153,9 @@ export default function ChatWindow() {
                     result = await clarify({ request_id: backendResponse.request_id, answers });
                 } else throw new Error("Missing backend response for clarification");
             } else {
-                result = await sendQuery(userInput);
+                const prefix = buildScopePrefix();
+                const queryWithScope = prefix ? `${prefix} ${userInput}` : userInput;
+                result = await sendQuery(queryWithScope);
                 if (result.sessionId) setSessionId(result.sessionId);
             }
             handleResponse(result.response, result.raw);
@@ -191,7 +250,7 @@ export default function ChatWindow() {
     function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            onSend();
+            onSendDebounced();
             requestAnimationFrame(() => { if (e.target instanceof HTMLTextAreaElement) e.target.style.height = "auto"; });
         }
     }
@@ -204,31 +263,50 @@ export default function ChatWindow() {
     if (!user) {
         return (
             <div className="flex min-h-screen">
-                {/* Left: animated gradient mesh */}
-                <div className="hidden lg:flex lg:w-1/2 gradient-mesh flex-col items-center justify-center p-12 relative overflow-hidden">
-                    {/* Subtle grid overlay */}
-                    <div className="absolute inset-0 opacity-10"
-                        style={{ backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)", backgroundSize: "32px 32px" }} />
-                    <div className="relative z-10 text-center text-white">
-                        <div className="flex items-center justify-center gap-2 mb-6">
-                            <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-                                <Zap size={20} className="text-white" />
-                            </div>
-                            <span className="text-2xl font-bold tracking-tight">CPG Analytics</span>
-                        </div>
-                        <h2 className="text-4xl font-extrabold leading-tight mb-4">
-                            Ask your data<br />anything.
-                        </h2>
-                        <p className="text-white/80 text-lg max-w-xs mx-auto">
-                            Instant SQL insights for sales, SKUs, zones &amp; targets — no code required.
+                {/* Left: editorial magazine panel */}
+                <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-14 relative overflow-hidden"
+                    style={{ backgroundColor: "#0A1628" }}>
+
+                    {/* Geometric SVG accent — top right */}
+                    <svg className="absolute top-0 right-0 w-72 h-72 opacity-20" viewBox="0 0 288 288" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="240" cy="48" r="120" stroke="white" strokeWidth="1"/>
+                        <circle cx="240" cy="48" r="80" stroke="#F97316" strokeWidth="0.8"/>
+                        <circle cx="240" cy="48" r="40" stroke="white" strokeWidth="0.6"/>
+                        <line x1="120" y1="0" x2="288" y2="168" stroke="white" strokeWidth="0.5"/>
+                        <line x1="160" y1="0" x2="288" y2="128" stroke="#F97316" strokeWidth="0.4"/>
+                        <line x1="200" y1="0" x2="288" y2="88" stroke="white" strokeWidth="0.3"/>
+                    </svg>
+
+                    {/* Top label */}
+                    <div className="relative z-10">
+                        <span className="text-xs font-bold tracking-[0.2em] uppercase" style={{ color: "#F97316" }}>
+                            Enterprise CPG Intelligence
+                        </span>
+                    </div>
+
+                    {/* Center: massive headline */}
+                    <div className="relative z-10 flex-1 flex flex-col justify-center">
+                        <h1 className="font-black text-white leading-[0.9] mb-6"
+                            style={{ fontSize: "clamp(64px, 7vw, 88px)", fontWeight: 900, letterSpacing: "-0.03em" }}>
+                            CPG<br />Analytics
+                        </h1>
+                        <p className="text-xl font-semibold mb-2" style={{ color: "#F97316" }}>
+                            Ask your data anything.
                         </p>
-                        <div className="mt-10 grid grid-cols-2 gap-3 max-w-sm mx-auto text-sm">
-                            {["Net Sales by Zone", "Top SKU Revenue", "Target vs Actual", "Region Trends"].map((label) => (
-                                <div key={label} className="bg-white/15 backdrop-blur-sm rounded-xl px-4 py-3 text-left font-medium border border-white/20">
-                                    {label}
-                                </div>
-                            ))}
-                        </div>
+                        <p className="text-sm" style={{ color: "#94A3B8" }}>
+                            Instant SQL insights for sales, SKUs,<br />zones &amp; targets — no code required.
+                        </p>
+                    </div>
+
+                    {/* Bottom: feature pills */}
+                    <div className="relative z-10 flex flex-wrap gap-2">
+                        {["Net Sales", "SKU Trends", "Zone Drill-down", "AI Insights"].map((label) => (
+                            <span key={label}
+                                className="text-xs font-semibold text-white px-4 py-2 rounded-full border"
+                                style={{ backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.15)" }}>
+                                {label}
+                            </span>
+                        ))}
                     </div>
                 </div>
 
@@ -299,32 +377,32 @@ export default function ChatWindow() {
     }, {});
 
     return (
-        <div className="flex h-screen bg-gray-50 overflow-hidden">
+        <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#0F2044", backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)", backgroundSize: "28px 28px" }}>
 
             {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
             {isSidebarOpen && (
-                <aside className="hidden lg:flex flex-col w-72 bg-white border-r border-gray-200 shrink-0 transition-all duration-200">
+                <aside className="hidden lg:flex flex-col w-72 shrink-0 transition-all duration-200" style={{ backgroundColor: "#0F2044", borderRight: "1px solid rgba(255,255,255,0.1)" }}>
                     {/* Logo row */}
-                    <div className="px-5 py-5 flex items-center justify-between border-b border-gray-100">
+                    <div className="px-5 py-5 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                         <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 gradient-mesh rounded-lg flex items-center justify-center">
                                 <Zap size={15} className="text-white" />
                             </div>
                             <div>
-                                <div className="text-sm font-bold text-gray-900 leading-none">CPG Analytics</div>
-                                <div className="text-[10px] text-gray-400 mt-0.5">NL2SQL Workspace</div>
+                                <div className="text-sm font-bold text-white leading-none">CPG Analytics</div>
+                                <div className="text-[10px] mt-0.5" style={{ color: "#94A3B8" }}>NL2SQL Workspace</div>
                             </div>
                         </div>
-                        <button onClick={() => setIsSidebarOpen(false)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded">
+                        <button onClick={() => setIsSidebarOpen(false)} className="p-1 rounded transition-colors" style={{ color: "#94A3B8" }}>
                             <PanelLeftClose size={16} />
                         </button>
                     </div>
 
                     {/* Tenant pill */}
-                    <div className="px-4 py-3 border-b border-gray-100">
-                        <button className="w-full flex items-center justify-between bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors">
+                    <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                        <button className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors" style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
                             <span className="truncate">{user.client_name || "Organisation"}</span>
-                            <ChevronDown size={14} className="text-gray-400 shrink-0 ml-1" />
+                            <ChevronDown size={14} className="shrink-0 ml-1" style={{ color: "#94A3B8" }} />
                         </button>
                     </div>
 
@@ -337,26 +415,31 @@ export default function ChatWindow() {
 
                     {/* Conversations */}
                     <div className="flex-1 overflow-y-auto px-3 pb-4">
-                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-2">Conversations</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider px-2 mb-2" style={{ color: "#64748B" }}>Conversations</div>
                         {Object.entries(groupedSessions).map(([group, groupSessions]) => (
                             <div key={group} className="mb-4">
-                                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1">{group}</div>
+                                <div className="text-[10px] font-semibold uppercase tracking-wider px-2 mb-1" style={{ color: "#64748B" }}>{group}</div>
                                 <div className="space-y-0.5">
                                     {groupSessions.map((s) => (
                                         <div key={s.session_id} className="flex items-center gap-1 group">
                                             <button
                                                 onClick={() => loadSession(s.session_id)}
-                                                className={`flex-1 text-left text-sm px-3 py-2 rounded-lg truncate transition-colors ${
-                                                    sessionId === s.session_id
-                                                        ? "nav-active rounded-lg"
-                                                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                                                }`}
+                                                className="flex-1 text-left text-sm px-3 py-2 rounded-lg truncate transition-colors"
+                                                style={sessionId === s.session_id
+                                                    ? { backgroundColor: "#1E3A5F", color: "#ffffff", borderLeft: "3px solid #F97316", paddingLeft: "9px" }
+                                                    : { color: "#CBD5E1" }
+                                                }
+                                                onMouseEnter={(e) => { if (sessionId !== s.session_id) (e.currentTarget as HTMLElement).style.backgroundColor = "#1E3A5F"; }}
+                                                onMouseLeave={(e) => { if (sessionId !== s.session_id) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                                             >
                                                 {s.title || "New conversation"}
                                             </button>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.session_id); }}
-                                                className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                                                className="p-1.5 rounded opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                                                style={{ color: "#64748B" }}
+                                                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f87171"; }}
+                                                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#64748B"; }}
                                             >
                                                 <Trash2 size={13} />
                                             </button>
@@ -366,20 +449,20 @@ export default function ChatWindow() {
                             </div>
                         ))}
                         {sessions.length === 0 && (
-                            <p className="text-xs text-gray-400 px-2 py-2">No conversations yet.</p>
+                            <p className="text-xs px-2 py-2" style={{ color: "#64748B" }}>No conversations yet.</p>
                         )}
                     </div>
 
                     {/* User footer */}
-                    <div className="border-t border-gray-100 px-4 py-3 flex items-center gap-3">
+                    <div className="px-4 py-3 flex items-center gap-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-indigo-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
                             {(user.full_name || user.username || "U")[0].toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-gray-900 truncate">{user.full_name || user.username}</div>
-                            <div className="text-[11px] text-gray-400 truncate">{user.role}</div>
+                            <div className="text-sm font-semibold text-white truncate">{user.full_name || user.username}</div>
+                            <div className="text-[11px] truncate" style={{ color: "#94A3B8" }}>{user.role}</div>
                         </div>
-                        <button onClick={handleLogout} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors" title="Sign out">
+                        <button onClick={handleLogout} className="p-1.5 rounded transition-colors" style={{ color: "#94A3B8" }} title="Sign out">
                             <LogOut size={15} />
                         </button>
                     </div>
@@ -424,43 +507,63 @@ export default function ChatWindow() {
                 </header>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center">
+                <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center" style={{ backgroundColor: "transparent" }}>
                     <div className="w-full max-w-4xl flex flex-col h-full">
 
                         {/* Empty state hero */}
                         {messages.length === 0 && (
-                            <div className="flex flex-col items-center justify-center h-full dot-grid rounded-3xl py-16 px-6 relative">
-                                <div className="absolute inset-0 rounded-3xl bg-gradient-to-b from-white/60 to-white/90" />
+                            <div className="flex flex-col items-center justify-center h-full rounded-3xl py-16 px-6 relative"
+                                style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                                 <div className="relative z-10 text-center mb-10">
-                                    <h2 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-3">
+                                    <h2 className="text-4xl font-extrabold tracking-tight mb-3" style={{ color: "#ffffff" }}>
                                         What do you want to know?
                                     </h2>
-                                    <p className="text-gray-500 text-lg">
+                                    <p className="text-lg" style={{ color: "#94A3B8" }}>
                                         Ask anything about your CPG sales, SKUs, zones, and targets
                                     </p>
                                 </div>
                                 {/* Suggestion cards 2x2 */}
                                 <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
-                                    {[
-                                        { icon: <BarChart2 size={20} className="text-orange-500" />, label: "Net Sales by Zone", desc: "Show net sales breakdown for last 30 days" },
-                                        { icon: <TrendingUp size={20} className="text-indigo-500" />, label: "Top SKU Revenue", desc: "Top 5 products by revenue this month" },
-                                        { icon: <Package size={20} className="text-emerald-500" />, label: "SKU Growth", desc: "Which SKUs had the highest growth last quarter?" },
-                                        { icon: <Target size={20} className="text-rose-500" />, label: "Target vs Actual", desc: "Sales performance by region vs target" },
-                                    ].map((s) => (
-                                        <button
-                                            key={s.label}
-                                            onClick={() => setInput(s.desc)}
-                                            className="card card-hover text-left p-4 flex gap-3 items-start hover:border-orange-200 group"
-                                        >
-                                            <div className="shrink-0 w-9 h-9 bg-gray-50 rounded-xl flex items-center justify-center group-hover:bg-orange-50 transition-colors">
-                                                {s.icon}
+                                    {suggestionsLoading ? (
+                                        [0, 1, 2, 3].map((i) => (
+                                            <div key={i} className="card p-4 flex gap-3 items-start animate-pulse">
+                                                <div className="shrink-0 w-9 h-9 bg-gray-200 rounded-xl" />
+                                                <div className="flex-1 space-y-2 py-1">
+                                                    <div className="h-3 bg-gray-200 rounded w-2/3" />
+                                                    <div className="h-3 bg-gray-200 rounded w-full" />
+                                                    <div className="h-3 bg-gray-200 rounded w-4/5" />
+                                                </div>
                                             </div>
-                                            <div>
-                                                <div className="font-semibold text-gray-900 text-sm">{s.label}</div>
-                                                <div className="text-xs text-gray-500 mt-0.5">{s.desc}</div>
-                                            </div>
-                                        </button>
-                                    ))}
+                                        ))
+                                    ) : (suggestions.length > 0 ? suggestions : [
+                                        { label: "Net Sales by Zone", question: "Show net sales breakdown for last 30 days", category: "sales_performance" },
+                                        { label: "Top SKU Revenue", question: "Top 5 products by revenue this month", category: "sku_product" },
+                                        { label: "SKU Growth", question: "Which SKUs had the highest growth last quarter?", category: "sku_product" },
+                                        { label: "Target vs Actual", question: "Sales performance by region vs target", category: "target_vs_actual" },
+                                    ]).map((s) => {
+                                        const iconMap: Record<string, React.ReactNode> = {
+                                            sales_performance: <BarChart2 size={20} className="text-orange-500" />,
+                                            sku_product: <Package size={20} className="text-emerald-500" />,
+                                            regional_zone: <MapPin size={20} className="text-indigo-500" />,
+                                            target_vs_actual: <Target size={20} className="text-rose-500" />,
+                                            risk_anomaly: <TrendingUp size={20} className="text-amber-500" />,
+                                        };
+                                        return (
+                                            <button
+                                                key={s.label}
+                                                onClick={() => setInput(s.question)}
+                                                className="card card-hover text-left p-4 flex gap-3 items-start hover:border-orange-200 group"
+                                            >
+                                                <div className="shrink-0 w-9 h-9 bg-gray-50 rounded-xl flex items-center justify-center group-hover:bg-orange-50 transition-colors">
+                                                    {iconMap[s.category] ?? <BarChart2 size={20} className="text-orange-500" />}
+                                                </div>
+                                                <div>
+                                                    <div className="font-semibold text-gray-900 text-sm">{s.label}</div>
+                                                    <div className="text-xs text-gray-500 mt-0.5">{s.question}</div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
@@ -510,8 +613,92 @@ export default function ChatWindow() {
                 {/* Floating input */}
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-3xl"
                     style={{ left: isSidebarOpen ? "calc(50% + 144px)" : "50%" }}>
-                    <div className={`flex items-end gap-2 bg-white border rounded-2xl px-4 py-2.5 shadow-lg transition-all duration-150 ${
-                        !isBackendAvailable ? "border-red-200" : "border-gray-200 focus-within:border-orange-300 focus-within:shadow-[0_0_0_3px_rgba(249,115,22,0.1)]"
+
+                    {/* Scope breadcrumb bar */}
+                    <div className="flex items-center gap-1.5 mb-2 px-1 flex-wrap">
+                        <MapPin size={12} style={{ color: "#94A3B8" }} className="shrink-0" />
+                        {/* National */}
+                        <button
+                            onClick={resetToNational}
+                            className="text-xs font-medium px-2 py-0.5 rounded-full transition-colors"
+                            style={!scopeZone
+                                ? { backgroundColor: "#F97316", color: "#fff" }
+                                : { color: "#94A3B8", backgroundColor: "rgba(255,255,255,0.1)" }}
+                        >
+                            National
+                        </button>
+
+                        {/* Zone level */}
+                        <span style={{ color: "#64748B" }} className="text-xs">›</span>
+                        {editingScope === "zone" ? (
+                            <input
+                                ref={zoneInputRef}
+                                value={zoneInput}
+                                onChange={(e) => setZoneInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") commitZone();
+                                    if (e.key === "Escape") { setEditingScope(null); setZoneInput(""); }
+                                }}
+                                onBlur={commitZone}
+                                placeholder="Type zone…"
+                                className="text-xs px-2 py-0.5 rounded-full outline-none border"
+                                style={{ backgroundColor: "#fff", color: "#0F2044", borderColor: "#F97316", width: "110px" }}
+                            />
+                        ) : (
+                            <button
+                                onClick={() => { setZoneInput(scopeZone || ""); setEditingScope("zone"); }}
+                                className="text-xs font-medium px-2 py-0.5 rounded-full transition-colors"
+                                style={scopeZone
+                                    ? { backgroundColor: "#F97316", color: "#fff" }
+                                    : { color: "#94A3B8", backgroundColor: "rgba(255,255,255,0.1)", border: "1px dashed rgba(255,255,255,0.2)" }}
+                            >
+                                {scopeZone || "+ Zone"}
+                            </button>
+                        )}
+                        {scopeZone && (
+                            <button onClick={() => { setScopeZone(null); setScopeCity(null); }} style={{ color: "#94A3B8" }}>
+                                <X size={11} />
+                            </button>
+                        )}
+
+                        {/* City level — only shown when zone is set */}
+                        {scopeZone && (<>
+                            <span style={{ color: "#64748B" }} className="text-xs">›</span>
+                            {editingScope === "city" ? (
+                                <input
+                                    ref={cityInputRef}
+                                    value={cityInput}
+                                    onChange={(e) => setCityInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") commitCity();
+                                        if (e.key === "Escape") { setEditingScope(null); setCityInput(""); }
+                                    }}
+                                    onBlur={commitCity}
+                                    placeholder="Type city…"
+                                    className="text-xs px-2 py-0.5 rounded-full outline-none border"
+                                    style={{ backgroundColor: "#fff", color: "#0F2044", borderColor: "#F97316", width: "110px" }}
+                                />
+                            ) : (
+                                <button
+                                    onClick={() => { setCityInput(scopeCity || ""); setEditingScope("city"); }}
+                                    className="text-xs font-medium px-2 py-0.5 rounded-full transition-colors"
+                                    style={scopeCity
+                                        ? { backgroundColor: "#F97316", color: "#fff" }
+                                        : { color: "#94A3B8", backgroundColor: "rgba(255,255,255,0.1)", border: "1px dashed rgba(255,255,255,0.2)" }}
+                                >
+                                    {scopeCity || "+ City"}
+                                </button>
+                            )}
+                            {scopeCity && (
+                                <button onClick={() => setScopeCity(null)} style={{ color: "#94A3B8" }}>
+                                    <X size={11} />
+                                </button>
+                            )}
+                        </>)}
+                    </div>
+
+                    <div className={`flex items-end gap-2 bg-white border rounded-2xl px-4 py-2.5 shadow-2xl transition-all duration-150 ${
+                        !isBackendAvailable ? "border-red-200" : "border-white/20 focus-within:border-orange-300 focus-within:shadow-[0_0_0_3px_rgba(249,115,22,0.15)]"
                     }`}>
                         <textarea
                             className="flex-1 max-h-40 outline-none border-none resize-none bg-transparent text-gray-900 text-sm leading-relaxed placeholder:text-gray-400 disabled:opacity-40 disabled:cursor-not-allowed overflow-y-auto"
@@ -532,7 +719,7 @@ export default function ChatWindow() {
                             disabled={!isBackendAvailable || isLoading || isClarificationWithButtons}
                         />
                         <button
-                            onClick={() => { onSend(); const ta = document.querySelector("textarea"); if (ta) ta.style.height = "auto"; }}
+                            onClick={() => { onSendDebounced(); const ta = document.querySelector("textarea"); if (ta) ta.style.height = "auto"; }}
                             disabled={!isBackendAvailable || isLoading || isClarificationWithButtons || !input.trim()}
                             className="shrink-0 p-2 rounded-xl flex items-center justify-center text-white btn-primary disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
                         >

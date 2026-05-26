@@ -159,6 +159,8 @@ DIMENSION_MAP = {
     "prod_sub_category": "dim_product.sub_category",
     "prod_brand":        "dim_product.brand",
     "prod_sku_code":     "dim_product.sku_code",
+    "prod_pack_size":    "dim_product.pack_size",
+    "prod_product_desc": "dim_product.product_desc",
 
     # Sales org hierarchy (org_* via dim_salesorg join)
     "org_zsm": "dim_salesorg.zsm_name",

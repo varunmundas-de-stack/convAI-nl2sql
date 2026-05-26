@@ -17,7 +17,7 @@ from typing import Any
 from app.models.intent import Intent, IntentType
 from datetime import date, timedelta
 from app.services.intent.intent_normalizer import DIMENSION_MAP as _DIMENSION_MAP
-
+'''
 def _build_valid_dimensions() -> frozenset[str]:
     ids: set[str] = set()
     for val in _DIMENSION_MAP.values():
@@ -25,6 +25,22 @@ def _build_valid_dimensions() -> frozenset[str]:
             ids.add(val)
         else:
             ids.update(val.values())
+    return frozenset(ids)
+'''
+##newly added
+def _build_valid_dimensions() -> frozenset[str]:
+    ids: set[str] = set()
+    for val in _DIMENSION_MAP.values():
+        if isinstance(val, str):
+            ids.add(val)
+        else:
+            ids.update(val.values())
+    # Also add all values as passthroughs
+    ids.update(_DIMENSION_MAP.values() 
+               if all(isinstance(v, str) 
+               for v in _DIMENSION_MAP.values()) 
+               else [v for v in _DIMENSION_MAP.values() 
+               if isinstance(v, str)])
     return frozenset(ids)
 
 _VALID_DIMENSIONS: frozenset[str] = _build_valid_dimensions()

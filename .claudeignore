@@ -1,0 +1,38 @@
+# Python environments
+.venv/
+venv*/
+__pycache__/
+*.pyc
+*.pyo
+
+# Common large folders irrelevant to Claude Code tasks
+node_modules/
+dist/
+build/
+*.egg-info/
+
+# Outputs and logs
+outputs/
+logs/
+cost_log.jsonl
+*.pid
+
+# Screenshots and media
+screen_shots/
+screenshots/
+*.png
+*.jpg
+*.mp4
+
+# Secrets
+.env
+*.pem
+*.key
+*.p12
+
+# Git
+.git/
+
+# IDE
+.vscode/
+.idea/

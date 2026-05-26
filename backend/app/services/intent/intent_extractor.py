@@ -394,7 +394,8 @@ def extract_intent(
             missing_fields=missing_fields,
             clarification_message=clarification_message,
             partial_intent=partial_intent,
-            allowed_values=list(set(all_options))  # Remove duplicates
+            ##allowed_values=sorted([v for v in set(all_options) if . not in v])  # Remove duplicates + hide technical paths
+            allowed_values=sorted([v for v in set(all_options) if "." not in v])  # Remove duplicates + hide technical paths
         ) from e
 
     except ImportError as e:

@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Claude Cost Monitor",
+      "type": "shell",
+      "command": "python claude_cost_monitor.py --limit 10.50 --project nl2sql",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "silent",
+        "group": "monitors"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

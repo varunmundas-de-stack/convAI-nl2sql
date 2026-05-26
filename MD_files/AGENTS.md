@@ -14,7 +14,7 @@ This repository contains an NL2SQL analytics app with a FastAPI backend, Next.js
 
 ## Build, Test, and Development Commands
 
-- `.\start-dev.ps1` starts Docker services, populates PostgreSQL, and runs FastAPI.
+- `bash start-dev.sh` starts Docker services, populates PostgreSQL, and runs FastAPI.
 - `docker compose up -d` starts PostgreSQL, Redis, and Cube.js without the backend process.
 - `venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` runs the backend from `backend/`.
 - `pytest` runs backend tests using `pytest.ini`.

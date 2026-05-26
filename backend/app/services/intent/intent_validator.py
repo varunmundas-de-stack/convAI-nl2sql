@@ -236,7 +236,7 @@ class IntentValidator:
             if first_missing == "metrics":
                 allowed_values = list(self.catalog.raw_catalog().get("metrics", {}).keys())
             elif first_missing == "group_by":
-                allowed_values = list(self.catalog.raw_catalog().get("dimensions", {}).keys())
+                allowed_values = [v for v in self.catalog.raw_catalog().get("dimensions", {}).keys() if "." not in v]
             elif first_missing == "time.granularity":
                 allowed_values = ["day", "week", "month", "quarter", "year"]
             elif first_missing == "post_processing.comparison.comparison_window":

@@ -95,7 +95,11 @@ class IntentValidator:
         
         # --- Validate group_by dimensions ---
         if intent.group_by:
-            self._validate_dimensions(intent.group_by, context="group_by")
+            try:
+                self._validate_dimensions(intent.group_by, context="group_by")
+            except UnknownDimensionError:
+                if "group_by" not in missing_fields:
+                    missing_fields.append("group_by")
         
         # --- Validate time spec if present ---
         if intent.time is not None:
@@ -236,7 +240,19 @@ class IntentValidator:
             if first_missing == "metrics":
                 allowed_values = list(self.catalog.raw_catalog().get("metrics", {}).keys())
             elif first_missing == "group_by":
-                allowed_values = [v for v in self.catalog.raw_catalog().get("dimensions", {}).keys() if "." not in v]
+                # Curated display-friendly dimension list for clarification chips
+                _DISPLAY_DIMENSIONS = [
+                    "zone", "state", "city",
+                    "brand", "category", "sub_category", "sku_code", "pack_size",
+                    "distributor_name", "distributor_code",
+                    "zsm_name", "asm_name", "so_name",
+                    "retailer_name", "retailer_type",
+                    "route_name", "salesrep_name",
+                ]
+                allowed_values = [
+                    v for v in _DISPLAY_DIMENSIONS
+                    if self.catalog.is_valid_dimension(v)
+                ]
             elif first_missing == "time.granularity":
                 allowed_values = ["day", "week", "month", "quarter", "year"]
             elif first_missing == "post_processing.comparison.comparison_window":

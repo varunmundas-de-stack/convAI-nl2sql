@@ -256,11 +256,22 @@ def normalize_intent(raw_intent: dict) -> dict:
         # LLM or tests might sometimes pass a string instead of a list
         if isinstance(intent["group_by"], str):
             intent["group_by"] = [intent["group_by"]]
-            
+        '''    
         intent["group_by"] = [
             resolve_dimension(dim, scope)
             for dim in intent["group_by"]
-        ]
+            ]
+        '''
+        # NEW
+        resolved_dims = []
+        for dim in intent["group_by"]:
+            try:
+                resolved_dims.append(resolve_dimension(dim, scope))
+            except UnknownDimensionError:
+                logger.warning(f"Stripping unknown group_by dim '{dim}' — will trigger clarification")
+        resolved_dims = resolved_dims or None  # empty → None → validator fires clarification
+        intent["group_by"] = resolved_dims
+        
 
     # -------------------------------------------------------------------------
     # Filters

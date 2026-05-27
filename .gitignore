@@ -44,3 +44,10 @@ CLAUDE.md
 *.old
 *.orig
 screen_shots/
+
+# Claude Cost Monitor (separate project)
+claude_cost_monitor.py
+claude_costs.db
+cost_log.jsonl
+get-api-key.ps1
+*.jsonl

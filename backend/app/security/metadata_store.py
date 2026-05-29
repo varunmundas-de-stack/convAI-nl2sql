@@ -237,40 +237,42 @@ def update_session(user: UserContext, session_id: str, title: str | None, is_act
 
 
 def list_insights(user: UserContext, limit: int = 20) -> list[dict[str, Any]]:
-    role = (user.role or "").upper()
-    params: list[Any] = [user.client_id, user.user_id]
-    scope = ["i.hierarchy_level IN ('all', 'NSM', 'ZSM', 'ASM', 'SO')"]
-    if role == "SO" and user.salesrep_code:
-        scope.append("(i.salesrep_code IS NULL OR i.salesrep_code = %s)")
-        params.append(user.salesrep_code)
-    if role in ("SO", "ASM") and user.asm_code:
-        scope.append("(i.asm_code IS NULL OR i.asm_code = %s)")
-        params.append(user.asm_code)
-    if role in ("SO", "ASM", "ZSM") and user.zsm_code:
-        scope.append("(i.zsm_code IS NULL OR i.zsm_code = %s)")
-        params.append(user.zsm_code)
-    params.append(limit)
+    """
+    Returns dynamic role-aware insights generated directly from Postgres,
+    merged with any pinned/active DB insights.
+    """
+    from app.insight_generator import generate_insights
+    dynamic = generate_insights(user.schema_name, user.role, user)
 
-    with get_conn() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                f"""
-                SELECT i.*,
-                       CASE WHEN r.insight_id IS NULL THEN FALSE ELSE TRUE END AS is_read
-                FROM app_meta.insights i
-                LEFT JOIN app_meta.insight_reads r
-                  ON r.insight_id = i.insight_id AND r.user_id = %s
-                WHERE i.tenant_id = %s
-                  AND i.is_active = TRUE
-                  AND (i.expires_at IS NULL OR i.expires_at > CURRENT_TIMESTAMP)
-                  AND {' AND '.join(scope)}
-                ORDER BY CASE i.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
-                         i.created_at DESC
-                LIMIT %s
-                """,
-                [params[1], params[0], *params[2:]],
-            )
-            return [dict(r) for r in cur.fetchall()]
+    # Also pull any non-seed pinned DB insights (watch_id not null)
+    db_insights: list[dict] = []
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT i.*,
+                           CASE WHEN r.insight_id IS NULL THEN FALSE ELSE TRUE END AS is_read
+                    FROM app_meta.insights i
+                    LEFT JOIN app_meta.insight_reads r
+                      ON r.insight_id = i.insight_id AND r.user_id = %s
+                    WHERE i.tenant_id = %s
+                      AND i.is_active = TRUE
+                      AND i.watch_id IS NOT NULL
+                      AND (i.expires_at IS NULL OR i.expires_at > CURRENT_TIMESTAMP)
+                    ORDER BY i.created_at DESC
+                    LIMIT 5
+                    """,
+                    [user.user_id, user.client_id],
+                )
+                db_insights = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        pass
+
+    merged = dynamic + db_insights
+    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    merged.sort(key=lambda x: priority_order.get(str(x.get("priority", "low")), 9))
+    return merged[:limit]
 
 
 def mark_insight_read(user: UserContext, insight_id: str) -> None:

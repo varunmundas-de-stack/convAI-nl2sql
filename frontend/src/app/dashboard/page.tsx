@@ -12,7 +12,7 @@ import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     AreaChart, Area, CartesianGrid
 } from "recharts";
-import { sendQuery, getAccessToken, login, logout, getMe } from "@/services/api";
+import { getDashboardKpis, sendQuery, getAccessToken, login, logout, getMe } from "@/services/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -273,59 +273,76 @@ export default function DashboardPage() {
 
     // ── Data fetchers ────────────────────────────────────────────────────────
 
-    const fetchKpis = useCallback(async () => {
-        // Hardcoded real values from client_nestle secondary sales (last 30 days)
-        setNetSales({ value: "₹54.7Cr", raw: 547736857, trend: 12.4, positive: true, loading: false, error: false });
-        setActiveSKUs({ value: "87", raw: 87, trend: 4.1, positive: true, loading: false, error: false });
-        setZoneCoverage({ value: "6 Zones", raw: 6, trend: 2.5, positive: true, loading: false, error: false });
-        setTargetVsActual({ value: "83%", raw: 83, trend: 3.2, positive: true, loading: false, error: false });
-    }, []);
+    // ── KPI helpers ──────────────────────────────────────────────────────────
 
-    const fetchTrend = useCallback(async () => {
+    // ── Fast dashboard fetch — single /dashboard/kpis call, no NL pipeline ─────
+
+    const fetchAllDashboard = useCallback(async () => {
         if (!user) return;
-        setTrendLoading(true);
-        // Hardcoded trend data based on client_nestle secondary sales pattern
-        const base7D = [
-            { label: "05-20", value: 48200000 }, { label: "05-21", value: 51300000 },
-            { label: "05-22", value: 67800000 }, { label: "05-23", value: 59400000 },
-            { label: "05-24", value: 72100000 }, { label: "05-25", value: 63500000 },
-            { label: "05-26", value: 55900000 },
-        ];
-        const base30D = Array.from({ length: 30 }, (_, i) => ({
-            label: `04-${String(i + 27).padStart(2, "0")}`,
-            value: Math.floor(45000000 + Math.random() * 35000000),
-        }));
-        const base90D = Array.from({ length: 90 }, (_, i) => ({
-            label: `0${Math.floor(i/30)+2}-${String((i%30)+1).padStart(2,"0")}`,
-            value: Math.floor(40000000 + Math.random() * 40000000),
-        }));
-        const dataMap: Record<string, { label: string; value: number }[]> = {
-            "7D": base7D, "30D": base30D, "90D": base90D,
-        };
-        setTrendData(dataMap[trendPeriod] || base7D);
-        setTrendLoading(false);
+        try {
+            const d = await getDashboardKpis();
+
+            // KPIs
+            const k = d.kpis;
+            setNetSales({ value: k.net_sales.value, raw: k.net_sales.raw,
+                trend: k.net_sales.trend, positive: k.net_sales.positive, loading: false, error: false });
+            setActiveSKUs({ value: k.active_skus.value, raw: k.active_skus.raw,
+                trend: k.active_skus.trend, positive: k.active_skus.positive, loading: false, error: false });
+            setZoneCoverage({ value: k.zone_coverage.value, raw: k.zone_coverage.raw,
+                trend: k.zone_coverage.trend, positive: k.zone_coverage.positive, loading: false, error: false });
+            setTargetVsActual({ value: k.target_vs_actual.value, raw: k.target_vs_actual.raw,
+                trend: k.target_vs_actual.trend, positive: k.target_vs_actual.positive, loading: false, error: false });
+
+            // Always use fast-endpoint trend on initial load
+            if (d.trend_7d.length > 0) {
+                setTrendData(d.trend_7d);
+                setTrendLoading(false);
+            } else {
+                setTrendLoading(false);
+            }
+
+            // Top products
+            if (d.top_brands.length > 0) setTopProducts(d.top_brands);
+            setTopProductsLoading(false);
+
+        } catch (e) {
+            // Mark all KPIs as error
+            const errKpi = { value: "—", raw: 0, trend: 0, positive: true, loading: false, error: true };
+            setNetSales(errKpi); setActiveSKUs(errKpi);
+            setZoneCoverage(errKpi); setTargetVsActual(errKpi);
+            setTrendLoading(false); setTopProductsLoading(false);
+        }
     }, [user, trendPeriod]);
 
-    const fetchTopProducts = useCallback(async () => {
+    // Period-aware trend fetch — fires when user switches tabs (needs API)
+    const fetchTrend = useCallback(async () => {
         if (!user) return;
-        setTopProductsLoading(true);
-        const hardcodedProducts = [
-            { "Brand": "Fortune", "Category": "Edible Oil", "Net Sales (₹)": "14,20,00,000" },
-            { "Brand": "Maggi", "Category": "Noodles", "Net Sales (₹)": "9,80,00,000" },
-            { "Brand": "KitKat", "Category": "Confectionery", "Net Sales (₹)": "7,50,00,000" },
-            { "Brand": "Munch", "Category": "Confectionery", "Net Sales (₹)": "6,20,00,000" },
-            { "Brand": "Milkmaid", "Category": "Dairy", "Net Sales (₹)": "5,90,00,000" },
-            { "Brand": "Nescafe", "Category": "Beverages", "Net Sales (₹)": "4,80,00,000" },
-            { "Brand": "Polo", "Category": "Confectionery", "Net Sales (₹)": "3,60,00,000" },
-            { "Brand": "Bar-One", "Category": "Confectionery", "Net Sales (₹)": "2,90,00,000" },
-            { "Brand": "Eclairs", "Category": "Confectionery", "Net Sales (₹)": "2,40,00,000" },
-            { "Brand": "Sunrise", "Category": "Coffee", "Net Sales (₹)": "1,80,00,000" },
-        ];
-        setTopProducts(hardcodedProducts);
-        setTopProductsLoading(false);
-    }, [user]);
+        // Only show loading spinner if we don't already have data
+        if (trendData.length === 0) setTrendLoading(true);
+        const windowQuery: Record<string, string> = {
+            "30D": "Show secondary net sales weekly trend last 30 days",
+            "90D": "Show secondary net sales monthly trend last 90 days",
+        };
+        try {
+            const r = await sendQuery(windowQuery[trendPeriod]);
+            const rows = extractRows(r.raw);
+            if (rows.length > 0) {
+                const labelKey = firstStringKey(rows[0]);
+                const valKey   = firstNumericKey(rows[0]);
+                setTrendData(rows.map((row) => ({
+                    label: String(row[labelKey] ?? "").slice(0, 10),
+                    value: Number(row[valKey]) || 0,
+                })));
+            } else { setTrendData([]); }
+        } catch { setTrendData([]); }
+        finally { setTrendLoading(false); }
+    }, [user, trendPeriod]);
 
-    useEffect(() => { if (authReady && user) { fetchKpis(); fetchTopProducts(); } }, [authReady, user]);
+    // Compatibility aliases so Refresh button still works
+    const fetchKpis         = fetchAllDashboard;
+    const fetchTopProducts  = fetchAllDashboard;
+
+    useEffect(() => { if (authReady && user) fetchAllDashboard(); }, [authReady, user]);
     useEffect(() => { if (authReady && user) fetchTrend(); }, [authReady, user, trendPeriod]);
 
     // ── Drawer openers ───────────────────────────────────────────────────────

@@ -17,30 +17,25 @@ from typing import Any
 from app.models.intent import Intent, IntentType
 from datetime import date, timedelta
 from app.services.intent.intent_normalizer import DIMENSION_MAP as _DIMENSION_MAP
-'''
 def _build_valid_dimensions() -> frozenset[str]:
+    """
+    Collect every fully-qualified Cube dimension ID from DIMENSION_MAP.
+
+    DIMENSION_MAP values are either:
+      str  → single scope (e.g. "fact_secondary_sales.retailer_code")
+      dict → scope-keyed  (e.g. {"PRIMARY": "fact_primary_sales.zone",
+                                  "SECONDARY": "fact_secondary_sales.zone"})
+
+    Both forms are flattened into a single frozenset of cube IDs so that
+    _build_dimensions() can validate normalised group_by / filter fields.
+    """
     ids: set[str] = set()
     for val in _DIMENSION_MAP.values():
         if isinstance(val, str):
             ids.add(val)
         else:
+            # dict → add every scope's cube ID
             ids.update(val.values())
-    return frozenset(ids)
-'''
-##newly added
-def _build_valid_dimensions() -> frozenset[str]:
-    ids: set[str] = set()
-    for val in _DIMENSION_MAP.values():
-        if isinstance(val, str):
-            ids.add(val)
-        else:
-            ids.update(val.values())
-    # Also add all values as passthroughs
-    ids.update(_DIMENSION_MAP.values() 
-               if all(isinstance(v, str) 
-               for v in _DIMENSION_MAP.values()) 
-               else [v for v in _DIMENSION_MAP.values() 
-               if isinstance(v, str)])
     return frozenset(ids)
 
 _VALID_DIMENSIONS: frozenset[str] = _build_valid_dimensions()

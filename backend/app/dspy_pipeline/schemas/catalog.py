@@ -35,44 +35,23 @@ METRICS_CATALOG = [
 CATALOG_METRICS = frozenset(m["name"] for m in METRICS_CATALOG)
 
 # Dimensions available in both PRIMARY and SECONDARY
-'''
+# ONLY flat fact-table semantic names — NO star-schema aliases (geo_*, prod_*,
+# org_*, period_*, dim_*) which resolve to dim_geography/dim_product etc.
+# tables that may not exist. Those aliases live in intent_normalizer only.
 COMMON_DIMENSIONS = frozenset({
     "city", "state", "zone",
     "distributor_code", "distributor_name",
     "brand", "category", "sub_category", "pack_size", "sku_code",
-    # Star schema hierarchy dimensions
-    "geo_zone", "geo_state", "geo_city", "geo_territory", "geo_level",
-    "prod_category", "prod_sub_category", "prod_brand", "prod_sku_code",
-    "org_zsm", "org_asm", "org_so",
-    "period_year", "period_quarter", "period_month", "period_week",
-})
-'''
-##newly added 
-COMMON_DIMENSIONS = frozenset({
-    "city", "state", "zone",
-    "distributor_code", "distributor_name",
-    "brand", "category", "sub_category", "pack_size", "sku_code",
-    # Star schema semantic aliases
-    "geo_zone", "geo_state", "geo_city", "geo_territory", "geo_level",
-    "prod_category", "prod_sub_category", "prod_brand", "prod_sku_code",
-    "org_zsm", "org_asm", "org_so",
-    "period_year", "period_quarter", "period_month", "period_week",
-    # Fully-qualified cube paths (post-normalization)
-    "dim_geography.zone", "dim_geography.state", "dim_geography.city",
-    "dim_geography.territory", "dim_geography.geo_level",
-    "dim_product.category", "dim_product.sub_category", "dim_product.brand",
-    "dim_product.sku_code", "dim_product.pack_size", "dim_product.product_desc",
-    "dim_period.fiscal_year", "dim_period.fiscal_quarter",
-    "dim_period.fiscal_month", "dim_period.fiscal_week",
-    "dim_salesorg.zsm_name", "dim_salesorg.asm_name", "dim_salesorg.so_code",
-    "dim_customer.channel_type", "dim_salesorg.so_code",
+    "so_name", "asm_name", "zsm_name",
+    "invoice_id",
 })
 
 # Dimensions only available in SECONDARY scope
 SECONDARY_ONLY_DIMENSIONS = frozenset({
     "retailer_code", "retailer_name", "retailer_type",
     "route_code", "route_name",
-    "dim_channel_type",
+    "salesrep_code", "salesrep_name",
+    "channel_type",
 })
 
 # All valid dimensions

@@ -432,6 +432,22 @@ export async function getChatMessages(sessionId: string) {
     return res.json();
 }
 
+export async function getDashboardKpis(): Promise<{
+    kpis: {
+        net_sales:        { value: string; raw: number; trend: number; positive: boolean };
+        active_skus:      { value: string; raw: number; trend: number; positive: boolean };
+        zone_coverage:    { value: string; raw: number; trend: number; positive: boolean };
+        target_vs_actual: { value: string; raw: number; trend: number; positive: boolean };
+    };
+    trend_7d:   { label: string; value: number }[];
+    top_brands: Record<string, string | number>[];
+    zone_rows:  { zone: string; net_value: number }[];
+}> {
+    const res = await apiFetch("/dashboard/kpis");
+    if (!res.ok) throw new Error("Dashboard KPI fetch failed");
+    return res.json();
+}
+
 export async function getInsights() {
     const res = await apiFetch("/insights");
     if (!res.ok) throw new Error("Failed to load insights");

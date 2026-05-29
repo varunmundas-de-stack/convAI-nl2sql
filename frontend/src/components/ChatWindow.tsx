@@ -30,6 +30,7 @@ export default function ChatWindow() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [scopeZone, setScopeZone] = useState<string | null>(null);
     const [scopeCity, setScopeCity] = useState<string | null>(null);
+    const [lastSalesScope, setLastSalesScope] = useState<"PRIMARY" | "SECONDARY" | null>(null);
     const [zoneInput, setZoneInput] = useState("");
     const [cityInput, setCityInput] = useState("");
     const [editingScope, setEditingScope] = useState<"zone" | "city" | null>(null);
@@ -44,6 +45,15 @@ export default function ChatWindow() {
         messages, pendingClarification, backendResponse, compoundState,
         addUserMessage, handleResponse, clearMessages, replaceMessages,
     } = useConversation();
+
+    // Track sales scope from last successful backend response
+    useEffect(() => {
+        if (backendResponse?.raw_intent?.sales_scope) {
+            setLastSalesScope(backendResponse.raw_intent.sales_scope as "PRIMARY" | "SECONDARY");
+        } else if (backendResponse?.merged_intent?.sales_scope) {
+            setLastSalesScope(backendResponse.merged_intent.sales_scope as "PRIMARY" | "SECONDARY");
+        }
+    }, [backendResponse]);
 
     async function refreshUserData() {
         try {
@@ -614,7 +624,32 @@ export default function ChatWindow() {
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-3xl"
                     style={{ left: isSidebarOpen ? "calc(50% + 144px)" : "50%" }}>
 
-                    {/* Scope breadcrumb bar removed */}
+                    {/* Scope-aware dimension chips */}
+                    {lastSalesScope && (
+                        <div className="flex flex-wrap gap-1.5 mb-2 px-1">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                                lastSalesScope === "PRIMARY"
+                                    ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                    : "bg-orange-50 text-orange-700 border-orange-200"
+                            }`}>
+                                {lastSalesScope === "PRIMARY" ? "Primary Sales" : "Secondary Sales"}
+                            </span>
+                            {/* Common dimensions — always visible */}
+                            {["zone","state","brand","category","sku","distributor","asm","zsm"].map((d) => (
+                                <button key={d} onClick={() => setInput((prev) => prev ? `${prev} by ${d}` : `Show by ${d}`)}
+                                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 transition-colors">
+                                    {d}
+                                </button>
+                            ))}
+                            {/* Secondary-only dimensions — hidden for PRIMARY */}
+                            {lastSalesScope === "SECONDARY" && ["retailer","route","salesrep"].map((d) => (
+                                <button key={d} onClick={() => setInput((prev) => prev ? `${prev} by ${d}` : `Show by ${d}`)}
+                                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-colors">
+                                    {d}
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
                     <div className={`flex items-end gap-2 bg-white border rounded-2xl px-4 py-2.5 shadow-2xl transition-all duration-150 ${
                         !isBackendAvailable ? "border-red-200" : "border-white/20 focus-within:border-orange-300 focus-within:shadow-[0_0_0_3px_rgba(249,115,22,0.15)]"

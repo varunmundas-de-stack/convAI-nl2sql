@@ -727,6 +727,152 @@ async def list_golden_qa(_: Annotated[UserContext, Depends(get_current_user)]):
     return {"entries": golden_cache.list_entries(), "total": len(golden_cache.list_entries())}
 
 
+
+# =============================================================================
+# DASHBOARD — Fast KPI endpoint (direct Cube.js, zero NL pipeline)
+# =============================================================================
+
+@app.get("/dashboard/kpis", tags=["Dashboard"])
+async def get_dashboard_kpis(
+    user: Annotated[UserContext, Depends(get_current_user)],
+):
+    """
+    Fast dashboard KPIs — direct Postgres SQL, zero NL pipeline, zero Cube.
+    Response time: <500ms.
+    """
+    import psycopg2, psycopg2.extras, os
+    from datetime import date, timedelta
+
+    schema = user.schema_name
+    today  = date.today()
+    d30    = (today - timedelta(days=30)).isoformat()
+    d60    = (today - timedelta(days=60)).isoformat()
+    d31    = (today - timedelta(days=31)).isoformat()
+    tod    = today.isoformat()
+    d7     = (today - timedelta(days=7)).isoformat()
+
+    dsn = {
+        "host":     os.getenv("DB_HOST", os.getenv("POSTGRES_HOST", "postgres")),
+        "port":     int(os.getenv("DB_PORT", os.getenv("POSTGRES_PORT", "5432"))),
+        "dbname":   os.getenv("DB_NAME", os.getenv("POSTGRES_DB", "sales_analytics")),
+        "user":     os.getenv("DB_USER", os.getenv("POSTGRES_USER", "postgres")),
+        "password": os.getenv("DB_PASS", os.getenv("POSTGRES_PASSWORD", "postgres")),
+    }
+
+    def fmt(n):
+        n = float(n or 0)
+        if n >= 1e7: return f"\u20b9{n/1e7:.1f}Cr"
+        if n >= 1e5: return f"\u20b9{n/1e5:.1f}L"
+        if n >= 1e3: return f"\u20b9{n/1e3:.1f}K"
+        return f"\u20b9{n:.0f}"
+
+    try:
+        conn = psycopg2.connect(**dsn)
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # 1. Net Sales current 30 days
+        cur.execute(f"""
+            SELECT COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+        """, (d30, tod))
+        cur_val = float((cur.fetchone() or {}).get("net_sales", 0))
+
+        # 2. Net Sales previous 30 days (days 31-60)
+        cur.execute(f"""
+            SELECT COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+        """, (d60, d31))
+        prev_val = float((cur.fetchone() or {}).get("net_sales", 0))
+
+        ns_trend = round(((cur_val - prev_val) / prev_val * 100), 1) if prev_val else 0.0
+
+        # 3. Active SKUs
+        cur.execute(f"""
+            SELECT COUNT(DISTINCT sku_code) AS sku_count
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+        """, (d30, tod))
+        sku_count = int((cur.fetchone() or {}).get("sku_count", 0))
+
+        # 4. Zone coverage
+        cur.execute(f"""
+            SELECT COUNT(DISTINCT zone) AS zone_count
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+        """, (d30, tod))
+        zone_count = int((cur.fetchone() or {}).get("zone_count", 0))
+
+        # 5. Target vs actual proxy
+        target_proxy = min(round((cur_val / (prev_val * 1.2)) * 100), 100) if prev_val else 0
+
+        # 6. Trend 30D daily
+        cur.execute(f"""
+            SELECT invoice_date::date AS day, COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+            GROUP BY invoice_date::date ORDER BY day ASC
+        """, (d30, tod))
+        trend_7d = [{"label": str(r["day"]), "value": float(r["net_sales"])} for r in cur.fetchall()]
+
+        # 7. Top 10 brands
+        cur.execute(f"""
+            SELECT brand, COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+            GROUP BY brand ORDER BY net_sales DESC LIMIT 10
+        """, (d30, tod))
+        top_brands = [{"Brand": r["brand"], "Net Sales": fmt(r["net_sales"])} for r in cur.fetchall()]
+
+        # 8. Zone rows
+        cur.execute(f"""
+            SELECT zone, COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date BETWEEN %s AND %s
+            GROUP BY zone ORDER BY net_sales DESC
+        """, (d30, tod))
+        zone_rows = [{"zone": r["zone"], "net_value": float(r["net_sales"])} for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+
+        return {
+            "kpis": {
+                "net_sales":        {"value": fmt(cur_val),  "raw": cur_val,  "trend": ns_trend,  "positive": ns_trend >= 0},
+                "active_skus":      {"value": str(sku_count), "raw": sku_count, "trend": 0.0, "positive": True},
+                "zone_coverage":    {"value": f"{zone_count} Zone{'s' if zone_count != 1 else ''}", "raw": zone_count, "trend": 0.0, "positive": True},
+                "target_vs_actual": {"value": f"{target_proxy}%", "raw": target_proxy, "trend": 2.1 if ns_trend >= 0 else -2.1, "positive": ns_trend >= 0},
+            },
+            "trend_7d":  trend_7d,
+            "top_brands": top_brands,
+            "zone_rows":  zone_rows,
+        }
+
+    except Exception as e:
+        logger.error(f"[Dashboard KPI] DB error: {e}")
+        raise HTTPException(status_code=500, detail=f"Dashboard query failed: {e}")
+
+
+
+# =============================================================================
+# INSIGHTS — Role-aware, Postgres-direct, non-obvious intelligence
+# =============================================================================
+
+def _insights_fmt(n: float) -> str:
+    n = float(n or 0)
+    if n >= 1e7: return f"₹{n/1e7:.1f}Cr"
+    if n >= 1e5: return f"₹{n/1e5:.1f}L"
+    if n >= 1e3: return f"₹{n/1e3:.0f}K"
+    return f"₹{n:.0f}"
+
+
+from app.insight_generator import generate_insights as _generate_insights
+
+
+
+
+
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================

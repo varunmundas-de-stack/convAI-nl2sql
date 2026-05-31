@@ -97,12 +97,34 @@ services:
       ANTHROPIC_MODEL_ID: ${ANTHROPIC_MODEL_ID:-claude-haiku-4-5-20251001}
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./backend/etl/data:/app/etl/data
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+
+  etl-watcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: nl2sql-backend:latest
+    container_name: nl2sql-etl-watcher
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/etl/data:/app/etl/data
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: sales_analytics
+      DB_USER: postgres
+      DB_PASS: postgres
+    command: python3 /app/etl/cpg_etl.py --tenant nestle --watch /app/etl/data/drop_zone --poll 30
 
   frontend:
     build:

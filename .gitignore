@@ -53,3 +53,6 @@ get-api-key.ps1
 *.jsonl
 .vscode/tasks.json
 .vscode/settings.json
+
+backend/etl/data/processed/
+backend/etl/data/*.csv

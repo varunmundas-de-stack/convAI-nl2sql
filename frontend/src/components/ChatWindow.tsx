@@ -503,8 +503,6 @@ export default function ChatWindow() {
                     {/* Center tabs */}
                     <nav className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
                         <Link href="/" className="px-4 py-1.5 rounded-lg text-sm font-medium bg-white text-gray-900 shadow-sm">Chat</Link>
-                        <Link href="/dashboard" className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors">Dashboard</Link>
-                        <Link href="/insights" className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors">Insights</Link>
                     </nav>
 
                     {/* Right: status + actions */}

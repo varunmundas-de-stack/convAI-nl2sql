@@ -90,6 +90,7 @@ class PipelineContext:
     validated_intent: Optional[Any] = None
     original_intent: Optional[Any] = None
     cube_query: Optional[Dict[str, Any]] = None
+    sql_query: Optional[str] = None
     period_strategy: Optional[str] = None
     data: Optional[List[Dict[str, Any]]] = None
     comparison_data: Optional[List[Dict[str, Any]]] = None
@@ -153,6 +154,7 @@ class PipelineContext:
             "merged_intent": self.merged_intent,
             "validated_intent": _dump(self.validated_intent),
             "original_intent": _dump(self.original_intent),
+            "sql_query": self.sql_query,
             "cube_query": self.cube_query,
             "period_strategy": self.period_strategy,
             "data": self.data,

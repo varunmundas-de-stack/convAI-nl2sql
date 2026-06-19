@@ -164,7 +164,7 @@ def step_execute_query(ctx: PipelineContext, span) -> None:
     # --- Primary query ---
     with tracer.start_as_current_span("cube.primary_query") as primary_span:
         try:
-            ctx.data = db.run(ctx.cube_query)
+            ctx.data, ctx.sql_query = db.run(ctx.cube_query)
             _span_set(primary_span,
                 output_row_count=len(ctx.data),
                 output_sample_row=str(ctx.data[0])[:500] if ctx.data else "",
@@ -197,7 +197,7 @@ def step_execute_query(ctx: PipelineContext, span) -> None:
         )
         with tracer.start_as_current_span(span_name) as s:
             try:
-                ctx.comparison_data = db.run(ctx.comparison_query)
+                ctx.comparison_data, _ = db.run(ctx.comparison_query)
                 _span_set(s, output_row_count=len(ctx.comparison_data))
                 logger.info(f"Secondary query ({strategy}): {len(ctx.comparison_data)} rows")
                 if strategy == QueryStrategy.DUAL_QUERY.value:

@@ -112,7 +112,7 @@ services:
         # NEXT_PUBLIC_* vars must be set at BUILD time so Next.js bakes them in.
         # Browser requests go from the user's machine → host → container,
         # so localhost:8000 is correct (backend is port-mapped on the host).
-        NEXT_PUBLIC_API_BASE: http://localhost:8000
+        NEXT_PUBLIC_API_BASE: 
     image: nl2sql-frontend:latest
     container_name: nl2sql-frontend
     restart: unless-stopped

@@ -52,7 +52,7 @@ class CubeDBTool:
         client = CubeClient()
 
         # Validate query SQL before executing (catches schema/measure errors early)
-        client.get_sql(query)
+        sql_string = client.get_sql(query)
 
         data = client.load(query).data
 
@@ -61,4 +61,4 @@ class CubeDBTool:
             time.sleep(_RETRY_DELAY_SECONDS)
             data = client.load(query).data
 
-        return data
+        return data, sql_string

@@ -93,6 +93,13 @@ export default function MessageBubble({
                     </div>
                 )}
 
+                {/* SQL Query Panel - admin debug */}
+                {!isUser && !isSystem && rawBackendData?.sql_query && (
+                    <details className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                        <summary className="px-4 py-2 bg-gray-100 hover:bg-gray-200 cursor-pointer text-sm font-medium text-gray-600 flex items-center gap-2">SQL Query</summary>
+                        <pre className="overflow-x-auto p-4 bg-gray-900 text-green-300 text-xs leading-relaxed whitespace-pre-wrap">{rawBackendData.sql_query}</pre>
+                    </details>
+                )}
                 {/* Feedback bar */}
                 {showFeedback && (
                     <FeedbackBar

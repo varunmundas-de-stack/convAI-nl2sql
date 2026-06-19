@@ -770,20 +770,21 @@ async def get_dashboard_kpis(
         conn = psycopg2.connect(**dsn)
         cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # 1. Net Sales current 30 days
+        # 1. Net Sales current 30 days (use MAX date in data, not today)
         cur.execute(f"""
             SELECT COALESCE(SUM(net_value),0) AS net_sales
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
-        """, (d30, tod))
+            WHERE invoice_date >= (SELECT MAX(invoice_date) - INTERVAL '29 days' FROM {schema}.fact_secondary_sales)
+        """)
         cur_val = float((cur.fetchone() or {}).get("net_sales", 0))
 
-        # 2. Net Sales previous 30 days (days 31-60)
+        # 2. Net Sales previous 30 days
         cur.execute(f"""
             SELECT COALESCE(SUM(net_value),0) AS net_sales
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
-        """, (d60, d31))
+            WHERE invoice_date >= (SELECT MAX(invoice_date) - INTERVAL '59 days' FROM {schema}.fact_secondary_sales)
+              AND invoice_date <  (SELECT MAX(invoice_date) - INTERVAL '29 days' FROM {schema}.fact_secondary_sales)
+        """)
         prev_val = float((cur.fetchone() or {}).get("net_sales", 0))
 
         ns_trend = round(((cur_val - prev_val) / prev_val * 100), 1) if prev_val else 0.0
@@ -792,46 +793,49 @@ async def get_dashboard_kpis(
         cur.execute(f"""
             SELECT COUNT(DISTINCT sku_code) AS sku_count
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
-        """, (d30, tod))
+            WHERE invoice_date >= (SELECT MAX(invoice_date) - INTERVAL '29 days' FROM {schema}.fact_secondary_sales)
+        """)
         sku_count = int((cur.fetchone() or {}).get("sku_count", 0))
 
         # 4. Zone coverage
         cur.execute(f"""
             SELECT COUNT(DISTINCT zone) AS zone_count
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
-        """, (d30, tod))
+            WHERE invoice_date >= (SELECT MAX(invoice_date) - INTERVAL '29 days' FROM {schema}.fact_secondary_sales)
+        """)
         zone_count = int((cur.fetchone() or {}).get("zone_count", 0))
 
         # 5. Target vs actual proxy
         target_proxy = min(round((cur_val / (prev_val * 1.2)) * 100), 100) if prev_val else 0
 
-        # 6. Trend 30D daily
+        # 6. Trend — last 30 days of actual data (not calendar days)
         cur.execute(f"""
             SELECT invoice_date::date AS day, COALESCE(SUM(net_value),0) AS net_sales
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
+            WHERE invoice_date::date >= (
+                SELECT MAX(invoice_date::date) - INTERVAL '29 days'
+                FROM {schema}.fact_secondary_sales
+            )
             GROUP BY invoice_date::date ORDER BY day ASC
-        """, (d30, tod))
+        """)
         trend_7d = [{"label": str(r["day"]), "value": float(r["net_sales"])} for r in cur.fetchall()]
 
         # 7. Top 10 brands
         cur.execute(f"""
             SELECT brand, COALESCE(SUM(net_value),0) AS net_sales
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
+            WHERE invoice_date >= (SELECT MAX(invoice_date) - INTERVAL '29 days' FROM {schema}.fact_secondary_sales)
             GROUP BY brand ORDER BY net_sales DESC LIMIT 10
-        """, (d30, tod))
+        """)
         top_brands = [{"Brand": r["brand"], "Net Sales": fmt(r["net_sales"])} for r in cur.fetchall()]
 
         # 8. Zone rows
         cur.execute(f"""
             SELECT zone, COALESCE(SUM(net_value),0) AS net_sales
             FROM {schema}.fact_secondary_sales
-            WHERE invoice_date BETWEEN %s AND %s
+            WHERE invoice_date >= (SELECT MAX(invoice_date) - INTERVAL '29 days' FROM {schema}.fact_secondary_sales)
             GROUP BY zone ORDER BY net_sales DESC
-        """, (d30, tod))
+        """)
         zone_rows = [{"zone": r["zone"], "net_value": float(r["net_sales"])} for r in cur.fetchall()]
 
         cur.close()

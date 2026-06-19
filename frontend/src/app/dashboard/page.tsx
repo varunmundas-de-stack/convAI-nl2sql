@@ -317,24 +317,13 @@ export default function DashboardPage() {
     // Period-aware trend fetch — fires when user switches tabs (needs API)
     const fetchTrend = useCallback(async () => {
         if (!user) return;
-        // Only show loading spinner if we don't already have data
-        if (trendData.length === 0) setTrendLoading(true);
-        const windowQuery: Record<string, string> = {
-            "30D": "Show secondary net sales weekly trend last 30 days",
-            "90D": "Show secondary net sales monthly trend last 90 days",
-        };
+        // Always use fast Postgres endpoint — no API key needed
         try {
-            const r = await sendQuery(windowQuery[trendPeriod]);
-            const rows = extractRows(r.raw);
-            if (rows.length > 0) {
-                const labelKey = firstStringKey(rows[0]);
-                const valKey   = firstNumericKey(rows[0]);
-                setTrendData(rows.map((row) => ({
-                    label: String(row[labelKey] ?? "").slice(0, 10),
-                    value: Number(row[valKey]) || 0,
-                })));
-            } else { setTrendData([]); }
-        } catch { setTrendData([]); }
+            const d = await getDashboardKpis();
+            if (d.trend_7d && d.trend_7d.length > 0) {
+                setTrendData(d.trend_7d);
+            }
+        } catch { /* keep existing data */ }
         finally { setTrendLoading(false); }
     }, [user, trendPeriod]);
 
@@ -343,7 +332,7 @@ export default function DashboardPage() {
     const fetchTopProducts  = fetchAllDashboard;
 
     useEffect(() => { if (authReady && user) fetchAllDashboard(); }, [authReady, user]);
-    useEffect(() => { if (authReady && user) fetchTrend(); }, [authReady, user, trendPeriod]);
+    // Trend loads once via fetchAllDashboard — tab switching is visual only until API available
 
     // ── Drawer openers ───────────────────────────────────────────────────────
 

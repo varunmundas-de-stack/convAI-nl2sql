@@ -602,12 +602,27 @@ export default function ChatWindow() {
                         })}
 
                         {isLoading && (
-                            <div className="flex justify-start mb-4">
-                                <div className="card px-5 py-3">
-                                    <div className="flex items-center gap-1.5">
-                                        {[0, 1, 2].map((i) => (
-                                            <div key={i} className={`w-2 h-2 bg-orange-400 rounded-full animate-bounce delay-${i * 100}`} />
-                                        ))}
+                            <div className="flex justify-start mb-6">
+                                <div className="w-full max-w-2xl bg-gray-50 border border-gray-200 rounded-xl px-6 py-5 shadow-sm space-y-3 animate-pulse">
+                                    {/* Pulsing dots + status line */}
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex gap-1">
+                                            <span className="w-2 h-2 rounded-full bg-orange-300 animate-bounce [animation-delay:0ms]" />
+                                            <span className="w-2 h-2 rounded-full bg-orange-300 animate-bounce [animation-delay:150ms]" />
+                                            <span className="w-2 h-2 rounded-full bg-orange-300 animate-bounce [animation-delay:300ms]" />
+                                        </div>
+                                        <div className="h-3 bg-gray-200 rounded w-36" />
+                                    </div>
+                                    {/* Skeleton content lines */}
+                                    <div className="space-y-2 pt-1">
+                                        <div className="h-3 bg-gray-200 rounded w-3/4" />
+                                        <div className="h-3 bg-gray-200 rounded w-1/2" />
+                                    </div>
+                                    {/* Skeleton metric card */}
+                                    <div className="flex gap-3 pt-1">
+                                        <div className="h-8 bg-gray-200 rounded w-24" />
+                                        <div className="h-8 bg-gray-200 rounded w-24" />
+                                        <div className="h-8 bg-gray-200 rounded w-24" />
                                     </div>
                                 </div>
                             </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { FixedSizeList as List } from "react-window";
 import { TableResponse } from "@/types/chat";
 import { LayoutGrid, Table2, ChevronDown } from "lucide-react";
 
@@ -57,29 +58,22 @@ function isNumericColumn(rows: any[], col: string): boolean {
 function isPriceColumn(col: string): boolean {
     if (!col) return false;
     const lower = col.toLowerCase();
-
     if (lower.includes("qty") || lower.includes("quantity") || lower.includes("volume") || lower.includes("count")) {
         return false;
     }
-
     return lower.includes("sales") || lower.includes("value") || lower.includes("revenue") || lower.includes("amount") || lower.includes("price") || lower.includes("cost") || lower.includes("margin");
 }
 
 // ─── Column deduplication ─────────────────────────────────────────────────────
-// When a granularity-suffixed column (e.g. "invoice_date.day", "invoice_date.week")
-// exists, suppress the bare base column (e.g. "invoice_date") to avoid showing
-// duplicate date information.
 const TIME_GRANULARITIES = new Set(["day", "week", "month", "quarter", "year"]);
 
 function deduplicateTimeColumns(columns: string[]): string[] {
-    // Collect all base columns that have a granularity-suffixed sibling
     const shadowed = new Set<string>();
     for (const col of columns) {
         const lastDot = col.lastIndexOf(".");
         if (lastDot === -1) continue;
         const suffix = col.substring(lastDot + 1);
         if (TIME_GRANULARITIES.has(suffix)) {
-            // The base is everything before the last dot segment
             const base = col.substring(0, lastDot);
             shadowed.add(base);
         }
@@ -88,60 +82,131 @@ function deduplicateTimeColumns(columns: string[]): string[] {
     return columns.filter(col => !shadowed.has(col));
 }
 
-// ─── Flat table ───────────────────────────────────────────────────────────────
+// ─── Virtualised flat table ───────────────────────────────────────────────────
+// Uses react-window FixedSizeList for large datasets (>100 rows).
+// For small datasets (<= 100 rows) falls back to the original DOM table
+// to preserve natural table behaviour (borders, hover, selection).
+
+const ROW_HEIGHT = 44;       // px — matches py-3 + border
+const HEADER_HEIGHT = 44;    // px
+const MAX_VISIBLE_ROWS = 12; // rows shown before virtualising scroll
 
 function FlatTable({ columns, rows }: { columns: string[]; rows: any[] }) {
-    const numericColumns = new Set(columns.filter(c => isNumericColumn(rows, c)));
-    return (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
-            <div className="max-h-[560px] overflow-y-auto">
-                <table className="min-w-full divide-y divide-gray-100 text-sm">
-                    <thead className="bg-gray-50 sticky top-0 z-10">
-                        <tr>
-                            {columns.map((col, i) => (
-                                <th
-                                    key={i}
-                                    className={`px-5 py-3 text-xs font-semibold tracking-wider text-gray-500 uppercase border-b border-gray-200 ${numericColumns.has(col) ? "text-right" : "text-left"
-                                        }`}
-                                >
-                                    {cleanColumnName(col)}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                        {rows.length === 0 ? (
+    const numericColumns = useMemo(
+        () => new Set(columns.filter(c => isNumericColumn(rows, c))),
+        [columns, rows]
+    );
+
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [containerWidth, setContainerWidth] = useState(800);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const ro = new ResizeObserver(([entry]) => {
+            setContainerWidth(entry.contentRect.width);
+        });
+        ro.observe(containerRef.current);
+        return () => ro.disconnect();
+    }, []);
+
+    // For small datasets use the original table — no virtualisation overhead
+    if (rows.length <= 100) {
+        return (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white">
+                <div className="max-h-[560px] overflow-y-auto">
+                    <table className="min-w-full divide-y divide-gray-100 text-sm">
+                        <thead className="bg-gray-50 sticky top-0 z-10">
                             <tr>
-                                <td
-                                    colSpan={columns.length}
-                                    className="px-5 py-10 text-center text-gray-400 italic"
-                                >
-                                    No data
-                                </td>
+                                {columns.map((col, i) => (
+                                    <th
+                                        key={i}
+                                        className={`px-5 py-3 text-xs font-semibold tracking-wider text-gray-500 uppercase border-b border-gray-200 ${numericColumns.has(col) ? "text-right" : "text-left"}`}
+                                    >
+                                        {cleanColumnName(col)}
+                                    </th>
+                                ))}
                             </tr>
-                        ) : (
-                            rows.map((row, ri) => (
-                                <tr
-                                    key={ri}
-                                    className={`transition-colors duration-100 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/50"
-                                        } hover:bg-blue-50/40`}
-                                >
-                                    {columns.map((col, ci) => (
-                                        <td
-                                            key={ci}
-                                            className={`px-5 py-3 text-gray-800 ${numericColumns.has(col)
-                                                ? "text-right font-mono tabular-nums whitespace-nowrap"
-                                                : "text-left"
-                                                }`}
-                                        >
-                                            {formatCellValue(row[col], isPriceColumn(col))}
-                                        </td>
-                                    ))}
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {rows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={columns.length} className="px-5 py-10 text-center text-gray-400 italic">
+                                        No data
+                                    </td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                            ) : (
+                                rows.map((row, ri) => (
+                                    <tr
+                                        key={ri}
+                                        className={`transition-colors duration-100 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-blue-50/40`}
+                                    >
+                                        {columns.map((col, ci) => (
+                                            <td
+                                                key={ci}
+                                                className={`px-5 py-3 text-gray-800 ${numericColumns.has(col) ? "text-right font-mono tabular-nums whitespace-nowrap" : "text-left"}`}
+                                            >
+                                                {formatCellValue(row[col], isPriceColumn(col))}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    }
+
+    // Large dataset — virtualised rendering
+    const listHeight = Math.min(rows.length, MAX_VISIBLE_ROWS) * ROW_HEIGHT;
+
+    const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
+        const row = rows[index];
+        return (
+            <div
+                style={style}
+                className={`flex border-b border-gray-100 transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-blue-50/40`}
+            >
+                {columns.map((col, ci) => (
+                    <div
+                        key={ci}
+                        className={`flex-1 px-5 flex items-center text-sm text-gray-800 min-w-[120px] ${numericColumns.has(col) ? "justify-end font-mono tabular-nums whitespace-nowrap" : "justify-start"}`}
+                    >
+                        {formatCellValue(row[col], isPriceColumn(col))}
+                    </div>
+                ))}
+            </div>
+        );
+    }, [rows, columns, numericColumns]);
+
+    return (
+        <div ref={containerRef} className="rounded-xl border border-gray-200 shadow-sm bg-white overflow-hidden">
+            {/* Sticky header */}
+            <div className="bg-gray-50 border-b border-gray-200 flex sticky top-0 z-10">
+                {columns.map((col, i) => (
+                    <div
+                        key={i}
+                        className={`flex-1 px-5 py-3 text-xs font-semibold tracking-wider text-gray-500 uppercase min-w-[120px] ${numericColumns.has(col) ? "text-right" : "text-left"}`}
+                    >
+                        {cleanColumnName(col)}
+                    </div>
+                ))}
+            </div>
+
+            {/* Virtualised rows */}
+            <List
+                height={listHeight}
+                itemCount={rows.length}
+                itemSize={ROW_HEIGHT}
+                width="100%"
+            >
+                {Row}
+            </List>
+
+            {/* Row count footer */}
+            <div className="px-5 py-2 text-xs text-gray-400 border-t border-gray-100 bg-gray-50">
+                Showing all {rows.length.toLocaleString()} rows — scrolling virtualised
             </div>
         </div>
     );
@@ -174,6 +239,8 @@ function Select({
 }
 
 // ─── Pivot table ──────────────────────────────────────────────────────────────
+// Unchanged from original — pivot builds a computed matrix, not a raw row list,
+// so react-window virtualisation does not apply here.
 
 function PivotTable({
     columns, rows,
@@ -189,7 +256,6 @@ function PivotTable({
     const [colDim, setColDim] = useState(defaultCol);
     const [valMetric, setValMetric] = useState(defaultVal);
 
-    // Build pivot matrix
     const { rowKeys, colKeys, matrix } = useMemo(() => {
         const rowKeySet = new Set<string>();
         const colKeySet = new Set<string>();
@@ -224,7 +290,6 @@ function PivotTable({
         return { rowKeys, colKeys, matrix };
     }, [rows, rowDim, colDim, valMetric]);
 
-    // Column totals & row totals
     const rowTotals = useMemo(
         () => rowKeys.map(rk => colKeys.reduce((s, ck) => s + (matrix[rk][ck] ?? 0), 0)),
         [rowKeys, colKeys, matrix],
@@ -235,7 +300,6 @@ function PivotTable({
     );
     const grandTotal = rowTotals.reduce((a, b) => a + b, 0);
 
-    // Heat-map intensity
     const maxVal = Math.max(...rowTotals, 1);
     function heatColor(val: number | null): string {
         if (val === null || val === 0) return "";
@@ -251,7 +315,6 @@ function PivotTable({
 
     return (
         <div className="space-y-3">
-            {/* Axis selectors */}
             <div className="flex flex-wrap items-end gap-4 px-1">
                 <Select label="Rows" value={rowDim} options={allCols} onChange={setRowDim} />
                 <Select label="Columns" value={colDim} options={allCols} onChange={setColDim} />
@@ -268,7 +331,6 @@ function PivotTable({
                         <table className="min-w-full text-sm border-collapse">
                             <thead className="sticky top-0 z-10">
                                 <tr className="bg-gray-50 border-b border-gray-200">
-                                    {/* Row label header */}
                                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 border-r border-gray-200 min-w-[140px]">
                                         {cleanColumnName(rowDim)}
                                         <span className="mx-1 text-gray-300">/</span>
@@ -291,8 +353,7 @@ function PivotTable({
                                 {rowKeys.map((rk, ri) => (
                                     <tr
                                         key={rk}
-                                        className={`transition-colors hover:bg-blue-50/30 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/40"
-                                            }`}
+                                        className={`transition-colors hover:bg-blue-50/30 ${ri % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}
                                     >
                                         <td className="px-5 py-3 text-left font-medium text-gray-700 border-r border-gray-100 whitespace-nowrap">
                                             {formatCellValue(rk)}
@@ -313,8 +374,6 @@ function PivotTable({
                                         </td>
                                     </tr>
                                 ))}
-
-                                {/* Column totals row */}
                                 <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold text-gray-800">
                                     <td className="px-5 py-3 text-left text-xs uppercase tracking-wider border-r border-gray-200">
                                         Total
@@ -350,14 +409,12 @@ export default function TableRenderer({ data }: TableRendererProps) {
 
     return (
         <div className="space-y-3">
-            {/* Explanation */}
             {explanation && (
                 <p className="text-sm text-gray-700 italic bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
                     {explanation}
                 </p>
             )}
 
-            {/* Toolbar */}
             <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-400">
                     {rows.length} {rows.length === 1 ? "row" : "rows"}
@@ -366,7 +423,6 @@ export default function TableRenderer({ data }: TableRendererProps) {
                     )}
                 </span>
 
-                {/* View toggle */}
                 <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                     <button
                         id="table-view-flat"
@@ -397,7 +453,6 @@ export default function TableRenderer({ data }: TableRendererProps) {
                 </div>
             </div>
 
-            {/* View */}
             {view === "flat" ? (
                 <FlatTable columns={columns} rows={rows} />
             ) : (

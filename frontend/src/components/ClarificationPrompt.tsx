@@ -7,51 +7,50 @@ interface ClarificationPromptProps {
     onClarify?: (value: string) => void;
 }
 
-export default function ClarificationPrompt({ question, allowed_values, missing_fields, onClarify }: ClarificationPromptProps) {
+export default function ClarificationPrompt({
+    question,
+    allowed_values,
+    missing_fields,
+    onClarify,
+}: ClarificationPromptProps) {
     return (
-        <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
-            <div className="flex items-start">
-                <div className="flex-shrink-0">
-                    <svg
-                        className="h-5 w-5 text-amber-500"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                    >
-                        <path
-                            fillRule="evenodd"
-                            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                        />
-                    </svg>
-                </div>
-                <div className="ml-3">
-                    <p className="text-sm font-medium text-amber-800">
-                        Clarification needed
-                    </p>
+        <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-5 py-4 space-y-3">
 
-                    {allowed_values && allowed_values.length > 0 ? (
-                        <div className="flex flex-wrap gap-2 mt-3">
-                            {allowed_values.map((val: string) => (
-                                <button
-                                    key={val}
-                                    onClick={() => onClarify && onClarify(val)}
-                                    className="bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 px-3 py-1.5 rounded-md text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
-                                >
-                                    {val.replace(/_/g, " ")}
-                                </button>
-                            ))}
-                        </div>
-                    ) : (
-                        !question && (
-                            <div className="text-xs space-y-0.5 mt-2">
-                                <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
-                                <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
-                                <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
-                            </div>
-                        )
-                    )}
+            {/* Question */}
+            <p className="text-sm font-semibold text-gray-800 leading-snug">
+                {question || "Could you clarify a few details?"}
+            </p>
+
+            {/* Chip buttons when allowed_values provided */}
+            {allowed_values && allowed_values.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                    {allowed_values.map((val: string) => (
+                        <button
+                            key={val}
+                            onClick={() => onClarify && onClarify(val)}
+                            className="px-4 py-1.5 rounded-full text-xs font-semibold border border-blue-300 bg-white text-blue-700 hover:bg-blue-600 hover:text-white hover:border-blue-600 shadow-sm transition-all duration-150"
+                        >
+                            {val.replace(/_/g, " ")}
+                        </button>
+                    ))}
                 </div>
-            </div>
+            ) : (
+                /* Fallback hint when no allowed_values */
+                !question && (
+                    <div className="text-xs text-gray-500 space-y-0.5">
+                        <div>• For <strong>time_dimension</strong>: Enter granularity (e.g., "day", "month", "year")</div>
+                        <div>• For <strong>time_range</strong>: Enter window (e.g., "last 30 days", "last 1 year")</div>
+                        <div>• For multiple fields: Separate with commas (e.g., "month, last 30 days")</div>
+                    </div>
+                )
+            )}
+
+            {/* Missing fields hint — subtle, only when no chips */}
+            {(!allowed_values || allowed_values.length === 0) && missing_fields && missing_fields.length > 0 && (
+                <p className="text-xs text-gray-400">
+                    Missing: {missing_fields.join(", ")}
+                </p>
+            )}
         </div>
     );
 }

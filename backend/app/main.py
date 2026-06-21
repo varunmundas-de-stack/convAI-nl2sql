@@ -352,6 +352,71 @@ def _get_http_status_for_stage(stage: str, error_type: str) -> int:
     return status.HTTP_400_BAD_REQUEST
 
 
+
+# =============================================================================
+# RATE LIMITER  (Redis sliding-window, DB 3)
+# =============================================================================
+# Limits: admin role → 30 req/min, all others → 10 req/min
+# Only applied to /query and /clarify — the two expensive LLM endpoints.
+# Uses Redis DB 3 (separate from session DB 2, cache DB 1, default DB 0).
+# Falls back silently if Redis is unavailable — never blocks the request.
+# =============================================================================
+
+import time as _time
+
+_RATE_LIMIT_WINDOW   = 60          # seconds
+_RATE_LIMIT_ADMIN    = 30          # requests per window for admin role
+_RATE_LIMIT_DEFAULT  = 10          # requests per window for all other roles
+_RL_DB               = 3           # Redis DB index for rate limit keys
+
+def _get_rate_limit_client():
+    """Lazy Redis client for rate limiting on DB 3."""
+    import redis as _redis
+    return _redis.Redis(
+        host=os.getenv("REDIS_HOST", "redis"),
+        port=int(os.getenv("REDIS_PORT", "6379")),
+        db=_RL_DB,
+        decode_responses=True,
+        socket_connect_timeout=1,
+    )
+
+def _check_rate_limit(user: UserContext) -> None:
+    """
+    Sliding-window rate limiter using Redis sorted sets.
+    Raises HTTP 429 if the user exceeds their limit.
+    Silently passes if Redis is unavailable.
+    """
+    try:
+        r = _get_rate_limit_client()
+        limit = _RATE_LIMIT_ADMIN if user.role == "admin" else _RATE_LIMIT_DEFAULT
+        key   = f"rl:query:{user.user_id}"
+        now   = _time.time()
+        window_start = now - _RATE_LIMIT_WINDOW
+
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(key, "-inf", window_start)   # remove expired entries
+        pipe.zadd(key, {str(now): now})                    # add current request
+        pipe.zcard(key)                                    # count in window
+        pipe.expire(key, _RATE_LIMIT_WINDOW + 5)           # auto-expire key
+        results = pipe.execute()
+
+        count = results[2]
+        if count > limit:
+            logger.warning(f"Rate limit exceeded: user={user.user_id} role={user.role} count={count}/{limit}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "error": "RateLimitExceeded",
+                    "message": f"Too many requests. Limit is {limit} queries per minute.",
+                    "retry_after_seconds": _RATE_LIMIT_WINDOW,
+                },
+                headers={"Retry-After": str(_RATE_LIMIT_WINDOW)},
+            )
+    except HTTPException:
+        raise   # re-raise 429 — don't swallow it
+    except Exception as e:
+        logger.warning(f"Rate limiter Redis error (non-fatal, allowing request): {e}")
+
 # =============================================================================
 # ENDPOINTS
 # =============================================================================
@@ -378,6 +443,7 @@ async def execute_query(
     Delegates all processing to the QueryOrchestrator.
     Returns the complete pipeline response (success or failure).
     """
+    _check_rate_limit(user)   # ← rate limit check (429 if exceeded)
     query = request.query.strip()
     # Auto-generate session_id if not provided (enables context for follow-ups)
     session_id = request.session_id or f"sess_{uuid.uuid4().hex[:12]}"
@@ -513,6 +579,7 @@ async def clarify_endpoint(
 
     Returns the same response shape as /query.
     """
+    _check_rate_limit(user)   # ← rate limit check (429 if exceeded)
     with tracer.start_as_current_span("http.clarify") as span:
         span.set_attribute("http.method", "POST")
         span.set_attribute("http.route", "/clarify")

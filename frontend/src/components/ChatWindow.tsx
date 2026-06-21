@@ -578,13 +578,26 @@ export default function ChatWindow() {
 
                         {messages.map((msg, index) => {
                             let originalQuery = "";
-                            if (msg.role === "assistant" && msg.rawBackendData?.effective_query) {
-                                originalQuery = msg.rawBackendData.effective_query;
-                            } else if (msg.role === "assistant" && msg.rawBackendData?.original_query) {
-                                originalQuery = msg.rawBackendData.original_query;
-                            } else if (index > 0 && messages[index - 1].role === "user") {
-                                originalQuery = messages[index - 1].content;
+                            let retryHandler: ((q: string) => void) | undefined = undefined;
+
+                            if (msg.role === "assistant") {
+                                // Assistant bubble — retry fires with this message's request_id
+                                if (msg.rawBackendData?.effective_query) originalQuery = msg.rawBackendData.effective_query;
+                                else if (msg.rawBackendData?.original_query) originalQuery = msg.rawBackendData.original_query;
+                                else if (index > 0 && messages[index - 1].role === "user") originalQuery = messages[index - 1].content;
+                                if (msg.rawBackendData?.request_id) {
+                                    retryHandler = (modifiedQuery) => handleRetry(modifiedQuery, msg);
+                                }
+                            } else if (msg.role === "user") {
+                                // User bubble — original query is this message's content
+                                // retry handler looks ahead to the next assistant message
+                                originalQuery = msg.content;
+                                const nextMsg = messages[index + 1];
+                                if (nextMsg && nextMsg.role === "assistant" && nextMsg.rawBackendData?.request_id) {
+                                    retryHandler = (modifiedQuery) => handleRetry(modifiedQuery, nextMsg);
+                                }
                             }
+
                             return (
                                 <MessageBubble
                                     key={msg.id}
@@ -593,9 +606,7 @@ export default function ChatWindow() {
                                     rawBackendData={msg.rawBackendData}
                                     onClarify={submitClarification}
                                     isActiveClarification={pendingClarification === msg.responseData}
-                                    onRetry={msg.role === "assistant" && msg.rawBackendData?.request_id
-                                        ? (modifiedQuery) => handleRetry(modifiedQuery, msg)
-                                        : undefined}
+                                    onRetry={retryHandler}
                                     originalQuery={originalQuery}
                                 />
                             );

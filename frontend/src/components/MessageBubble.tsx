@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
+import { Pencil } from "lucide-react";
 import { ChatMessage, ChatResponse } from "@/types/chat";
 import TableRenderer from "./TableRenderer";
 import ChartRenderer from "./ChartRenderer";
 import ClarificationPrompt from "./ClarificationPrompt";
 import FeedbackBar from "./FeedbackBar";
+import RetryModal from "./RetryModal";
 
 interface MessageBubbleProps {
     message: ChatMessage;
@@ -56,6 +59,9 @@ export default function MessageBubble({
     // Hide content if it's just raw JSON from the backend (which happens when refined_insights is dumped into the DB)
     const isContentJson = !isUser && message.content && typeof message.content === 'string' && message.content.trim().startsWith('{') && message.content.trim().endsWith('}');
 
+    // Edit & retry state — only for user bubbles with a retry handler
+    const [showEditModal, setShowEditModal] = useState(false);
+
     return (
         <div className={`flex ${alignClasses} mb-6`}>
             <div className={containerClasses}>
@@ -63,6 +69,20 @@ export default function MessageBubble({
                 {message.content && !isContentJson && (
                     <div className={`whitespace-pre-wrap break-words ${!isUser ? "text-lg leading-relaxed text-gray-800" : ""}`}>
                         {message.content}
+                    </div>
+                )}
+
+                {/* Edit & retry button — user bubbles only */}
+                {isUser && onRetry && (
+                    <div className="flex justify-end mt-2">
+                        <button
+                            onClick={() => setShowEditModal(true)}
+                            className="flex items-center gap-1 text-blue-200 hover:text-white text-xs transition-colors"
+                            title="Edit and retry this query"
+                        >
+                            <Pencil size={11} />
+                            <span>Edit</span>
+                        </button>
                     </div>
                 )}
 
@@ -127,6 +147,19 @@ export default function MessageBubble({
                     />
                 )}
             </div>
+
+            {/* Edit & retry modal for user bubbles */}
+            {isUser && onRetry && (
+                <RetryModal
+                    isOpen={showEditModal}
+                    originalQuery={originalQuery || message.content || ""}
+                    onSubmit={(modifiedQuery) => {
+                        setShowEditModal(false);
+                        onRetry(modifiedQuery);
+                    }}
+                    onCancel={() => setShowEditModal(false)}
+                />
+            )}
         </div>
     );
 }

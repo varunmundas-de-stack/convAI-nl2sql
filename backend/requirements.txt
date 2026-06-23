@@ -81,3 +81,7 @@ arize-otel
 # faiss-cpu==1.11.0
 # sentence-transformers==3.4.1
 # Pinned compatible version: sentence-transformers 2.7.0 works with huggingface-hub<1.0
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.24.0

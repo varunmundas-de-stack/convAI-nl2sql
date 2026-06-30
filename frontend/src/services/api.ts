@@ -584,3 +584,59 @@ export async function submitFeedback(payload: {
         throw new Error(`Feedback submission failed: ${res.status}`);
     }
 }
+
+// =============================================================================
+// OBJECTIVES API  (CPGAN-13 / CPGAN-14 / CPGAN-15)
+// =============================================================================
+
+export type ObjectiveOption = {
+    option_id: string;
+    label: string;
+    value: string;
+    order_no: number;
+};
+
+export type ObjectiveQuestion = {
+    question_id: string;
+    question_text: string;
+    input_type: string;
+    order_no: number;
+    is_required: boolean;
+    options: ObjectiveOption[];
+};
+
+export type ObjectiveTemplate = {
+    template_id: string;
+    role: string;
+    title: string;
+    description: string;
+    order_no?: number;
+    questions?: ObjectiveQuestion[];
+};
+
+export async function getObjectiveTemplates(): Promise<{ templates: ObjectiveTemplate[] }> {
+    const res = await apiFetch("/api/objectives/templates");
+    if (!res.ok) throw new Error("Failed to load objective templates");
+    return res.json();
+}
+
+export async function getObjectiveTemplate(templateId: string): Promise<ObjectiveTemplate> {
+    const res = await apiFetch(`/api/objectives/templates/${templateId}`);
+    if (!res.ok) throw new Error("Failed to load objective template");
+    return res.json();
+}
+
+export async function saveObjective(payload: {
+    template_id: string;
+    answers: Record<string, string>;
+    title?: string;
+}): Promise<{ session_id: string; template_id: string }> {
+    const res = await apiFetch("/api/objectives", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Failed to save objective");
+    return res.json();
+}
+

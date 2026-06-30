@@ -176,6 +176,12 @@ try:
 except Exception as e:
     logger.warning(f"Questions router mount failed (non-fatal): {e}")
 
+try:
+    from app.objectives_router import router as objectives_router
+    app.include_router(objectives_router)
+except Exception as e:
+    logger.warning(f"Objectives router mount failed (non-fatal): {e}")
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -460,7 +466,7 @@ async def execute_query(
         tokens = _set_user_context(user)
         try:
             # Delegate to orchestrator (does ALL the work)
-            response = run_pipeline(query, session_id=session_id, _resolved_clarifications=request.clarification_answers or None)
+            response = run_pipeline(query, session_id=session_id, _resolved_clarifications=request.clarification_answers or None, _user=user)
         finally:
             _reset_user_context(tokens)
 

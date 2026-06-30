@@ -31,6 +31,7 @@ from app.services.intent.intent_merger import merge_intent
 # Import for compound clarification
 from app.services.tools.compound_tool import resume_compound_clarification
 from app.dspy_pipeline.clarification_tool import CompoundClarificationState
+from app.security.context import UserContext as _UserContext
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
@@ -89,19 +90,45 @@ def _store_session_resolved_terms(
 # PUBLIC API
 # =============================================================================
 
+def _scope_from_role(role: str) -> str:
+    """Derive default sales_scope from user role for objective pre-fill."""
+    return "SECONDARY" if role.upper() in ("SO",) else "PRIMARY"
+
+
 def execute_query(
     query: str,
     session_id: Optional[str] = None,
     _skip_reset_overrides: bool = False,
     _resolved_clarifications: Optional[Dict[str, Any]] = None,
+    _user: Optional[_UserContext] = None,
 ) -> PipelineContext:
     """Run the full pipeline from step 0."""
+    resolved = dict(_resolved_clarifications or {})
+
+    # Inject sales_scope from objective answers or role default,
+    # so the scope clarification gate is bypassed automatically.
+    if "sales_scope" not in resolved:
+        injected = False
+        if session_id:
+            try:
+                from app.security.metadata_store import get_session_objective
+                obj = get_session_objective(session_id)
+                if obj and "sales_scope" in obj:
+                    resolved["sales_scope"] = obj["sales_scope"]
+                    injected = True
+                    logger.debug(f"[Objective] Injected sales_scope={resolved['sales_scope']} from session objective")
+            except Exception as e:
+                logger.debug(f"[Objective] Could not load session objective: {e}")
+        if not injected and _user is not None:
+            resolved["sales_scope"] = _scope_from_role(_user.role)
+            logger.debug(f"[Objective] Role-default sales_scope={resolved['sales_scope']} for role={_user.role}")
+
     ctx = PipelineContext(
         query=query,
         session_id=session_id,
         original_query=query,
         skip_reset_overrides=_skip_reset_overrides,
-        resolved_clarifications=_resolved_clarifications,
+        resolved_clarifications=resolved or None,
     )
     ctx = run_pipeline(ctx, start_step=0)
 
@@ -112,7 +139,7 @@ def execute_query(
             intent=ctx.raw_intent or {},
             missing_fields=ctx.missing_fields or [],
             session_id=session_id,
-            resolved_clarifications=_resolved_clarifications or {},
+            resolved_clarifications=resolved or {},
         ))
         logger.info(f"Clarification state saved: {ctx.request_id}")
 

@@ -119,6 +119,115 @@ def ensure_chat_session(session_id: str, user: UserContext, title: str | None = 
             )
 
 
+def list_objective_templates(role: str) -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT template_id, role, title, description, order_no
+                FROM app_meta.objective_templates
+                WHERE role = %s AND is_active = TRUE
+                ORDER BY order_no
+                """,
+                (role,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+
+def get_objective_template(template_id: str) -> dict[str, Any] | None:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT template_id, role, title, description
+                FROM app_meta.objective_templates
+                WHERE template_id = %s AND is_active = TRUE
+                """,
+                (template_id,),
+            )
+            template = cur.fetchone()
+            if not template:
+                return None
+            template = dict(template)
+
+            cur.execute(
+                """
+                SELECT question_id, question_text, input_type, order_no, is_required
+                FROM app_meta.template_questions
+                WHERE template_id = %s
+                ORDER BY order_no
+                """,
+                (template_id,),
+            )
+            questions = [dict(q) for q in cur.fetchall()]
+
+            for q in questions:
+                cur.execute(
+                    """
+                    SELECT option_id, label, value, order_no
+                    FROM app_meta.question_options
+                    WHERE question_id = %s
+                    ORDER BY order_no
+                    """,
+                    (q["question_id"],),
+                )
+                q["options"] = [dict(o) for o in cur.fetchall()]
+
+            template["questions"] = questions
+            return template
+
+
+def save_objective_session(
+    session_id: str,
+    user: UserContext,
+    template_id: str,
+    answers: dict[str, Any],
+    title: str | None = None,
+) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO app_meta.chat_sessions
+                    (session_id, user_id, client_id, title, template_id, objective_answers)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (session_id) DO UPDATE SET
+                    template_id = EXCLUDED.template_id,
+                    objective_answers = EXCLUDED.objective_answers,
+                    last_active = CURRENT_TIMESTAMP
+                """,
+                (
+                    session_id,
+                    user.user_id,
+                    user.client_id,
+                    (title or "New conversation")[:200],
+                    template_id,
+                    json.dumps(answers),
+                ),
+            )
+
+
+def get_session_objective(session_id: str) -> dict[str, Any] | None:
+    """Return objective_answers JSONB for a session, or None if not set."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT objective_answers
+                FROM app_meta.chat_sessions
+                WHERE session_id = %s AND objective_answers IS NOT NULL
+                """,
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            val = row["objective_answers"]
+            if isinstance(val, str):
+                return json.loads(val)
+            return dict(val) if val else None
+
+
 def save_chat_message(
     session_id: str,
     user: UserContext,

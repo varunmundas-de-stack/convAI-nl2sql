@@ -15,6 +15,7 @@ import {
 } from "@/services/api";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
+import ObjectiveModal from "./ObjectiveModal";
 import { parseClarificationAnswers } from "@/utils/clarificationParser";
 
 export default function ChatWindow() {
@@ -24,6 +25,9 @@ export default function ChatWindow() {
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
     const [user, setUser] = useState<any>(null);
+    const [showObjectiveModal, setShowObjectiveModal] = useState(false);
+    const [objectiveBanner, setObjectiveBanner] = useState<string | null>(null);
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [loginError, setLoginError] = useState<string | null>(null);
     const [loginForm, setLoginForm] = useState({ username: "", password: "" });
     const [sessions, setSessions] = useState<any[]>([]);
@@ -64,7 +68,13 @@ export default function ChatWindow() {
 
     useEffect(() => {
         if (!getAccessToken()) return;
-        getMe().then((data) => { setUser(data.user); refreshUserData(); }).catch(() => logout());
+        getMe().then((data) => {
+            setUser(data.user);
+            refreshUserData();
+            if (!localStorage.getItem(`objective_seen_${data.user.username}`)) {
+                setShowObjectiveModal(true);
+            }
+        }).catch(() => logout());
     }, []);
 
     useEffect(() => {
@@ -216,10 +226,10 @@ export default function ChatWindow() {
     }
 
     async function handleDeleteSession(sessionIdToDelete: string) {
-        if (!confirm("Delete this conversation?")) return;
         try {
             await deleteChatSession(sessionIdToDelete);
             if (sessionId === sessionIdToDelete) { resetSession(); setSessionId(null); clearMessages(); }
+            setConfirmDeleteId(null);
             await refreshUserData();
         } catch (error) { console.error("Failed to delete session", error); }
     }
@@ -387,6 +397,7 @@ export default function ChatWindow() {
     }, {});
 
     return (
+        <>
         <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#0F2044", backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)", backgroundSize: "28px 28px" }}>
 
             {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
@@ -444,15 +455,28 @@ export default function ChatWindow() {
                                             >
                                                 {s.title || "New conversation"}
                                             </button>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.session_id); }}
-                                                className="p-1.5 rounded opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                                                style={{ color: "#64748B" }}
-                                                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f87171"; }}
-                                                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#64748B"; }}
-                                            >
-                                                <Trash2 size={13} />
-                                            </button>
+                                            {confirmDeleteId === s.session_id ? (
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.session_id); }}
+                                                        className="px-2 py-0.5 rounded text-xs bg-red-500 text-white hover:bg-red-600"
+                                                    >Yes</button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                                                        className="px-2 py-0.5 rounded text-xs bg-gray-600 text-white hover:bg-gray-500"
+                                                    >No</button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(s.session_id); }}
+                                                    className="p-1.5 rounded opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                                                    style={{ color: "#64748B" }}
+                                                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#f87171"; }}
+                                                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#64748B"; }}
+                                                >
+                                                    <Trash2 size={13} />
+                                                </button>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -472,6 +496,9 @@ export default function ChatWindow() {
                             <div className="text-sm font-semibold text-white truncate">{user.full_name || user.username}</div>
                             <div className="text-[11px] truncate" style={{ color: "#94A3B8" }}>{user.role}</div>
                         </div>
+                        <button onClick={() => setShowObjectiveModal(true)} className="p-1.5 rounded transition-colors" style={{ color: "#94A3B8" }} title="Set objective">
+                            <Target size={15} />
+                        </button>
                         <button onClick={handleLogout} className="p-1.5 rounded transition-colors" style={{ color: "#94A3B8" }} title="Sign out">
                             <LogOut size={15} />
                         </button>
@@ -513,6 +540,14 @@ export default function ChatWindow() {
                         </button>
                     </div>
                 </header>
+
+                {/* Objective banner */}
+                {objectiveBanner && (
+                    <div className="flex items-center justify-between px-4 md:px-8 py-2" style={{ backgroundColor: "rgba(99,102,241,0.12)", borderBottom: "1px solid rgba(99,102,241,0.2)" }}>
+                        <span className="text-xs font-medium" style={{ color: "#A5B4FC" }}>🎯 {objectiveBanner}</span>
+                        <button onClick={() => setObjectiveBanner(null)} className="text-xs ml-4" style={{ color: "#6366F1" }}>✕</button>
+                    </div>
+                )}
 
                 {/* Messages */}
                 <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col items-center" style={{ backgroundColor: "transparent" }}>
@@ -707,5 +742,24 @@ export default function ChatWindow() {
                 </div>
             </div>
         </div>
+        {showObjectiveModal && (
+            <ObjectiveModal
+                onClose={() => setShowObjectiveModal(false)}
+                onSaved={(result) => {
+                    if (user) localStorage.setItem(`objective_seen_${user.username}`, "1");
+                    setShowObjectiveModal(false);
+                    setApiSessionId(result.session_id);
+                    setSessionId(result.session_id);
+                    const scope = ["SO"].includes((user?.role || "").toUpperCase()) ? "Secondary" : "Primary";
+                    const metric = result.answers
+                        ? Object.values(result.answers as Record<string,string>)
+                            .map((v: string) => v.replace(/_/g, " "))
+                            .join(" · ")
+                        : "";
+                    setObjectiveBanner(`Active objective: ${result.title} · Scope: ${scope} Sales${metric ? " · " + metric : ""}`);
+                }}
+            />
+        )}
+        </>
     );
 }

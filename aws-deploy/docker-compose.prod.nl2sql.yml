@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: nl2sql-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sales_analytics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - nl2sql_postgres_data:/var/lib/postgresql/data
+    # No host port mapping — internal only, avoids conflict with host postgres on 5432
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sales_analytics"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: nl2sql-redis
+    restart: unless-stopped
+    volumes:
+      - nl2sql_redis_data:/data
+    # No host port mapping — internal only, avoids any conflict with host redis
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: nl2sql-backend:latest
+    container_name: nl2sql-backend
+    restart: unless-stopped
+    # Host port 8010 avoids conflict with existing uvicorn on 8000
+    ports:
+      - "8010:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: sales_analytics
+      DB_USER: postgres
+      DB_PASS: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: sales_analytics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-changeme-prod-secret}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL_ID: ${ANTHROPIC_MODEL_ID:-claude-haiku-4-5-20251001}
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # Points browser directly to backend on port 8010
+        NEXT_PUBLIC_API_BASE: http://${EC2_PUBLIC_IP}:8010
+    image: nl2sql-frontend:latest
+    container_name: nl2sql-frontend
+    restart: unless-stopped
+    # Host port 3010 avoids conflict with existing node on 3000
+    ports:
+      - "3010:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  nl2sql_postgres_data:
+  nl2sql_redis_data:

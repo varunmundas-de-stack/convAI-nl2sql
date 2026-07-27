@@ -1,0 +1,42 @@
+# NSM Home Layout — Spec 14
+card_id: nsm
+sections:
+  - id: nsm_kpi_strip
+    title: "National KPIs"
+    type: kpi_strip
+    items:
+      - label: "Net Sales"
+        metric: net_sales
+      - label: "Target Achievement"
+        metric: target_achievement_pct
+      - label: "Outlet Coverage"
+        metric: outlet_coverage_pct
+
+  - id: nsm_insights
+    title: "National Alerts"
+    type: insight_list
+    max_items: 5
+    filters:
+      priority: [critical, high]
+    insight_types:
+      - target_gap
+      - sales_anomaly
+      - fast_sku_opportunity
+
+  - id: nsm_actions
+    title: "Strategic Actions"
+    type: action_list
+    max_items: 4
+    source: priority_insights
+
+  - id: nsm_questions
+    title: "Ask Analyst"
+    type: suggested_questions
+    max_items: 4
+    source: question_bank
+
+  - id: nsm_trend
+    title: "National Sales Trend"
+    type: chart
+    metric: net_sales
+    trend_grain: month

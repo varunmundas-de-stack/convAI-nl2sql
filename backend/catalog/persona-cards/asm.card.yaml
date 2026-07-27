@@ -1,0 +1,151 @@
+# Area Sales Manager Persona Card — Spec 10
+# card_id is stable. Version bumps on content upgrade.
+
+card_id: asm
+version: 1
+display_name: "Area Sales Manager"
+job_description: >
+  Manages primary and secondary sales performance for a defined geographic area.
+  Responsible for distributor health, outlet coverage, and achieving area-level
+  sales targets. Coaches Sales Officers, reviews distributor stock, and escalates
+  risks to the Regional Sales Manager.
+
+hierarchy:
+  tree: sales
+  level: 3
+  reports_to: rsm
+  manages: [so]
+
+scope:
+  operating_grain: area
+  drilldown_path: [distributor_name, zone, state]
+  rollup_path: [region, nation]
+  default_period: MTD
+
+kpis:
+  primary:
+    - net_sales
+    - target_achievement_pct
+    - outlet_coverage_pct
+  secondary:
+    - billed_qty
+    - distributor_stock_days
+    - lines_per_call
+    - sales_gap_value
+
+preferences:
+  - preference: sales_type
+    default: primary
+    ask_priority: high
+  - preference: comparison_period
+    default: previous_month
+    ask_priority: high
+  - preference: measure_unit
+    default: value
+    ask_priority: medium
+  - preference: trend_grain
+    default: week
+    ask_priority: never
+  - preference: baseline_window
+    default: l3m
+    ask_priority: never
+  - preference: default_period
+    default: MTD
+    ask_priority: never
+  - preference: drilldown_dimension
+    default: distributor
+    ask_priority: never
+  - preference: output_format
+    default: table
+    ask_priority: never
+
+insight_types:
+  - target_gap
+  - distributor_underperformance
+  - outlet_coverage_drop
+  - stockout_risk
+  - excess_stock
+  - fast_sku_opportunity
+  - secondary_primary_gap
+  - lines_per_call_drop
+  - sales_anomaly
+
+questions:
+  - id: asm_q1
+    text: "Which distributors in my area are below target this {{period}}?"
+    intent: distributor_target_performance
+    entities:
+      metric: target_achievement_pct
+      dimension: distributor_name
+    cube_context:
+      measures: [target_achievement_pct]
+      dimensions: [distributor_name, zone]
+
+  - id: asm_q2
+    text: "What is my outlet coverage this {{period}} vs last month?"
+    intent: outlet_coverage_trend
+    entities:
+      metric: outlet_coverage_pct
+    cube_context:
+      measures: [outlet_coverage_pct]
+      dimensions: [zone]
+
+  - id: asm_q3
+    text: "Which SKUs are growing fastest in my area?"
+    intent: fast_sku_identification
+    entities:
+      metric: billed_qty
+    cube_context:
+      measures: [billed_qty]
+      dimensions: [sku_code, brand]
+
+  - id: asm_q4
+    text: "Which distributors have stock below 7 days?"
+    intent: stockout_risk_check
+    entities:
+      metric: distributor_stock_days
+    cube_context:
+      measures: [distributor_stock_days]
+      dimensions: [distributor_name]
+
+  - id: asm_q5
+    text: "Show me my area's sales trend over the last 4 weeks."
+    intent: area_sales_trend
+    entities:
+      metric: net_sales
+    cube_context:
+      measures: [net_sales]
+      dimensions: [zone]
+
+actions:
+  - id: analyze_target_gap
+    label: "Analyse target gap by distributor"
+    from_insight: target_gap
+  - id: review_weak_distributors
+    label: "Review underperforming distributors"
+    from_insight: distributor_underperformance
+  - id: review_coverage_gaps
+    label: "Check outlet coverage gaps"
+    from_insight: outlet_coverage_drop
+  - id: raise_replenishment_order
+    label: "Raise replenishment order"
+    from_insight: stockout_risk
+  - id: plan_liquidation_scheme
+    label: "Plan liquidation scheme"
+    from_insight: excess_stock
+  - id: expand_sku_distribution
+    label: "Expand SKU distribution"
+    from_insight: fast_sku_opportunity
+  - id: review_secondary_push
+    label: "Review secondary push plan"
+    from_insight: secondary_primary_gap
+  - id: review_sales_productivity
+    label: "Review sales rep productivity"
+    from_insight: lines_per_call_drop
+  - id: investigate_anomaly
+    label: "Investigate sales anomaly"
+    from_insight: sales_anomaly
+
+cold_start:
+  ask_preferences: [sales_type, comparison_period]
+  max_questions: 2

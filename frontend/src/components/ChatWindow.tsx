@@ -12,10 +12,13 @@ import {
     setSessionId as setApiSessionId, resetSession, retryQuery,
     login, logout, getAccessToken, getMe, getChatSessions,
     deleteChatSession, getChatMessages, transformBackendResponse,
+    getPersonaHomeLayout,
 } from "@/services/api";
+import { getActiveAction, clearActiveAction, getPipeline, serializeActionContext } from "@/lib/actionPipelines";
 import { useConversation } from "@/state/conversation";
 import MessageBubble from "./MessageBubble";
 import ObjectiveModal from "./ObjectiveModal";
+import PersonaColdStartModal, { isColdStartDone } from "./PersonaColdStartModal";
 import { parseClarificationAnswers } from "@/utils/clarificationParser";
 
 export default function ChatWindow() {
@@ -26,6 +29,7 @@ export default function ChatWindow() {
     const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
     const [user, setUser] = useState<any>(null);
     const [showObjectiveModal, setShowObjectiveModal] = useState(false);
+    const [showColdStartModal, setShowColdStartModal] = useState(false);
     const [objectiveBanner, setObjectiveBanner] = useState<string | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [loginError, setLoginError] = useState<string | null>(null);
@@ -40,6 +44,7 @@ export default function ChatWindow() {
     const [editingScope, setEditingScope] = useState<"zone" | "city" | null>(null);
     const [suggestions, setSuggestions] = useState<{ label: string; question: string; category: string }[]>([]);
     const [suggestionsLoading, setSuggestionsLoading] = useState(true);
+    const [actionInterruptModal, setActionInterruptModal] = useState<{ show: boolean; pipeline: string; stepLabel: string } | null>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const zoneInputRef = useRef<HTMLInputElement>(null);
     const cityInputRef = useRef<HTMLInputElement>(null);
@@ -71,17 +76,26 @@ export default function ChatWindow() {
         getMe().then((data) => {
             setUser(data.user);
             refreshUserData();
-            if (!localStorage.getItem(`objective_seen_${data.user.username}`)) {
+            if (!isColdStartDone(data.user.username)) {
+                setShowColdStartModal(true);
+            } else if (!localStorage.getItem(`objective_seen_${data.user.username}`)) {
                 setShowObjectiveModal(true);
             }
         }).catch(() => logout());
     }, []);
 
     useEffect(() => {
-        const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
-        fetch(`${API_BASE}/api/questions?category=all&limit=4`)
-            .then((r) => r.json())
-            .then((d) => { if (d.questions?.length) setSuggestions(d.questions); })
+        getPersonaHomeLayout()
+            .then((layout) => {
+                const section = layout.sections.find(s => s.type === "suggested_questions");
+                if (section?.items?.length) {
+                    setSuggestions(section.items.map(item => ({
+                        label: item.label,
+                        question: item.question ?? item.label,
+                        category: item.intent ?? "sales_performance",
+                    })));
+                }
+            })
             .catch(() => {})
             .finally(() => setSuggestionsLoading(false));
     }, []);
@@ -109,6 +123,16 @@ export default function ChatWindow() {
     useEffect(() => {
         const storedQuery = sessionStorage.getItem("suggested_query");
         if (storedQuery) { setInput(storedQuery); sessionStorage.removeItem("suggested_query"); }
+    }, []);
+
+    // Interruption guard — detect active action when user lands on Chat
+    useEffect(() => {
+        const active = getActiveAction();
+        if (!active) return;
+        const pipeline = getPipeline(active.pipelineId);
+        if (!pipeline) return;
+        const stepLabel = pipeline.steps[active.currentStep]?.title ?? "In progress";
+        setActionInterruptModal({ show: true, pipeline: pipeline.label, stepLabel });
     }, []);
 
     useEffect(() => {
@@ -240,6 +264,11 @@ export default function ChatWindow() {
             const nextUser = await login(loginForm.username, loginForm.password);
             setUser(nextUser);
             await refreshUserData();
+            if (!isColdStartDone(nextUser.username)) {
+                setShowColdStartModal(true);
+            } else if (!localStorage.getItem(`objective_seen_${nextUser.username}`)) {
+                setShowObjectiveModal(true);
+            }
         } catch (error) { setLoginError(error instanceof Error ? error.message : "Login failed"); }
     }
 
@@ -530,6 +559,10 @@ export default function ChatWindow() {
                     {/* Center tabs */}
                     <nav className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
                         <Link href="/" className="px-4 py-1.5 rounded-lg text-sm font-medium bg-white text-gray-900 shadow-sm">Chat</Link>
+                        <Link href="/dashboard" className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Dashboard</Link>
+                        <Link href="/insights" className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Insights</Link>
+                        <Link href="/actions" className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Actions</Link>
+                        <Link href="/objectives" className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Objectives</Link>
                     </nav>
 
                     {/* Right: status + actions */}
@@ -742,6 +775,17 @@ export default function ChatWindow() {
                 </div>
             </div>
         </div>
+        {showColdStartModal && user && (
+            <PersonaColdStartModal
+                username={user.username}
+                onDone={() => {
+                    setShowColdStartModal(false);
+                    if (!localStorage.getItem(`objective_seen_${user.username}`)) {
+                        setShowObjectiveModal(true);
+                    }
+                }}
+            />
+        )}
         {showObjectiveModal && (
             <ObjectiveModal
                 onClose={() => setShowObjectiveModal(false)}
@@ -759,6 +803,53 @@ export default function ChatWindow() {
                     setObjectiveBanner(`Active objective: ${result.title} · Scope: ${scope} Sales${metric ? " · " + metric : ""}`);
                 }}
             />
+        )}
+        {/* Action Interruption Modal */}
+        {actionInterruptModal?.show && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#6366f1,#f97316)" }}>
+                            <Zap size={18} className="text-white" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-bold text-gray-900">Active Action in Progress</h2>
+                            <p className="text-xs text-gray-400">You have an unfinished pipeline</p>
+                        </div>
+                    </div>
+                    <div className="bg-indigo-50 rounded-xl p-3 mb-5 text-sm text-indigo-800">
+                        <span className="font-semibold">{actionInterruptModal.pipeline}</span>
+                        <span className="text-indigo-500 ml-2">— paused at: {actionInterruptModal.stepLabel}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-5">What would you like to do?</p>
+                    <div className="space-y-2">
+                        <button
+                            onClick={() => { setActionInterruptModal(null); window.location.href = "/actions"; }}
+                            className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold text-white transition-all"
+                            style={{ background: "linear-gradient(135deg,#6366f1,#f97316)" }}>
+                            Go back and finish the action first
+                        </button>
+                        <button
+                            onClick={() => {
+                                const active = getActiveAction();
+                                if (active) {
+                                    const ctx = serializeActionContext(active);
+                                    setInput(`[Continuing from action: ${actionInterruptModal.pipeline}]\n${ctx}\n\n`);
+                                }
+                                clearActiveAction();
+                                setActionInterruptModal(null);
+                            }}
+                            className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-all">
+                            Bring action context into Chat
+                        </button>
+                        <button
+                            onClick={() => { clearActiveAction(); setActionInterruptModal(null); }}
+                            className="w-full py-2.5 px-4 rounded-xl text-sm font-medium text-gray-500 hover:bg-gray-50 transition-all">
+                            Start fresh chat (discard action)
+                        </button>
+                    </div>
+                </div>
+            </div>
         )}
         </>
     );

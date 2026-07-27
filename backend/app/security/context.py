@@ -42,3 +42,4 @@ class UserContext:
 
 current_user: ContextVar[UserContext | None] = ContextVar("current_user", default=None)
 current_cube_token: ContextVar[str | None] = ContextVar("current_cube_token", default=None)
+current_preferences: ContextVar[dict | None] = ContextVar("current_preferences", default=None)

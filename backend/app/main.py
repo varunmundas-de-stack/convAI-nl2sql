@@ -30,7 +30,7 @@ from app.services.query_orchestrator import execute_query as run_pipeline, resum
 from app.services.helpers.catalog_manager import CatalogManager
 from app.utils.tracer import get_tracer
 from app.security.auth import create_cube_token, get_current_user
-from app.security.context import UserContext, current_cube_token, current_user
+from app.security.context import UserContext, current_cube_token, current_user, current_preferences
 from app.security.metadata_store import log_audit, save_chat_message
 
 # Module-level tracer (provider is set up by llm_service on first import)
@@ -126,12 +126,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Golden cache initialization failed (non-fatal): {e}")
 
+    # Start intel scheduler (generates AI narratives every 6h)
+    try:
+        from app.intel.scheduler import start_scheduler
+        start_scheduler()
+        logger.info("Intel scheduler started")
+    except Exception as e:
+        logger.warning(f"Intel scheduler failed to start (non-fatal): {e}")
+
     logger.info("NL2SQL API started successfully")
 
     yield
 
     # Shutdown
     logger.info("Shutting down NL2SQL API...")
+    try:
+        from app.intel.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
 
 
 # =============================================================================
@@ -179,6 +192,18 @@ except Exception as e:
 try:
     from app.objectives_router import router as objectives_router
     app.include_router(objectives_router)
+except Exception as e:
+    logger.warning(f"Objectives router mount failed (non-fatal): {e}")
+
+try:
+    from app.persona_router import router as persona_router
+    app.include_router(persona_router, dependencies=[Depends(get_current_user)])
+except Exception as e:
+    logger.warning(f"Persona router mount failed (non-fatal): {e}")
+
+try:
+    from app.objectives_router import router as objectives_router
+    app.include_router(objectives_router, dependencies=[Depends(get_current_user)])
 except Exception as e:
     logger.warning(f"Objectives router mount failed (non-fatal): {e}")
 
@@ -251,13 +276,33 @@ class RetryRequest(BaseModel):
 def _set_user_context(user: UserContext):
     user_token = current_user.set(user)
     cube_token = current_cube_token.set(create_cube_token(user))
-    return user_token, cube_token
+
+    # Load resolved preferences (Spec 20 Tier-3) and store in context
+    try:
+        from app.services.persona.card_loader import get_loader as _get_loader
+        from app.services.persona.preference_store import resolve_preferences as _resolve_prefs
+        loader = _get_loader()
+        role = (user.role or "").lower()
+        card_id = role if role in loader.list_cards() else "asm"
+        card = loader.get_card(card_id)
+        card_defaults = {
+            p["preference"]: p["default"]
+            for p in card.get("preferences", [])
+            if "preference" in p and "default" in p
+        }
+        prefs = _resolve_prefs(user.user_id, card_defaults)
+    except Exception:
+        prefs = {}
+    pref_token = current_preferences.set(prefs)
+
+    return user_token, cube_token, pref_token
 
 
 def _reset_user_context(tokens):
-    user_token, cube_token = tokens
+    user_token, cube_token, pref_token = tokens
     current_cube_token.reset(cube_token)
     current_user.reset(user_token)
+    current_preferences.reset(pref_token)
 
 
 def _persist_query_side_effects(
@@ -881,7 +926,19 @@ async def get_dashboard_kpis(
         # 5. Target vs actual proxy
         target_proxy = min(round((cur_val / (prev_val * 1.2)) * 100), 100) if prev_val else 0
 
-        # 6. Trend — last 30 days of actual data (not calendar days)
+        # 6a. Trend — last 7 days
+        cur.execute(f"""
+            SELECT invoice_date::date AS day, COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date::date >= (
+                SELECT MAX(invoice_date::date) - INTERVAL '6 days'
+                FROM {schema}.fact_secondary_sales
+            )
+            GROUP BY invoice_date::date ORDER BY day ASC
+        """)
+        trend_7d = [{"label": str(r["day"]), "value": float(r["net_sales"])} for r in cur.fetchall()]
+
+        # 6b. Trend — last 30 days
         cur.execute(f"""
             SELECT invoice_date::date AS day, COALESCE(SUM(net_value),0) AS net_sales
             FROM {schema}.fact_secondary_sales
@@ -891,7 +948,20 @@ async def get_dashboard_kpis(
             )
             GROUP BY invoice_date::date ORDER BY day ASC
         """)
-        trend_7d = [{"label": str(r["day"]), "value": float(r["net_sales"])} for r in cur.fetchall()]
+        trend_30d = [{"label": str(r["day"]), "value": float(r["net_sales"])} for r in cur.fetchall()]
+
+        # 6c. Trend — last 90 days grouped by week
+        cur.execute(f"""
+            SELECT DATE_TRUNC('week', invoice_date::date) AS week_start,
+                   COALESCE(SUM(net_value),0) AS net_sales
+            FROM {schema}.fact_secondary_sales
+            WHERE invoice_date::date >= (
+                SELECT MAX(invoice_date::date) - INTERVAL '89 days'
+                FROM {schema}.fact_secondary_sales
+            )
+            GROUP BY week_start ORDER BY week_start ASC
+        """)
+        trend_90d = [{"label": str(r["week_start"])[:10], "value": float(r["net_sales"])} for r in cur.fetchall()]
 
         # 7. Top 10 brands
         cur.execute(f"""
@@ -921,7 +991,9 @@ async def get_dashboard_kpis(
                 "zone_coverage":    {"value": f"{zone_count} Zone{'s' if zone_count != 1 else ''}", "raw": zone_count, "trend": 0.0, "positive": True},
                 "target_vs_actual": {"value": f"{target_proxy}%", "raw": target_proxy, "trend": 2.1 if ns_trend >= 0 else -2.1, "positive": ns_trend >= 0},
             },
-            "trend_7d":  trend_7d,
+            "trend_7d":   trend_7d,
+            "trend_30d":  trend_30d,
+            "trend_90d":  trend_90d,
             "top_brands": top_brands,
             "zone_rows":  zone_rows,
         }

@@ -24,26 +24,41 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.intel.db import get_conn, dict_cursor
+from app.services.persona.card_loader import get_loader as _get_persona_loader
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Catalog constants — mirrors what catalog.yaml exposes
+# Catalog constants — loaded from metric registry (spec 12) via card_loader
 # ---------------------------------------------------------------------------
-_KNOWN_KPIS: set[str] = {
-    "net_value", "gross_value", "tax_value",
-    "billed_qty", "billed_volume", "billed_weight",
-}
+def _build_known_kpis() -> set[str]:
+    try:
+        loader = _get_persona_loader()
+        # Collect all metric_ids referenced across all loaded persona cards
+        ids: set[str] = set()
+        for card_id in loader.list_cards():
+            ids.update(loader.get_all_kpis(card_id))
+        # Also include the short legacy aliases still used in existing data
+        ids.update({"net_value", "gross_value", "tax_value", "billed_qty"})
+        return ids
+    except Exception:
+        # Fallback so the pipeline never hard-fails on loader errors
+        return {"net_value", "gross_value", "tax_value", "billed_qty"}
+
+
+_KNOWN_KPIS: set[str] = _build_known_kpis()
 
 _KPI_ALIASES: dict[str, str] = {
-    "revenue": "net_value",
-    "net revenue": "net_value",
-    "sales": "net_value",
-    "gross": "gross_value",
+    "revenue": "net_sales",
+    "net revenue": "net_sales",
+    "sales": "net_sales",
+    "net sales": "net_sales",
+    "gross": "gross_sales",
     "quantity": "billed_qty",
     "qty": "billed_qty",
-    "volume": "billed_volume",
-    "weight": "billed_weight",
+    # legacy column aliases kept for backward compat with older chat rows
+    "net_value": "net_sales",
+    "gross_value": "gross_sales",
 }
 
 _KNOWN_DIMENSIONS: set[str] = {

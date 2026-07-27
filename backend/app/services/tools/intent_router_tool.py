@@ -49,13 +49,60 @@ def _fetch_conversation_history(session_id: str | None) -> list[dict]:
         return []
 
 
+def _build_narrative_system() -> str:
+    """Build narrative system prompt, injecting resolved user preferences if available."""
+    try:
+        from app.security.context import current_preferences
+        prefs = current_preferences.get(None) or {}
+    except Exception:
+        prefs = {}
+
+    if not prefs:
+        return _NARRATIVE_SYSTEM
+
+    lines = ["User preferences (apply these to all queries):"]
+    label_map = {
+        "sales_type": ("Sales type", {
+            "primary": "primary (distributor billing)",
+            "secondary": "secondary (retailer offtake)",
+        }),
+        "comparison_period": ("Comparison period", {
+            "previous_month": "vs previous month",
+            "previous_year": "vs same period last year",
+            "last_7d": "vs last 7 days",
+        }),
+        "measure_unit": ("Measure unit", {
+            "value": "value (₹)",
+            "volume": "volume (cases/units)",
+        }),
+    }
+    for key, value in prefs.items():
+        if key in label_map:
+            label, val_map = label_map[key]
+            human_value = val_map.get(value, value)
+            lines.append(f"- {label}: {human_value}")
+        else:
+            lines.append(f"- {key}: {value}")
+
+    pref_block = "\n".join(lines)
+    result = f"{_NARRATIVE_SYSTEM}\n\n{pref_block}"
+
+    # Inject active objective context as a dedicated block
+    obj_ctx = prefs.get("active_objective_context", "")
+    if obj_ctx:
+        result += f"\n\nActive Objective Context (always keep this in mind when answering):\n{obj_ctx}"
+
+    return result
+
+
 def _call_claude_narrative(prompt: str) -> str:
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     model = os.getenv("ANTHROPIC_MODEL_ID", "claude-haiku-4-5-20251001")
+    system = _build_narrative_system()
     response = client.messages.create(
         model=model,
         max_tokens=1024,
-        system=_NARRATIVE_SYSTEM,
+        system=system,
         messages=[{"role": "user", "content": prompt}],
     )
     return response.content[0].text.strip()

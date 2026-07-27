@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState, useEffect } from "react";
+import { sendQuery } from "@/services/api";
 import {
     ArrowLeft, MessageSquare, Download, ChevronRight, AlertTriangle,
     TrendingDown, Target, Clock, Sparkles, BarChart2, Map, Users,
@@ -78,6 +79,27 @@ function InsightDetailContent() {
     const meta = TYPE_META[type] ?? TYPE_META.default;
     const MetaIcon = meta.icon;
     const pri = PRI_CONFIG[priority] ?? PRI_CONFIG.medium;
+
+    // Auto-fetch live analysis for this insight
+    const [liveRows, setLiveRows] = useState<Record<string, any>[]>([]);
+    const [liveLoading, setLiveLoading] = useState(true);
+    const [liveError, setLiveError] = useState(false);
+
+    useEffect(() => {
+        const q = sugQuery || drillQuestions[0]?.query;
+        if (!q) { setLiveLoading(false); return; }
+        sendQuery(q)
+            .then(r => {
+                const raw = r?.raw;
+                let rows: any[] = [];
+                if (raw?.visual_spec?.data?.rows) rows = raw.visual_spec.data.rows;
+                else if (Array.isArray(raw?.visual_spec?.data)) rows = raw.visual_spec.data;
+                else if (Array.isArray(raw?.data)) rows = raw.data;
+                setLiveRows(rows.slice(0, 10));
+            })
+            .catch(() => setLiveError(true))
+            .finally(() => setLiveLoading(false));
+    }, []);
 
     function goToChat(query: string) {
         sessionStorage.setItem("suggested_query", query);
@@ -185,6 +207,45 @@ function InsightDetailContent() {
                                 <ArrowLeft size={13} /> Back to Insights
                             </button>
                         </div>
+                    </div>
+                </div>
+
+                {/* Live Analysis Panel */}
+                <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-white/8 flex items-center gap-2">
+                        <Activity size={14} className="text-emerald-400" />
+                        <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Live Analysis</span>
+                        {liveLoading && <span className="text-[10px] text-white/30 ml-auto animate-pulse">Fetching data...</span>}
+                    </div>
+                    <div className="p-4">
+                        {liveLoading ? (
+                            <div className="space-y-2">
+                                {[0,1,2,3].map(i => <div key={i} className="h-8 bg-white/5 rounded-lg animate-pulse" />)}
+                            </div>
+                        ) : liveError || liveRows.length === 0 ? (
+                            <p className="text-sm text-white/30 italic">No live data — click a drill-down below to fetch in Chat.</p>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                    <thead>
+                                        <tr className="border-b border-white/10">
+                                            {Object.keys(liveRows[0]).map(h => (
+                                                <th key={h} className="text-left px-2 py-1.5 text-white/40 font-semibold uppercase tracking-wide">{h.replace(/_/g," ")}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {liveRows.map((row, i) => (
+                                            <tr key={i} className="border-b border-white/5 hover:bg-white/4 transition-colors">
+                                                {Object.values(row).map((v, j) => (
+                                                    <td key={j} className="px-2 py-1.5 text-white/70">{String(v ?? "—")}</td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 </div>
 

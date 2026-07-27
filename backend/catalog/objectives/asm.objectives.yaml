@@ -1,0 +1,103 @@
+# ASM Objectives Catalog
+role: asm
+objectives:
+  - id: increase_zone_sales
+    title: "Increase Zone Sales"
+    description: "Drive revenue growth in my assigned zones this period"
+    questions:
+      - id: growth_type
+        text: "What type of growth are you targeting?"
+        options:
+          - value: quantity
+            label: "Increase quantity sold"
+          - value: value
+            label: "Increase net value / revenue"
+          - value: both
+            label: "Both quantity and value"
+      - id: customer_focus
+        text: "Which customer segment to focus on?"
+        options:
+          - value: new_customers
+            label: "Acquire new customers"
+          - value: existing_customers
+            label: "Grow existing customers"
+          - value: both
+            label: "Both new and existing"
+      - id: strategy
+        text: "What sales strategy to apply?"
+        options:
+          - value: upsell
+            label: "Upsell — higher-value SKUs"
+          - value: cross_sell
+            label: "Cross-sell — complementary SKUs"
+          - value: both
+            label: "Both upsell and cross-sell"
+
+  - id: improve_distributor_performance
+    title: "Improve Distributor Performance"
+    description: "Identify and fix underperforming distributors in my territory"
+    questions:
+      - id: focus_area
+        text: "What aspect to improve?"
+        options:
+          - value: coverage
+            label: "Outlet coverage and reach"
+          - value: fill_rate
+            label: "Order fill rate and availability"
+          - value: collections
+            label: "Collections and payment compliance"
+      - id: priority_zone
+        text: "Which zone to prioritize?"
+        options:
+          - value: worst_performing
+            label: "Worst-performing zone first"
+          - value: highest_potential
+            label: "Highest-potential zone first"
+          - value: all_zones
+            label: "All zones equally"
+
+  - id: expand_sku_range
+    title: "Expand SKU Range"
+    description: "Push more SKUs per outlet and increase product portfolio breadth"
+    questions:
+      - id: sku_type
+        text: "Which SKUs to push?"
+        options:
+          - value: new_launches
+            label: "New product launches"
+          - value: low_penetration
+            label: "Existing SKUs with low penetration"
+          - value: premium
+            label: "Premium / high-margin SKUs"
+      - id: outlet_type
+        text: "Target outlet type?"
+        options:
+          - value: general_trade
+            label: "General trade retailers"
+          - value: modern_trade
+            label: "Modern trade / supermarkets"
+          - value: all
+            label: "All outlet types"
+
+  - id: beat_month_target
+    title: "Beat Monthly Target"
+    description: "Ensure all zones close the month above their sales targets"
+    questions:
+      - id: target_gap_focus
+        text: "How to address target gap?"
+        options:
+          - value: push_volume
+            label: "Push volume through distributor"
+          - value: focus_top_skus
+            label: "Focus on top revenue SKUs"
+          - value: activate_dormant
+            label: "Reactivate dormant accounts"
+      - id: monitoring_frequency
+        text: "How frequently to track progress?"
+        options:
+          - value: daily
+            label: "Daily check-ins"
+          - value: weekly
+            label: "Weekly reviews"
+          - value: milestone
+            label: "At 50% and 80% of month"

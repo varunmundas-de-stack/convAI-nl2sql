@@ -1,0 +1,147 @@
+# National Sales Manager Persona Card — Spec 10
+
+card_id: nsm
+version: 1
+display_name: "National Sales Manager"
+job_description: >
+  Owns national sales performance across all regions. Monitors total net sales,
+  target achievement, and strategic distributor health at the national level.
+  Reviews regional performance, drives cross-regional initiatives, and presents
+  monthly/quarterly business reviews to the Sales Head.
+
+hierarchy:
+  tree: sales
+  level: 5
+  reports_to: sales_head
+  manages: [rsm]
+
+scope:
+  operating_grain: nation
+  drilldown_path: [zone, state, distributor_name]
+  rollup_path: []
+  default_period: MTD
+
+kpis:
+  primary:
+    - net_sales
+    - target_achievement_pct
+    - outlet_coverage_pct
+  secondary:
+    - billed_qty
+    - distributor_stock_days
+    - sales_gap_value
+    - secondary_net_sales
+
+preferences:
+  - preference: sales_type
+    default: primary
+    ask_priority: high
+  - preference: comparison_period
+    default: smly
+    ask_priority: high
+  - preference: measure_unit
+    default: value
+    ask_priority: medium
+  - preference: trend_grain
+    default: month
+    ask_priority: never
+  - preference: baseline_window
+    default: l13m
+    ask_priority: never
+  - preference: default_period
+    default: MTD
+    ask_priority: never
+  - preference: drilldown_dimension
+    default: zone
+    ask_priority: never
+  - preference: output_format
+    default: chart
+    ask_priority: never
+
+insight_types:
+  - target_gap
+  - national_sales_trend
+  - sales_anomaly
+  - distributor_underperformance
+  - secondary_primary_gap
+  - stockout_risk
+  - fast_sku_opportunity
+  - outlet_coverage_drop
+
+questions:
+  - id: nsm_q1
+    text: "How is our national sales tracking vs target this {{period}}?"
+    intent: national_target_performance
+    entities:
+      metric: target_achievement_pct
+    cube_context:
+      measures: [net_sales, target_achievement_pct]
+      dimensions: [zone]
+
+  - id: nsm_q2
+    text: "Which regions are below target this {{period}}?"
+    intent: regional_target_gap
+    entities:
+      metric: target_achievement_pct
+      dimension: zone
+    cube_context:
+      measures: [target_achievement_pct, sales_gap_value]
+      dimensions: [zone]
+
+  - id: nsm_q3
+    text: "What is our YTD performance compared to same period last year?"
+    intent: ytd_smly_comparison
+    entities:
+      metric: net_sales
+    cube_context:
+      measures: [net_sales]
+      dimensions: [zone]
+
+  - id: nsm_q4
+    text: "Which brands are driving growth this quarter?"
+    intent: brand_growth_drivers
+    entities:
+      metric: net_sales
+      dimension: brand
+    cube_context:
+      measures: [net_sales, billed_qty]
+      dimensions: [brand, category]
+
+  - id: nsm_q5
+    text: "Show me national secondary vs primary sales gap trend."
+    intent: secondary_primary_gap_trend
+    entities:
+      metric: secondary_net_sales
+    cube_context:
+      measures: [net_sales, secondary_net_sales]
+      dimensions: [zone]
+
+actions:
+  - id: analyze_target_gap
+    label: "Analyse national target gap by region"
+    from_insight: target_gap
+  - id: review_national_strategy
+    label: "Review national sales strategy"
+    from_insight: national_sales_trend
+  - id: investigate_anomaly
+    label: "Investigate national anomaly"
+    from_insight: sales_anomaly
+  - id: escalate_to_rsm
+    label: "Escalate to Regional Sales Manager"
+    from_insight: distributor_underperformance
+  - id: review_secondary_push
+    label: "Review secondary push strategy"
+    from_insight: secondary_primary_gap
+  - id: raise_replenishment_order
+    label: "Coordinate national replenishment"
+    from_insight: stockout_risk
+  - id: expand_sku_distribution
+    label: "Drive national SKU distribution"
+    from_insight: fast_sku_opportunity
+  - id: review_coverage_gaps
+    label: "Review regional coverage gaps"
+    from_insight: outlet_coverage_drop
+
+cold_start:
+  ask_preferences: [sales_type, comparison_period]
+  max_questions: 2

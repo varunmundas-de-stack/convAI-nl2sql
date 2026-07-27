@@ -1,0 +1,100 @@
+# Metric Registry — Spec 12
+# One entry per metric. metric_id is stable and referenced by persona cards (10),
+# insight rules (13), and the preference catalog (11).
+# cube_measure must exist in the Cube.js schema.
+
+- metric_id: net_sales
+  display_name: "Net Sales"
+  cube_measure: fact_primary_sales.net_value
+  format: currency
+  unit: value
+  direction: higher_is_better
+  description: "Primary net sales value after returns and claims."
+
+- metric_id: secondary_net_sales
+  display_name: "Secondary Net Sales"
+  cube_measure: fact_secondary_sales.net_value
+  format: currency
+  unit: value
+  direction: higher_is_better
+  description: "Sell-out net sales value at the retailer level."
+
+- metric_id: gross_sales
+  display_name: "Gross Sales"
+  cube_measure: fact_primary_sales.gross_value
+  format: currency
+  unit: value
+  direction: higher_is_better
+  description: "Gross sales before deductions."
+
+- metric_id: billed_qty
+  display_name: "Billed Quantity"
+  cube_measure: fact_primary_sales.billed_qty
+  format: count
+  unit: units
+  direction: higher_is_better
+  description: "Number of units billed in primary sales."
+
+- metric_id: secondary_billed_qty
+  display_name: "Secondary Billed Qty"
+  cube_measure: fact_secondary_sales.billed_qty
+  format: count
+  unit: units
+  direction: higher_is_better
+  description: "Number of units sold at the retailer level."
+
+- metric_id: tax_value
+  display_name: "Tax Value"
+  cube_measure: fact_primary_sales.tax_value
+  format: currency
+  unit: value
+  direction: neutral
+  description: "Tax component of primary sales billing."
+
+- metric_id: target_achievement_pct
+  display_name: "Target Achievement"
+  cube_measure: Sales.targetAchievementPct
+  format: percentage
+  unit: pct
+  direction: higher_is_better
+  description: "Net sales as a percent of target for the period."
+
+- metric_id: sales_gap_value
+  display_name: "Sales Gap"
+  cube_measure: Sales.salesGapValue
+  format: currency
+  unit: value
+  direction: lower_is_better
+  description: "Gap between target and actual net sales value."
+
+- metric_id: distributor_stock_days
+  display_name: "Stock Days"
+  cube_measure: Inventory.distributorStockDays
+  format: number
+  unit: days
+  direction: neutral
+  description: "Days of stock cover at the distributor. Too low or too high is a risk."
+
+- metric_id: outlet_coverage_pct
+  display_name: "Outlet Coverage"
+  cube_measure: Coverage.outletCoveragePct
+  format: percentage
+  unit: pct
+  direction: higher_is_better
+  description: "Percentage of active outlets billed at least once in the period."
+
+- metric_id: lines_per_call
+  display_name: "Lines Per Call"
+  cube_measure: Coverage.linesPerCall
+  format: number
+  unit: count
+  direction: higher_is_better
+  description: "Average SKU lines billed per outlet visit."
+
+- metric_id: invoice_count
+  display_name: "Invoice Count"
+  cube_measure: fact_primary_sales.count
+  format: count
+  unit: count
+  direction: higher_is_better
+  description: "Number of invoices raised in the period."

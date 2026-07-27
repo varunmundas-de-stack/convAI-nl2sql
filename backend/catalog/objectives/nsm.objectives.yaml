@@ -1,0 +1,71 @@
+# NSM Objectives Catalog
+role: nsm
+objectives:
+  - id: national_sales_growth
+    title: "National Sales Growth"
+    description: "Drive national revenue targets and market share growth"
+    questions:
+      - id: growth_lever
+        text: "Primary growth lever for the period?"
+        options:
+          - value: volume
+            label: "Volume — units sold"
+          - value: value
+            label: "Value — net revenue"
+          - value: market_share
+            label: "Market share gain"
+      - id: geography_focus
+        text: "Geographic focus?"
+        options:
+          - value: underperforming_regions
+            label: "Fix underperforming regions"
+          - value: top_regions
+            label: "Accelerate top-performing regions"
+          - value: balanced
+            label: "Balanced national push"
+
+  - id: launch_new_product
+    title: "New Product Launch Tracking"
+    description: "Monitor and accelerate new SKU distribution and trial"
+    questions:
+      - id: launch_metric
+        text: "Primary launch metric?"
+        options:
+          - value: distribution
+            label: "Numeric distribution (% of outlets)"
+          - value: trial_rate
+            label: "Trial / first-purchase rate"
+          - value: repeat_purchase
+            label: "Repeat purchase rate"
+      - id: channel_priority
+        text: "Which channel to seed first?"
+        options:
+          - value: modern_trade
+            label: "Modern trade"
+          - value: general_trade
+            label: "General trade"
+          - value: ecommerce
+            label: "E-commerce / quick commerce"
+
+  - id: reduce_target_gap
+    title: "Reduce National Target Gap"
+    description: "Identify and close the gap between actual and national sales target"
+    questions:
+      - id: gap_strategy
+        text: "Strategy to close the gap?"
+        options:
+          - value: volume_push
+            label: "Volume push through distributors"
+          - value: price_realization
+            label: "Improve price realization"
+          - value: channel_activation
+            label: "Activate new channels"
+      - id: time_horizon
+        text: "Target closure horizon?"
+        options:
+          - value: this_month
+            label: "Close within this month"
+          - value: this_quarter
+            label: "Close within this quarter"
+          - value: next_quarter
+            label: "Plan for next quarter"

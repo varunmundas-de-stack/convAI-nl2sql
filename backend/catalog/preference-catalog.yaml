@@ -1,0 +1,169 @@
+# Preference Catalog — Spec 11
+# One entry per disambiguation slot. Shared across all roles.
+# The per-role default lives in the persona card (spec 10), not here.
+# maps_to keys: measure, unit, comparison_metric, comparison_period,
+#               baseline_window, trend_grain, dimension, filter
+
+- preference_id: sales_type
+  category: data_source
+  question_text: "Which sales view do you usually work with?"
+  reversible: true
+  options:
+    - value: primary
+      label: "Primary (distributor billing)"
+      maps_to:
+        measure: net_sales
+    - value: secondary
+      label: "Secondary (retailer sell-out)"
+      maps_to:
+        measure: secondary_net_sales
+
+- preference_id: measure_unit
+  category: measure
+  question_text: "How do you prefer to measure sales?"
+  reversible: true
+  options:
+    - value: value
+      label: "Value (₹)"
+      maps_to:
+        unit: value
+    - value: volume
+      label: "Volume (units)"
+      maps_to:
+        unit: units
+
+- preference_id: comparison_period
+  category: comparison
+  question_text: "What period do you compare against by default?"
+  reversible: true
+  options:
+    - value: previous_month
+      label: "Previous Month"
+      maps_to:
+        comparison_period: previous_month
+    - value: previous_quarter
+      label: "Previous Quarter"
+      maps_to:
+        comparison_period: previous_quarter
+    - value: smly
+      label: "Same Month Last Year"
+      maps_to:
+        comparison_period: smly
+
+- preference_id: baseline_window
+  category: baseline
+  question_text: "How many months of history for anomaly detection?"
+  reversible: true
+  options:
+    - value: l3m
+      label: "Last 3 Months"
+      maps_to:
+        baseline_window: l3m
+    - value: l6m
+      label: "Last 6 Months"
+      maps_to:
+        baseline_window: l6m
+    - value: l13m
+      label: "Last 13 Months"
+      maps_to:
+        baseline_window: l13m
+
+- preference_id: trend_grain
+  category: trend
+  question_text: "What time granularity for trend charts?"
+  reversible: true
+  options:
+    - value: week
+      label: "Weekly"
+      maps_to:
+        trend_grain: week
+    - value: month
+      label: "Monthly"
+      maps_to:
+        trend_grain: month
+    - value: day
+      label: "Daily"
+      maps_to:
+        trend_grain: day
+
+- preference_id: default_period
+  category: time_framing
+  question_text: "What time window do you work with most?"
+  reversible: true
+  options:
+    - value: MTD
+      label: "Month to Date"
+      maps_to:
+        filter:
+          period: MTD
+    - value: QTD
+      label: "Quarter to Date"
+      maps_to:
+        filter:
+          period: QTD
+    - value: YTD
+      label: "Year to Date"
+      maps_to:
+        filter:
+          period: YTD
+    - value: TODAY
+      label: "Today"
+      maps_to:
+        filter:
+          period: TODAY
+
+- preference_id: drilldown_dimension
+  category: granularity
+  question_text: "Which dimension do you drill into most often?"
+  reversible: true
+  options:
+    - value: zone
+      label: "Zone"
+      maps_to:
+        dimension: zone
+    - value: state
+      label: "State"
+      maps_to:
+        dimension: state
+    - value: distributor
+      label: "Distributor"
+      maps_to:
+        dimension: distributor_name
+    - value: brand
+      label: "Brand"
+      maps_to:
+        dimension: brand
+
+- preference_id: output_format
+  category: output_style
+  question_text: "How do you prefer to see answers?"
+  reversible: true
+  options:
+    - value: table
+      label: "Table"
+      maps_to: {}
+    - value: chart
+      label: "Chart"
+      maps_to: {}
+    - value: narrative
+      label: "Narrative summary"
+      maps_to: {}
+
+- preference_id: channel_filter
+  category: channel
+  question_text: "Do you focus on a specific sales channel?"
+  reversible: true
+  options:
+    - value: all
+      label: "All Channels"
+      maps_to: {}
+    - value: modern_trade
+      label: "Modern Trade"
+      maps_to:
+        filter:
+          retailer_type: "MT"
+    - value: general_trade
+      label: "General Trade"
+      maps_to:
+        filter:
+          retailer_type: "GT"

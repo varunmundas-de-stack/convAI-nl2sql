@@ -1,0 +1,42 @@
+# ASM Home Layout — Spec 14
+card_id: asm
+sections:
+  - id: asm_kpi_strip
+    title: "Key Metrics"
+    type: kpi_strip
+    items:
+      - label: "Net Sales"
+        metric: net_sales
+      - label: "Target Achievement"
+        metric: target_achievement_pct
+      - label: "Outlet Coverage"
+        metric: outlet_coverage_pct
+
+  - id: asm_insights
+    title: "Priority Alerts"
+    type: insight_list
+    max_items: 3
+    filters:
+      priority: [critical, high]
+    insight_types:
+      - target_gap
+      - distributor_underperformance
+      - stockout_risk
+
+  - id: asm_actions
+    title: "Recommended Actions"
+    type: action_list
+    max_items: 4
+    source: priority_insights
+
+  - id: asm_questions
+    title: "Ask Analyst"
+    type: suggested_questions
+    max_items: 4
+    source: question_bank
+
+  - id: asm_trend
+    title: "Net Sales Trend"
+    type: chart
+    metric: net_sales
+    trend_grain: week

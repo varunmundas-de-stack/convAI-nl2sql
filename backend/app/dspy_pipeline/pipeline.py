@@ -832,6 +832,17 @@ class IntentExtractionPipeline(dspy.Module):
                 conversation = self._build_conversation_string(previous_qco)
                 interpreter_context = self._build_interpreter_context(previous_qco) if previous_qco else ""
 
+                # Inject resolved user preferences (Spec 20 Tier-3) into interpreter context
+                try:
+                    from app.security.context import current_preferences as _current_prefs
+                    prefs = _current_prefs.get(None) or {}
+                    if prefs:
+                        pref_lines = ["User preferences:"] + [f"- {k}: {v}" for k, v in prefs.items()]
+                        pref_block = "\n".join(pref_lines)
+                        interpreter_context = (interpreter_context + "\n\n" + pref_block).strip()
+                except Exception:
+                    pass
+
                 resolved_query = self.interpreter(
                     current_input=query_text,
                     conversation=conversation,

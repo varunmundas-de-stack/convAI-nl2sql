@@ -1,0 +1,164 @@
+# Insight Rule Registry — Spec 13
+# Each rule is a deterministic check. Cards (spec 10) reference rule ids here.
+# The engine (step4_detect.py) executes triggers; LLM only narrates results.
+# actions[] are ADVISORY defaults; the persona card owns authoritative mappings
+# via actions[].from_insight.
+
+- rule_id: target_gap
+  type: risk
+  title: "Target achievement is below expected level"
+  trigger:
+    kind: threshold
+    metric: target_achievement_pct
+    operator: lt
+    value: 80
+  breakdown: [zone, distributor_name, sku_code]
+  impact:
+    metric: sales_gap_value
+  evidence: [distributor_underperformance, outlet_coverage_drop, stockout_risk]
+  actions: [analyze_target_gap, review_weak_distributors]
+  applies_to:
+    operating_grain: [nation, region, area]
+
+- rule_id: distributor_underperformance
+  type: risk
+  title: "Distributor sales declining versus last period"
+  trigger:
+    kind: variance
+    metric: net_sales
+    baseline: previous_month
+    direction: down
+    min_change_pct: 10
+  breakdown: [distributor_name, zone]
+  impact:
+    metric: net_sales
+  evidence: [outlet_coverage_drop, stockout_risk]
+  actions: [review_weak_distributors, escalate_to_asm]
+  applies_to:
+    operating_grain: [area, distributor]
+
+- rule_id: outlet_coverage_drop
+  type: risk
+  title: "Outlet coverage has dropped this period"
+  trigger:
+    kind: variance
+    metric: outlet_coverage_pct
+    baseline: previous_month
+    direction: down
+    min_change_pct: 5
+  breakdown: [zone, state, distributor_name]
+  impact:
+    metric: outlet_coverage_pct
+  actions: [review_coverage_gaps]
+  applies_to:
+    operating_grain: [area, region]
+
+- rule_id: stockout_risk
+  type: risk
+  title: "Stock days critically low — stockout risk"
+  trigger:
+    kind: threshold
+    metric: distributor_stock_days
+    operator: lt
+    value: 7
+  breakdown: [distributor_name, zone, brand]
+  impact:
+    metric: distributor_stock_days
+  actions: [raise_replenishment_order]
+  applies_to:
+    operating_grain: [distributor, area, region]
+
+- rule_id: excess_stock
+  type: risk
+  title: "Excess stock at distributor — liquidation risk"
+  trigger:
+    kind: threshold
+    metric: distributor_stock_days
+    operator: gt
+    value: 45
+  breakdown: [distributor_name, brand]
+  impact:
+    metric: distributor_stock_days
+  actions: [plan_liquidation_scheme]
+  applies_to:
+    operating_grain: [distributor, area]
+
+- rule_id: sales_anomaly
+  type: anomaly
+  title: "Unusual sales spike or drop detected"
+  trigger:
+    kind: anomaly
+    metric: net_sales
+    history_window: l3m
+    z_threshold: 2.0
+  breakdown: [zone, state, brand]
+  impact:
+    metric: net_sales
+  actions: [investigate_anomaly]
+  applies_to:
+    operating_grain: [nation, region, area]
+
+- rule_id: fast_sku_opportunity
+  type: opportunity
+  title: "Fast-moving SKU under-distributed in zone"
+  trigger:
+    kind: variance
+    metric: billed_qty
+    baseline: previous_month
+    direction: up
+    min_change_pct: 20
+  breakdown: [sku_code, zone, distributor_name]
+  impact:
+    metric: net_sales
+  actions: [expand_sku_distribution]
+  applies_to:
+    operating_grain: [area, region]
+
+- rule_id: secondary_primary_gap
+  type: driver
+  title: "Secondary sales lagging behind primary — pipeline build-up"
+  trigger:
+    kind: variance
+    metric: secondary_net_sales
+    baseline: previous_month
+    direction: down
+    min_change_pct: 15
+  breakdown: [zone, distributor_name, retailer_type]
+  impact:
+    metric: secondary_net_sales
+  evidence: [outlet_coverage_drop]
+  actions: [review_secondary_push]
+  applies_to:
+    operating_grain: [area, region, nation]
+
+- rule_id: national_sales_trend
+  type: driver
+  title: "National sales showing consistent trend"
+  trigger:
+    kind: variance
+    metric: net_sales
+    baseline: previous_quarter
+    direction: down
+    min_change_pct: 5
+  breakdown: [zone, brand, category]
+  impact:
+    metric: net_sales
+  actions: [review_national_strategy]
+  applies_to:
+    operating_grain: [nation]
+
+- rule_id: lines_per_call_drop
+  type: risk
+  title: "Lines per call declining — sales productivity falling"
+  trigger:
+    kind: variance
+    metric: lines_per_call
+    baseline: previous_month
+    direction: down
+    min_change_pct: 10
+  breakdown: [zone, salesrep_name, distributor_name]
+  impact:
+    metric: net_sales
+  actions: [review_sales_productivity]
+  applies_to:
+    operating_grain: [area, distributor]

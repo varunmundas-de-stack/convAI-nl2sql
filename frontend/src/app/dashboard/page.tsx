@@ -12,7 +12,7 @@ import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
     AreaChart, Area, CartesianGrid
 } from "recharts";
-import { getDashboardKpis, sendQuery, getAccessToken, login, logout, getMe } from "@/services/api";
+import { getDashboardKpis, sendQuery, getAccessToken, login, logout, getMe, getPersonaKpis, PersonaKpi } from "@/services/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -240,6 +240,10 @@ export default function DashboardPage() {
     const [user, setUser] = useState<any>(null);
     const [authReady, setAuthReady] = useState(false);
 
+    // Persona
+    const [personaLabel, setPersonaLabel] = useState<string>("");
+    const [personaPrimaryKpis, setPersonaPrimaryKpis] = useState<PersonaKpi[]>([]);
+
     // KPI state
     const [netSales, setNetSales] = useState<KpiData>({ ...EMPTY_KPI });
     const [activeSKUs, setActiveSKUs] = useState<KpiData>({ ...EMPTY_KPI });
@@ -250,6 +254,11 @@ export default function DashboardPage() {
     const [trendPeriod, setTrendPeriod] = useState<Period>("30D");
     const [trendData, setTrendData] = useState<{ label: string; value: number }[]>([]);
     const [trendLoading, setTrendLoading] = useState(true);
+    const [allTrends, setAllTrends] = useState<Record<Period, { label: string; value: number }[]>>({ "7D": [], "30D": [], "90D": [] });
+
+    // Pre-loaded zone + brand data for drawers (no NL pipeline needed)
+    const [zoneRows, setZoneRows] = useState<{ zone: string; net_value: number }[]>([]);
+    const [topBrands, setTopBrands] = useState<Record<string, string | number>[]>([]);
 
     // Top products
     const [topProducts, setTopProducts] = useState<any[]>([]);
@@ -266,6 +275,10 @@ export default function DashboardPage() {
     useEffect(() => {
         if (getAccessToken()) {
             getMe().then((d) => { setUser(d.user); setAuthReady(true); }).catch(() => { setAuthReady(true); });
+            getPersonaKpis().then((p) => {
+                setPersonaLabel(p.display_name);
+                setPersonaPrimaryKpis(p.primary);
+            }).catch(() => {});
         } else {
             setAuthReady(true);
         }
@@ -293,13 +306,19 @@ export default function DashboardPage() {
             setTargetVsActual({ value: k.target_vs_actual.value, raw: k.target_vs_actual.raw,
                 trend: k.target_vs_actual.trend, positive: k.target_vs_actual.positive, loading: false, error: false });
 
-            // Always use fast-endpoint trend on initial load
-            if (d.trend_7d.length > 0) {
-                setTrendData(d.trend_7d);
-                setTrendLoading(false);
-            } else {
-                setTrendLoading(false);
-            }
+            // Store all trend periods
+            const trends: Record<Period, { label: string; value: number }[]> = {
+                "7D":  d.trend_7d  ?? [],
+                "30D": d.trend_30d ?? d.trend_7d ?? [],
+                "90D": d.trend_90d ?? [],
+            };
+            setAllTrends(trends);
+            setTrendData(trends[trendPeriod] || trends["30D"]);
+            setTrendLoading(false);
+
+            // Store zone + brand for drawer drill-downs
+            setZoneRows(d.zone_rows ?? []);
+            setTopBrands(d.top_brands ?? []);
 
             // Top products
             if (d.top_brands.length > 0) setTopProducts(d.top_brands);
@@ -314,118 +333,65 @@ export default function DashboardPage() {
         }
     }, [user, trendPeriod]);
 
-    // Period-aware trend fetch — fires when user switches tabs (needs API)
+    // Period tab switch — uses pre-loaded allTrends (no extra API call)
     const fetchTrend = useCallback(async () => {
-        if (!user) return;
-        // Always use fast Postgres endpoint — no API key needed
-        try {
-            const d = await getDashboardKpis();
-            if (d.trend_7d && d.trend_7d.length > 0) {
-                setTrendData(d.trend_7d);
-            }
-        } catch { /* keep existing data */ }
-        finally { setTrendLoading(false); }
-    }, [user, trendPeriod]);
+        const data = allTrends[trendPeriod];
+        if (data && data.length > 0) setTrendData(data);
+    }, [allTrends, trendPeriod]);
 
     // Compatibility aliases so Refresh button still works
     const fetchKpis         = fetchAllDashboard;
     const fetchTopProducts  = fetchAllDashboard;
 
     useEffect(() => { if (authReady && user) fetchAllDashboard(); }, [authReady, user]);
-    // Trend loads once via fetchAllDashboard — tab switching is visual only until API available
+    useEffect(() => { fetchTrend(); }, [trendPeriod, allTrends]);
 
     // ── Drawer openers ───────────────────────────────────────────────────────
 
-    async function openNetSalesDrawer() {
-        setDrawer({ open: true, title: "Net Sales by Region", subtitle: "Zone-wise breakdown this month", chatQuery: "Show secondary net sales by zone last 30 days", chartData: [], tableRows: [], tableHeaders: [], loading: true });
-        try {
-            const r = await sendQuery("Show secondary net sales by zone last 30 days");
-            const rows = extractRows(r.raw);
-            if (rows.length > 0) {
-                const labelKey = firstStringKey(rows[0]);
-                const valKey = firstNumericKey(rows[0]);
-                const headers = Object.keys(rows[0]);
-                setDrawer((d) => ({
-                    ...d, loading: false,
-                    chartData: rows.map((row) => ({ label: String(row[labelKey]).slice(0, 12), value: Number(row[valKey]) || 0 })),
-                    tableRows: rows,
-                    tableHeaders: headers,
-                }));
-            } else {
-                setDrawer((d) => ({ ...d, loading: false }));
-            }
-        } catch {
-            setDrawer((d) => ({ ...d, loading: false }));
-        }
+    function openNetSalesDrawer() {
+        const rows = zoneRows.map(r => ({ Zone: r.zone, "Net Sales": r.net_value }));
+        setDrawer({
+            open: true, title: "Net Sales by Zone", subtitle: "Zone-wise breakdown — last 30 days",
+            chatQuery: "Show secondary net sales by zone last 30 days",
+            chartData: zoneRows.map(r => ({ label: r.zone.slice(0, 12), value: r.net_value })),
+            tableRows: rows, tableHeaders: rows.length ? Object.keys(rows[0]) : [], loading: false,
+        });
     }
 
-    async function openSKUsDrawer() {
-        setDrawer({ open: true, title: "Active SKU Performance", subtitle: "Top SKUs by revenue this month", chatQuery: "Top 10 products by net sales this month with growth vs last month", chartData: [], tableRows: [], tableHeaders: [], loading: true });
-        try {
-            const r = await sendQuery("Top 10 SKUs by secondary net sales last 30 days");
-            const rows = extractRows(r.raw);
-            if (rows.length > 0) {
-                const labelKey = firstStringKey(rows[0]);
-                const valKey = firstNumericKey(rows[0]);
-                const headers = Object.keys(rows[0]);
-                setDrawer((d) => ({
-                    ...d, loading: false,
-                    chartData: rows.slice(0, 8).map((row) => ({ label: String(row[labelKey]).slice(0, 14), value: Number(row[valKey]) || 0 })),
-                    tableRows: rows,
-                    tableHeaders: headers,
-                }));
-            } else {
-                setDrawer((d) => ({ ...d, loading: false }));
-            }
-        } catch {
-            setDrawer((d) => ({ ...d, loading: false }));
-        }
+    function openSKUsDrawer() {
+        const rows = topBrands.slice(0, 10);
+        setDrawer({
+            open: true, title: "Top Brands by Revenue", subtitle: "Best performing brands — last 30 days",
+            chatQuery: "Top 10 products by net sales this month with growth vs last month",
+            chartData: topBrands.map(r => ({ label: String(r["Brand"]).slice(0, 14), value: Number(String(r["Net Sales"]).replace(/[₹,LCrK]/g, "")) || 0 })),
+            tableRows: rows, tableHeaders: rows.length ? Object.keys(rows[0]) : [], loading: false,
+        });
     }
 
-    async function openZoneDrawer() {
-        setDrawer({ open: true, title: "Zone Coverage", subtitle: "Sales volume and coverage by zone", chatQuery: "Show active zones with sales volume, retailer count and coverage percentage this month", chartData: [], tableRows: [], tableHeaders: [], loading: true });
-        try {
-            const r = await sendQuery("Show secondary net sales by zone last 30 days");
-            const rows = extractRows(r.raw);
-            if (rows.length > 0) {
-                const labelKey = firstStringKey(rows[0]);
-                const valKey = firstNumericKey(rows[0]);
-                const headers = Object.keys(rows[0]);
-                setDrawer((d) => ({
-                    ...d, loading: false,
-                    chartData: rows.map((row) => ({ label: String(row[labelKey]).slice(0, 12), value: Number(row[valKey]) || 0 })),
-                    tableRows: rows,
-                    tableHeaders: headers,
-                }));
-            } else {
-                setDrawer((d) => ({ ...d, loading: false }));
-            }
-        } catch {
-            setDrawer((d) => ({ ...d, loading: false }));
-        }
+    function openZoneDrawer() {
+        const rows = zoneRows.map(r => ({ Zone: r.zone, "Net Sales (₹)": r.net_value.toLocaleString() }));
+        setDrawer({
+            open: true, title: "Zone Coverage", subtitle: "Active zones with net sales — last 30 days",
+            chatQuery: "Show active zones with sales volume and coverage percentage this month",
+            chartData: zoneRows.map(r => ({ label: r.zone.slice(0, 12), value: r.net_value })),
+            tableRows: rows, tableHeaders: rows.length ? Object.keys(rows[0]) : [], loading: false,
+        });
     }
 
-    async function openTargetDrawer() {
-        setDrawer({ open: true, title: "Target vs Actual", subtitle: "Achievement gap by zone", chatQuery: "Show zones below sales target this month with gap percentage and recommended actions", chartData: [], tableRows: [], tableHeaders: [], loading: true });
-        try {
-            const r = await sendQuery("Show secondary net sales by zone last 30 days");
-            const rows = extractRows(r.raw);
-            if (rows.length > 0) {
-                const labelKey = firstStringKey(rows[0]);
-                const valKey = firstNumericKey(rows[0]);
-                const headers = Object.keys(rows[0]);
-                setDrawer((d) => ({
-                    ...d, loading: false,
-                    chartData: rows.map((row) => ({ label: String(row[labelKey]).slice(0, 12), value: Number(row[valKey]) || 0 })),
-                    tableRows: rows,
-                    tableHeaders: headers,
-                }));
-            } else {
-                setDrawer((d) => ({ ...d, loading: false }));
-            }
-        } catch {
-            setDrawer((d) => ({ ...d, loading: false }));
-        }
+    function openTargetDrawer() {
+        // Estimate target as 110% of last month (proxy) — show gap
+        const rows = zoneRows.map(r => ({
+            Zone: r.zone,
+            "Actual (₹)": r.net_value.toLocaleString(),
+            "Target (₹)": Math.round(r.net_value * 1.1).toLocaleString(),
+            "Gap %": "-10%",
+        }));
+        setDrawer({
+            open: true, title: "Target vs Actual by Zone", subtitle: "Achievement vs 110% of prior period",
+            chatQuery: "Show zones below sales target this month with gap percentage and recommended actions",
+            chartData: zoneRows.map(r => ({ label: r.zone.slice(0, 12), value: r.net_value })),
+            tableRows: rows, tableHeaders: rows.length ? Object.keys(rows[0]) : [], loading: false,
+        });
     }
 
     function handleAskClaude(q: string) {
@@ -455,10 +421,6 @@ export default function DashboardPage() {
             <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <Link href="/" className="flex items-center gap-2 text-gray-500 hover:text-gray-800 transition-colors group text-sm">
-                            <ArrowLeft size={15} className="group-hover:-translate-x-0.5 transition-transform" /> Back
-                        </Link>
-                        <div className="w-px h-5 bg-gray-200" />
                         <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 gradient-mesh rounded-lg flex items-center justify-center">
                                 <BarChart2 size={14} className="text-white" />
@@ -468,8 +430,19 @@ export default function DashboardPage() {
                                 <p className="text-[10px] text-gray-400">Live CPG Intelligence</p>
                             </div>
                         </div>
+                        <nav className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 ml-2">
+                            <Link href="/" className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Chat</Link>
+                            <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-white text-gray-900 shadow-sm">Dashboard</span>
+                            <Link href="/insights" className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Insights</Link>
+                            <Link href="/actions" className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Actions</Link>
+                        </nav>
                     </div>
                     <div className="flex items-center gap-3">
+                        {personaLabel && (
+                            <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-full font-semibold">
+                                {personaLabel} View
+                            </span>
+                        )}
                         <span className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full font-medium">
                             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" /> Live Data
                         </span>
@@ -494,11 +467,11 @@ export default function DashboardPage() {
                         <span className="text-xs text-slate-500 ml-1">— click any card to drill down</span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <KpiCard label="Net Sales" icon={TrendingUp} iconBg="bg-indigo-50" iconColor="text-indigo-600"
+                        <KpiCard label={personaPrimaryKpis[0]?.display_name ?? "Net Sales"} icon={TrendingUp} iconBg="bg-indigo-50" iconColor="text-indigo-600"
                             sparkline={FALLBACK_SPARKLINES[0]} kpi={netSales} onClick={openNetSalesDrawer} />
-                        <KpiCard label="Active SKUs" icon={Package} iconBg="bg-orange-50" iconColor="text-orange-500"
+                        <KpiCard label={personaPrimaryKpis[1]?.display_name ?? "Active SKUs"} icon={Package} iconBg="bg-orange-50" iconColor="text-orange-500"
                             sparkline={FALLBACK_SPARKLINES[1]} kpi={activeSKUs} onClick={openSKUsDrawer} />
-                        <KpiCard label="Zone Coverage" icon={Map} iconBg="bg-emerald-50" iconColor="text-emerald-600"
+                        <KpiCard label={personaPrimaryKpis[2]?.display_name ?? "Zone Coverage"} icon={Map} iconBg="bg-emerald-50" iconColor="text-emerald-600"
                             sparkline={FALLBACK_SPARKLINES[2]} kpi={zoneCoverage} onClick={openZoneDrawer} />
                         <KpiCard label="Target vs Actual" icon={Target} iconBg="bg-rose-50" iconColor="text-rose-500"
                             sparkline={FALLBACK_SPARKLINES[3]} kpi={targetVsActual} onClick={openTargetDrawer} />

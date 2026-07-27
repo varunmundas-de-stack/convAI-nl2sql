@@ -440,6 +440,8 @@ export async function getDashboardKpis(): Promise<{
         target_vs_actual: { value: string; raw: number; trend: number; positive: boolean };
     };
     trend_7d:   { label: string; value: number }[];
+    trend_30d:  { label: string; value: number }[];
+    trend_90d:  { label: string; value: number }[];
     top_brands: Record<string, string | number>[];
     zone_rows:  { zone: string; net_value: number }[];
 }> {
@@ -448,9 +450,113 @@ export async function getDashboardKpis(): Promise<{
     return res.json();
 }
 
+export interface PersonaColdStartQuestion {
+    preference_id: string;
+    question_text: string;
+    options: { value: string; label: string }[];
+    default: string | null;
+}
+
+export async function getPersonaColdStart(): Promise<{ card_id: string; questions: PersonaColdStartQuestion[] }> {
+    const res = await apiFetch("/persona/me/cold-start");
+    if (!res.ok) throw new Error("Persona cold-start fetch failed");
+    return res.json();
+}
+
+export interface PersonaKpi {
+    metric_id: string;
+    display_name: string;
+    format: string;
+    unit: string;
+    direction: string;
+}
+
+export async function getPersonaKpis(): Promise<{ card_id: string; display_name: string; primary: PersonaKpi[]; secondary: PersonaKpi[] }> {
+    const res = await apiFetch("/persona/me/kpis");
+    if (!res.ok) throw new Error("Persona KPI fetch failed");
+    return res.json();
+}
+
+export interface HomeSection {
+    id: string;
+    title: string;
+    type: string;
+    items?: { id?: string; label: string; question?: string; intent?: string; metric?: string; from_insight?: string }[];
+    max_items?: number;
+    metric?: string;
+    trend_grain?: string;
+}
+
+export async function getPersonaHomeLayout(): Promise<{ card_id: string; display_name: string; sections: HomeSection[] }> {
+    const res = await apiFetch("/persona/me/home-layout");
+    if (!res.ok) throw new Error("Persona home-layout fetch failed");
+    return res.json();
+}
+
+export async function savePersonaPreferences(preferences: Record<string, string>): Promise<void> {
+    const res = await apiFetch("/persona/me/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences }),
+    });
+    if (!res.ok) throw new Error("Failed to save preferences");
+}
+
 export async function getInsights() {
     const res = await apiFetch("/insights");
     if (!res.ok) throw new Error("Failed to load insights");
+    return res.json();
+}
+
+// ── Objectives API ────────────────────────────────────────────────────────────
+
+export interface PersonaObjectiveSummary {
+    id: string;
+    title: string;
+    description: string;
+    question_count: number;
+}
+
+export interface PersonaObjectiveQuestion {
+    id: string;
+    text: string;
+    options: { value: string; label: string }[];
+}
+
+export interface PersonaObjectiveFull {
+    id: string;
+    title: string;
+    description: string;
+    questions: PersonaObjectiveQuestion[];
+}
+
+export async function listObjectives(): Promise<{ role: string; objectives: PersonaObjectiveSummary[] }> {
+    const res = await apiFetch("/objectives/me");
+    if (!res.ok) throw new Error("Failed to load objectives");
+    return res.json();
+}
+
+export async function getObjective(objectiveId: string): Promise<PersonaObjectiveFull> {
+    const res = await apiFetch(`/objectives/me/${objectiveId}`);
+    if (!res.ok) throw new Error("Failed to load objective");
+    return res.json();
+}
+
+export async function saveObjectiveResponse(objectiveId: string, answers: Record<string, string>): Promise<{
+    status: string; session_id: string; title: string; context_text: string; answers: Record<string, string>;
+}> {
+    const res = await apiFetch("/objectives/me/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ objective_id: objectiveId, answers }),
+    });
+    if (!res.ok) throw new Error("Failed to save objective");
+    return res.json();
+}
+
+export async function getActiveObjective(): Promise<{ active: { objective_id: string; title: string; context_text: string } | null }> {
+    const res = await apiFetch("/objectives/me/active");
+    if (!res.ok) return { active: null };
     return res.json();
 }
 

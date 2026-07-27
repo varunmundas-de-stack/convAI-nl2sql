@@ -380,10 +380,6 @@ export default function InsightsPage() {
             <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
                 <div className="max-w-5xl mx-auto px-5 py-4 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
-                        <button onClick={() => router.push("/")} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all">
-                            <ArrowLeft size={17} />
-                        </button>
-                        <div className="w-px h-5 bg-gray-200" />
                         <div className="flex items-center gap-2.5">
                             <div className="w-9 h-9 rounded-xl gradient-mesh flex items-center justify-center">
                                 <Sparkles size={15} className="text-white" />
@@ -393,6 +389,12 @@ export default function InsightsPage() {
                                 <p className="text-[10px] text-gray-400">{clientName || "Proactive alerts from your data"}</p>
                             </div>
                         </div>
+                        <nav className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 ml-2">
+                            <a href="/" className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Chat</a>
+                            <a href="/dashboard" className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Dashboard</a>
+                            <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-white text-gray-900 shadow-sm">Insights</span>
+                            <a href="/actions" className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors">Actions</a>
+                        </nav>
                     </div>
                     <div className="flex items-center gap-2">
                         {unreadCount > 0 && (

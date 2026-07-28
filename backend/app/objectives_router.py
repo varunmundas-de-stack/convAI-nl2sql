@@ -20,6 +20,7 @@ from app.security.context import UserContext
 from app.services.persona.preference_store import save_preferences, load_preferences
 
 router = APIRouter(prefix="/objectives", tags=["Objectives"])
+api_router = APIRouter(prefix="/api/objectives", tags=["Objectives"])
 
 _OBJECTIVES_DIR = Path(__file__).parent.parent / "catalog" / "objectives"
 
@@ -123,3 +124,77 @@ def save_objective_response(
         "context_text": context_text,
         "answers": body.answers,
     }
+
+
+# ── Legacy /api/objectives/* endpoints (used by ObjectiveModal component) ──────
+
+class LegacySaveRequest(BaseModel):
+    template_id: str
+    answers: dict[str, str]
+    title: str | None = None
+
+
+def _to_template(o: dict, role: str, include_questions: bool = False) -> dict:
+    out: dict = {
+        "template_id": o["id"],
+        "role": role,
+        "title": o["title"],
+        "description": o.get("description", ""),
+        "order_no": 0,
+    }
+    if include_questions:
+        out["questions"] = [
+            {
+                "question_id": q["id"],
+                "question_text": q["text"],
+                "input_type": "select",
+                "order_no": i,
+                "is_required": True,
+                "options": [
+                    {"label": opt["label"], "value": opt["value"], "order_no": j}
+                    for j, opt in enumerate(q.get("options", []))
+                ],
+            }
+            for i, q in enumerate(o.get("questions", []))
+        ]
+    return out
+
+
+@api_router.get("/templates")
+def legacy_list_templates(user: Annotated[UserContext, Depends(get_current_user)]):
+    role = (user.role or "asm").lower()
+    objectives = _load_objectives(role)
+    return {"templates": [_to_template(o, role) for o in objectives]}
+
+
+@api_router.get("/templates/{template_id}")
+def legacy_get_template(template_id: str, user: Annotated[UserContext, Depends(get_current_user)]):
+    role = (user.role or "asm").lower()
+    objectives = _load_objectives(role)
+    obj = next((o for o in objectives if o["id"] == template_id), None)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return _to_template(obj, role, include_questions=True)
+
+
+@api_router.post("")
+def legacy_save_objective(body: LegacySaveRequest, user: Annotated[UserContext, Depends(get_current_user)]):
+    role = (user.role or "asm").lower()
+    objectives = _load_objectives(role)
+    obj = next((o for o in objectives if o["id"] == body.template_id), None)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Template not found")
+    answer_lines = []
+    for q in obj.get("questions", []):
+        answer = body.answers.get(q["id"])
+        if answer:
+            label = next((opt["label"] for opt in q.get("options", []) if opt["value"] == answer), answer)
+            answer_lines.append(f"  - {q['text']}: {label}")
+    context_text = f"User Objective: {obj['title']}\n" + "\n".join(answer_lines)
+    prefs = {
+        "active_objective_id": body.template_id,
+        "active_objective_title": obj["title"],
+        "active_objective_context": context_text,
+    }
+    save_preferences(user.user_id, prefs)
+    return {"session_id": str(uuid.uuid4()), "template_id": body.template_id}

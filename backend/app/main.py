@@ -202,8 +202,9 @@ except Exception as e:
     logger.warning(f"Persona router mount failed (non-fatal): {e}")
 
 try:
-    from app.objectives_router import router as objectives_router
+    from app.objectives_router import router as objectives_router, api_router as objectives_api_router
     app.include_router(objectives_router, dependencies=[Depends(get_current_user)])
+    app.include_router(objectives_api_router, dependencies=[Depends(get_current_user)])
 except Exception as e:
     logger.warning(f"Objectives router mount failed (non-fatal): {e}")
 

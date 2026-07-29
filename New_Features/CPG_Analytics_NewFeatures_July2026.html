@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPG Analytics Portal — New Features & Test Guide · July 2026</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #1a1a2e;
+    background: #fff;
+  }
+
+  /* ── Page chrome ── */
+  .cover {
+    min-height: 100vh;
+    background: linear-gradient(145deg, #0f172a 0%, #1e3a5f 55%, #0d4f8c 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 80px 80px 60px;
+    page-break-after: always;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -120px; right: -120px;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(99,179,237,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .cover::after {
+    content: '';
+    position: absolute;
+    bottom: -80px; left: 200px;
+    width: 350px; height: 350px;
+    background: radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .cover-badge {
+    display: inline-block;
+    background: rgba(99,179,237,0.2);
+    border: 1px solid rgba(99,179,237,0.4);
+    color: #93c5fd;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 20px;
+    margin-bottom: 28px;
+  }
+  .cover h1 {
+    font-size: 44px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.15;
+    max-width: 620px;
+    margin-bottom: 20px;
+  }
+  .cover h1 span { color: #60a5fa; }
+  .cover-sub {
+    font-size: 16px;
+    color: #94a3b8;
+    max-width: 520px;
+    line-height: 1.6;
+    margin-bottom: 48px;
+  }
+  .cover-meta {
+    border-top: 1px solid rgba(255,255,255,0.12);
+    padding-top: 28px;
+    display: flex;
+    gap: 48px;
+  }
+  .cover-meta-item label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+  .cover-meta-item span {
+    font-size: 14px;
+    font-weight: 500;
+    color: #e2e8f0;
+  }
+
+  /* ── Page layout ── */
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 56px 64px;
+  }
+
+  /* ── Section headers ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    margin-top: 48px;
+  }
+  .section-header:first-child { margin-top: 0; }
+  .section-number {
+    width: 34px; height: 34px;
+    background: #1e40af;
+    color: #fff;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e40af;
+    margin: 20px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+
+  p { margin-bottom: 10px; color: #374151; }
+
+  /* ── Feature cards ── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .feature-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    background: #f8fafc;
+    position: relative;
+  }
+  .feature-card.highlight {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+  }
+  .feature-card.new-badge::before {
+    content: 'NEW';
+    position: absolute;
+    top: 12px; right: 14px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .feature-card .icon {
+    font-size: 22px;
+    margin-bottom: 10px;
+    display: block;
+  }
+  .feature-card h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    margin-bottom: 6px;
+  }
+  .feature-card p {
+    font-size: 12px;
+    color: #4b5563;
+    margin: 0;
+  }
+
+  /* ── Test steps ── */
+  .test-block {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .test-header {
+    background: #f1f5f9;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .test-status {
+    width: 22px; height: 22px;
+    border: 2px solid #cbd5e1;
+    border-radius: 5px;
+    flex-shrink: 0;
+  }
+  .test-header h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    flex: 1;
+  }
+  .test-tag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .test-tag.must { background: #fee2e2; color: #991b1b; }
+  .test-tag.nice { background: #fef9c3; color: #854d0e; }
+  .test-tag.infra { background: #dcfce7; color: #166534; }
+  .test-body { padding: 14px 18px; }
+  .test-body p { font-size: 12px; margin-bottom: 8px; }
+  .test-body ol, .test-body ul {
+    padding-left: 18px;
+    margin-bottom: 8px;
+  }
+  .test-body li {
+    font-size: 12px;
+    color: #374151;
+    margin-bottom: 4px;
+  }
+  .test-body .expected {
+    background: #f0fdf4;
+    border-left: 3px solid #22c55e;
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+    color: #166534;
+    margin-top: 8px;
+  }
+  .test-body .note {
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+    color: #78350f;
+    margin-top: 8px;
+  }
+
+  /* ── Sample queries box ── */
+  .query-box {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 12px 0;
+  }
+  .query-box p {
+    color: #94a3b8;
+    font-size: 11px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+  }
+  .query-box ul { list-style: none; padding: 0; margin: 0; }
+  .query-box li {
+    color: #60a5fa;
+    font-size: 12.5px;
+    font-family: 'Courier New', monospace;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .query-box li:last-child { border-bottom: none; }
+  .query-box li::before { content: '❯ '; color: #34d399; font-size: 11px; }
+
+  /* ── Credentials table ── */
+  .creds-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+  }
+  .creds-table th {
+    background: #1e40af;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 14px;
+    text-align: left;
+  }
+  .creds-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 12px;
+    color: #374151;
+  }
+  .creds-table tr:nth-child(even) td { background: #f8fafc; }
+  .creds-table code {
+    font-family: 'Courier New', monospace;
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: #1e40af;
+  }
+
+  /* ── Insights pills ── */
+  .insight-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .insight-pill {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: #374151;
+    font-weight: 500;
+  }
+  .insight-pill.high { border-color: #fca5a5; background: #fff1f2; color: #991b1b; }
+  .insight-pill.med  { border-color: #fcd34d; background: #fffbeb; color: #78350f; }
+
+  /* ── KPI strip ── */
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 14px 0;
+  }
+  .kpi-card {
+    background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+    border-radius: 8px;
+    padding: 14px 16px;
+    color: #fff;
+    text-align: center;
+  }
+  .kpi-card .val {
+    font-size: 20px;
+    font-weight: 700;
+    display: block;
+  }
+  .kpi-card .lbl {
+    font-size: 10px;
+    opacity: 0.75;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Divider ── */
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 36px 0; }
+
+  /* ── Print ── */
+  @media print {
+    body { font-size: 11px; }
+    .cover { min-height: 100vh; }
+    .page { padding: 40px 48px; }
+    .section-header { margin-top: 36px; }
+    .feature-grid { grid-template-columns: 1fr 1fr; }
+    .kpi-strip { grid-template-columns: repeat(4, 1fr); }
+    a { color: inherit; text-decoration: none; }
+    .page-break { page-break-before: always; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     COVER PAGE
+═══════════════════════════════════════════════ -->
+<div class="cover">
+  <div class="cover-badge">Early Access · Confidential</div>
+  <h1>CPG Analytics Portal<br><span>New Features Guide</span></h1>
+  <p class="cover-sub">
+    A hands-on walkthrough of every new feature available for testing on the portal.
+    Designed for select business users participating in the closed beta.
+  </p>
+  <div class="cover-meta">
+    <div class="cover-meta-item">
+      <label>Portal URL</label>
+      <span>http://3.6.178.118:3010</span>
+    </div>
+    <div class="cover-meta-item">
+      <label>Release</label>
+      <span>July 2026 — Beta</span>
+    </div>
+    <div class="cover-meta-item">
+      <label>Audience</label>
+      <span>Business Users (Internal)</span>
+    </div>
+    <div class="cover-meta-item">
+      <label>Status</label>
+      <span>Live on AWS EC2</span>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════
+     PAGE 1 — OVERVIEW
+═══════════════════════════════════════════════ -->
+<div class="page">
+
+  <div class="section-header">
+    <div class="section-number">0</div>
+    <h2>What is the CPG Analytics Portal?</h2>
+  </div>
+  <p>
+    The CPG Analytics Portal is an AI-powered sales intelligence platform for CPG (Consumer Packaged Goods) companies.
+    It lets sales managers, ASMs, ZSMs, and admins ask plain-English questions about their secondary and primary sales data
+    — and get instant answers, charts, and insights without writing a single SQL query or opening Excel.
+  </p>
+  <p>
+    The beta release you are testing today ships six major feature areas. Each section below describes the feature, shows
+    you what to look for, and gives you a short checklist to verify it works as expected.
+  </p>
+
+  <hr>
+
+  <div class="section-header">
+    <div class="section-number">1</div>
+    <h2>Logging In</h2>
+  </div>
+
+  <table class="creds-table">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Password</th>
+        <th>Role</th>
+        <th>What you see</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>nestle_admin</code></td>
+        <td><code>admin123</code></td>
+        <td>Admin (full view)</td>
+        <td>All zones, all brands, national totals</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Login and session persistence</h4>
+      <span class="test-tag must">Must Pass</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>Open <strong>http://3.6.178.118:3010</strong> in Chrome.</li>
+        <li>Enter username <code>nestle_admin</code> and password <code>admin123</code>.</li>
+        <li>Click <strong>Sign In</strong>.</li>
+        <li>You should land on the <strong>Dashboard</strong> home page within 2–3 seconds.</li>
+        <li>Refresh the browser tab — you should remain logged in (session persists via JWT cookie).</li>
+      </ol>
+      <div class="expected">✓ Expected: Dashboard loads with KPI tiles showing net sales figures. No blank screen or login loop.</div>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ═══ SECTION 2 — DASHBOARD ═══ -->
+  <div class="section-header">
+    <div class="section-number">2</div>
+    <h2>Live Sales Dashboard</h2>
+  </div>
+
+  <p>
+    The dashboard shows a real-time snapshot of your sales performance pulled directly from the warehouse.
+    All figures reflect actual transaction data — no mock values.
+  </p>
+
+  <div class="kpi-strip">
+    <div class="kpi-card"><span class="val">₹12.3Cr</span><span class="lbl">Net Sales (30D)</span></div>
+    <div class="kpi-card"><span class="val">+15.6%</span><span class="lbl">Trend vs Prior</span></div>
+    <div class="kpi-card"><span class="val">27</span><span class="lbl">Active SKUs</span></div>
+    <div class="kpi-card"><span class="val">22</span><span class="lbl">Daily Datapoints</span></div>
+  </div>
+
+  <p style="font-size:11px; color:#64748b; margin-top:-4px;">Sample figures from the live deployment as of July 2026 — your view may differ slightly.</p>
+
+  <div class="feature-grid" style="margin-top:16px;">
+    <div class="feature-card new-badge highlight">
+      <span class="icon">📊</span>
+      <h4>KPI Tiles</h4>
+      <p>Net Sales, Trend %, Active SKUs, and Zone Coverage — computed from the last 30 days of secondary sales data.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">📈</span>
+      <h4>30-Day Revenue Trend</h4>
+      <p>Line chart showing daily secondary sales over the past month. Hover over any point to see the exact day's value.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">🏷️</span>
+      <h4>Top 10 Brands</h4>
+      <p>Bar chart of the highest-revenue brands in the current window. Updates as new data loads.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">🗺️</span>
+      <h4>Zone Performance</h4>
+      <p>Zone-wise breakdown showing which geographies are over- or under-performing vs the prior period.</p>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Dashboard data loads correctly</h4>
+      <span class="test-tag must">Must Pass</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>After login, wait 3–5 seconds for all 4 KPI tiles to populate.</li>
+        <li>Verify the <strong>Net Sales</strong> tile shows a ₹ value (not zero or "—").</li>
+        <li>Check the <strong>Trend %</strong> tile — it should show a positive or negative percentage.</li>
+        <li>Scroll down to see the trend chart and brand bars.</li>
+      </ol>
+      <div class="expected">✓ Expected: All KPI tiles show real numbers. Charts render without blank areas.</div>
+      <div class="note">⚠ If tiles show "—" for more than 10 seconds, try a hard refresh (Ctrl+Shift+R).</div>
+    </div>
+  </div>
+
+  <hr class="page-break">
+
+  <!-- ═══ SECTION 3 — CHAT / NL QUERY ═══ -->
+  <div class="section-header">
+    <div class="section-number">3</div>
+    <h2>Natural Language Chat — Ask Any Sales Question</h2>
+  </div>
+
+  <p>
+    The Chat tab is the core feature of the portal. Type any question about your sales data in plain English.
+    The AI understands what you mean, runs the query against the warehouse, and returns the answer as
+    a table, chart, or narrative — in under 10 seconds for most queries.
+  </p>
+
+  <div class="query-box">
+    <p>Try these sample questions</p>
+    <ul>
+      <li>Top 5 brands by net sales last 30 days</li>
+      <li>Which zone had the highest growth in June?</li>
+      <li>Show me SKU-wise secondary sales for Fortune this month</li>
+      <li>Which distributors contributed most to West zone revenue last quarter?</li>
+      <li>Compare primary vs secondary sales for Aashirvaad in the last 60 days</li>
+      <li>Top 3 states by volume last week</li>
+      <li>Which SKUs are declining vs last month?</li>
+      <li>Show retailer-wise sales for last 7 days</li>
+    </ul>
+  </div>
+
+  <div class="feature-grid" style="margin-top: 16px;">
+    <div class="feature-card new-badge highlight">
+      <span class="icon">💬</span>
+      <h4>Dimension Chips</h4>
+      <p>Quick-insert buttons above the chat bar. Click "By Zone" or "By Brand" to append dimensions to your current question without retyping.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">✏️</span>
+      <h4>Edit &amp; Retry</h4>
+      <p>Hover over any message you sent and click the edit icon to modify your question and re-run it — no need to type from scratch.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">⏳</span>
+      <h4>Skeleton Loader</h4>
+      <p>A loading placeholder appears while your query is processing, so you always know the system is working.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">📋</span>
+      <h4>Large Table Virtualisation</h4>
+      <p>If your query returns 100+ rows, the table scrolls smoothly without freezing the browser — powered by virtual rendering.</p>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Basic NL query end-to-end</h4>
+      <span class="test-tag must">Must Pass</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>Navigate to the <strong>Chat</strong> tab.</li>
+        <li>Type: <em>"Top 5 brands last 30 days"</em> and press Enter.</li>
+        <li>Observe the skeleton loader appear (animated grey bars).</li>
+        <li>Within ~8 seconds, a table or list should appear with brand names and ₹ values.</li>
+      </ol>
+      <div class="expected">✓ Expected: 5 brands returned (e.g. Fortune, Aashirvaad, Gold Flake, Savlon, Engage) with net values in ₹L or ₹Cr.</div>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Edit &amp; Retry a message</h4>
+      <span class="test-tag must">Must Pass</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>After any query result appears, hover your mouse over the question bubble you sent.</li>
+        <li>A small pencil/edit icon should appear on the message.</li>
+        <li>Click it — the text should load back into the input bar for editing.</li>
+        <li>Change "last 30 days" to "last 7 days" and press Enter.</li>
+      </ol>
+      <div class="expected">✓ Expected: A new result appears for the 7-day window, replacing the previous answer in the thread.</div>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Clarification flow</h4>
+      <span class="test-tag nice">Nice to Have</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>Type an ambiguous question: <em>"Show me sales"</em> (no time period, no dimension).</li>
+        <li>The system should respond with a clarifying question (e.g. "Which time period are you interested in?" or "Primary or secondary sales?").</li>
+        <li>Answer the clarification question by clicking the suggested option or typing your answer.</li>
+      </ol>
+      <div class="expected">✓ Expected: The system asks for missing context rather than guessing. After you answer, it returns the correct result.</div>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ═══ SECTION 4 — INSIGHTS ═══ -->
+  <div class="section-header">
+    <div class="section-number">4</div>
+    <h2>AI-Generated Insights</h2>
+  </div>
+
+  <p>
+    The Insights panel runs eight statistical detectors against your live warehouse data every time it loads.
+    Unlike a static report, these insights reflect what is actually happening in your data right now —
+    no human analyst needed. Each insight includes a severity level, explanation, and suggested action.
+  </p>
+
+  <div class="insight-list">
+    <span class="insight-pill high">🔴 SKU Concentration Risk</span>
+    <span class="insight-pill high">🔴 Dormant High-Value Brand</span>
+    <span class="insight-pill high">🔴 Distributor Dependency</span>
+    <span class="insight-pill high">🔴 Channel Stuffing Alert</span>
+    <span class="insight-pill med">🟡 Zone Velocity Divergence</span>
+    <span class="insight-pill med">🟡 Emerging SKU Momentum</span>
+    <span class="insight-pill med">🟡 Push-Model Signal (Weekday/Weekend)</span>
+    <span class="insight-pill med">🟡 Pack Size Mix Shift</span>
+  </div>
+
+  <h3>What each insight detects</h3>
+
+  <div class="feature-grid">
+    <div class="feature-card new-badge">
+      <span class="icon">⚠️</span>
+      <h4>SKU Concentration Risk</h4>
+      <p>Fires when your top 3 SKUs account for >25% of total secondary revenue — any supply issue hits you immediately.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">📉</span>
+      <h4>Dormant High-Value Brand</h4>
+      <p>A brand that was top-5 last month but has dropped >15% this period. Often masked by other brands growing.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">🏢</span>
+      <h4>Distributor Dependency</h4>
+      <p>One distributor handles >25% of a zone's total throughput. A credit block or dispute = immediate zone impact.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">📅</span>
+      <h4>End-of-Month Channel Stuffing</h4>
+      <p>Last 3 days of the month consistently drive >30% of monthly secondary sales — a classic EOM push signal.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">🗺️</span>
+      <h4>Zone Velocity Divergence</h4>
+      <p>Two zones moving in opposite directions simultaneously — one accelerating while another declines — signals execution gaps.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">🚀</span>
+      <h4>Emerging SKU Momentum</h4>
+      <p>A small-base SKU growing >20% — early breakout signal worth pushing distribution ahead of competition.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">📆</span>
+      <h4>Push-Model Signal</h4>
+      <p>Weekday sales are 1.5× or more than weekends — field-rep activity is driving orders, not consumer demand.</p>
+    </div>
+    <div class="feature-card new-badge">
+      <span class="icon">📦</span>
+      <h4>Pack Size Mix Shift</h4>
+      <p>A specific pack size declining >5% — trading-down signal or competitive pricing pressure, invisible in brand totals.</p>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Insights panel loads with live detections</h4>
+      <span class="test-tag must">Must Pass</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>Click the <strong>Insights</strong> tab in the left navigation.</li>
+        <li>Wait 2–3 seconds for the insights to load from the warehouse.</li>
+        <li>You should see at least 3 insight cards — each with a title, description, and suggested action.</li>
+        <li>Verify insights reference real data (brand names, zone names, ₹ values) — not placeholder text.</li>
+      </ol>
+      <div class="expected">✓ Expected: 3–8 insights visible. Each card shows priority badge (Critical/High/Medium), a description with actual figures, and a suggested action.</div>
+    </div>
+  </div>
+
+  <hr class="page-break">
+
+  <!-- ═══ SECTION 5 — OBJECTIVES ═══ -->
+  <div class="section-header">
+    <div class="section-number">5</div>
+    <h2>Objectives — Set and Track Sales Goals</h2>
+  </div>
+
+  <p>
+    The Objectives feature allows each user to define up to 4 personal sales objectives tied to specific
+    KPIs (zone sales, SKU range, distributor performance, or month targets). The system tracks progress
+    against each objective and surfaces it in the dashboard banner.
+  </p>
+
+  <div class="feature-grid">
+    <div class="feature-card new-badge highlight">
+      <span class="icon">🎯</span>
+      <h4>Objective Templates</h4>
+      <p>4 pre-built templates: Increase Zone Sales, Improve Distributor Performance, Expand SKU Range, Beat Month Target.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">⚙️</span>
+      <h4>Cold-Start Modal</h4>
+      <p>First-time users see a setup modal to pick their objectives before landing on the main portal.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">📌</span>
+      <h4>Scope Injection</h4>
+      <p>Your objectives influence the AI's context — queries are automatically scoped to your goal areas without extra prompting.</p>
+    </div>
+    <div class="feature-card new-badge highlight">
+      <span class="icon">🔔</span>
+      <h4>Progress Banner</h4>
+      <p>A banner at the top of the dashboard shows your active objectives and current progress at a glance.</p>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Set an objective from the template list</h4>
+      <span class="test-tag must">Must Pass</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>Click <strong>Objectives</strong> in the left navigation (or find the Objectives icon).</li>
+        <li>You should see 4 objective cards or a "Set your objectives" prompt.</li>
+        <li>Select the template <strong>"Increase Zone Sales"</strong>.</li>
+        <li>Configure the zone and target value when prompted, then save.</li>
+        <li>Return to the Dashboard — a banner or progress indicator should appear for your active objective.</li>
+      </ol>
+      <div class="expected">✓ Expected: Objective saved successfully. Banner appears on dashboard referencing your chosen objective.</div>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ═══ SECTION 6 — PERFORMANCE ═══ -->
+  <div class="section-header">
+    <div class="section-number">6</div>
+    <h2>Performance &amp; Caching</h2>
+  </div>
+
+  <p>
+    The portal uses a 3-tier semantic cache to make repeat queries near-instant and reduce AI costs.
+    You won't see this directly, but you'll feel it — common questions return in under 1 second on the second ask.
+  </p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <span class="icon">⚡</span>
+      <h4>Tier 1 — Golden Q&amp;A</h4>
+      <p>Pre-computed answers for the most common questions. Returns in &lt;100ms — zero AI cost.</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">🔁</span>
+      <h4>Tier 2 — Semantic Cache (Redis)</h4>
+      <p>Semantically similar questions (even worded differently) served from Redis. Returns in &lt;500ms.</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">🤖</span>
+      <h4>Tier 3 — Live AI Pipeline</h4>
+      <p>Genuinely new questions go through the full DSPy + Cube + Claude pipeline. Returns in 5–10 seconds.</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">🛡️</span>
+      <h4>Rate Limiting</h4>
+      <p>Each user is limited to a set number of queries per minute to prevent overload. You'll see a friendly message if you hit the limit.</p>
+    </div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-header">
+      <div class="test-status"></div>
+      <h4>Test: Cache speedup on repeated query</h4>
+      <span class="test-tag nice">Nice to Have</span>
+    </div>
+    <div class="test-body">
+      <ol>
+        <li>Ask any question and note the response time (shown in the UI or estimated by observation).</li>
+        <li>Ask the exact same question again immediately.</li>
+        <li>The second response should feel noticeably faster (under 1 second).</li>
+      </ol>
+      <div class="expected">✓ Expected: Second identical query returns almost instantly vs 5–8 seconds for the first.</div>
+    </div>
+  </div>
+
+  <hr class="page-break">
+
+  <!-- ═══ SECTION 7 — DATA COVERAGE ═══ -->
+  <div class="section-header">
+    <div class="section-number">7</div>
+    <h2>Data Coverage &amp; Scope</h2>
+  </div>
+
+  <p>
+    The warehouse currently contains <strong>1.27 million secondary sales rows</strong> and
+    <strong>34,000+ primary sales rows</strong> covering the period <strong>June 2024 to September 2026</strong>.
+    Data is for the <em>Nestle</em> client profile (demo tenant).
+  </p>
+
+  <table class="creds-table">
+    <thead>
+      <tr><th>Dimension</th><th>Available Values (sample)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Brands</td><td>Fortune, Aashirvaad, Gold Flake, Savlon, Engage, + more</td></tr>
+      <tr><td>Zones</td><td>North, South, East, West, Central</td></tr>
+      <tr><td>Data type</td><td>Secondary sales (distributor → retailer), Primary sales (company → distributor)</td></tr>
+      <tr><td>Date range</td><td>June 2024 – September 2026</td></tr>
+      <tr><td>Metrics</td><td>net_value (₹), volume, pack_size, brand, zone, state, city, distributor, SKU</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note" style="background:#fffbeb;border-left:3px solid #f59e0b;padding:12px 16px;border-radius:0 6px 6px 0;margin-top:12px;font-size:12px;color:#78350f;">
+    <strong>Note:</strong> This is demo data for testing purposes. Brand names and figures are illustrative and do not represent real Nestle sales.
+  </div>
+
+  <hr>
+
+  <!-- ═══ SECTION 8 — FEEDBACK ═══ -->
+  <div class="section-header">
+    <div class="section-number">8</div>
+    <h2>Reporting Issues &amp; Feedback</h2>
+  </div>
+
+  <p>When you encounter anything unexpected, please note the following:</p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <span class="icon">📝</span>
+      <h4>What to capture</h4>
+      <p>The exact question you typed, the response you received (or error message), and the browser + time of occurrence.</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">📸</span>
+      <h4>Screenshot preferred</h4>
+      <p>A screenshot is worth a thousand words. Use Windows + Shift + S (Snipping Tool) to capture and paste into your feedback.</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">🔄</span>
+      <h4>Try a refresh first</h4>
+      <p>Many transient issues resolve with Ctrl+Shift+R (hard refresh). If it recurs after refresh, log it as a bug.</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">✅</span>
+      <h4>Mark your test checklist</h4>
+      <p>Use the checkbox in each test block in this document. Return this document with your marks as your test report.</p>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ═══ QUICK REFERENCE ═══ -->
+  <div class="section-header">
+    <div class="section-number">✦</div>
+    <h2>Quick Reference</h2>
+  </div>
+
+  <table class="creds-table">
+    <thead>
+      <tr><th>Item</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Portal URL</td><td><code>http://3.6.178.118:3010</code></td></tr>
+      <tr><td>Login</td><td><code>nestle_admin / admin123</code></td></tr>
+      <tr><td>Browser</td><td>Google Chrome (recommended)</td></tr>
+      <tr><td>Response time (new query)</td><td>5–10 seconds</td></tr>
+      <tr><td>Response time (cached query)</td><td>&lt;1 second</td></tr>
+      <tr><td>Data freshness</td><td>Static seed data (June 2024 – Sept 2026)</td></tr>
+      <tr><td>Max rows per query</td><td>No limit (virtualised table for large results)</td></tr>
+      <tr><td>Rate limit</td><td>~10 queries/minute per user</td></tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top:32px; font-size:11px; color:#94a3b8; text-align:center;">
+    CPG Analytics Portal · Beta Release · July 2026 · Confidential — Internal Use Only
+  </p>
+
+</div><!-- /.page -->
+</body>
+</html>

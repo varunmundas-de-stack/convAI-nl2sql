@@ -48,7 +48,7 @@ services:
       - /home/ec2-user/nl2sql/cube/model:/cube/conf/model
       - /home/ec2-user/nl2sql/cube/cube.js:/cube/conf/cube.js
     environment:
-      CUBEJS_DEV_MODE: "false"
+      CUBEJS_DEV_MODE: "true"
       CUBEJS_DB_TYPE: postgres
       CUBEJS_DB_HOST: postgres
       CUBEJS_DB_PORT: 5432

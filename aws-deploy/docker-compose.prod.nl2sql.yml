@@ -35,6 +35,36 @@ services:
       timeout: 5s
       retries: 5
 
+  cube:
+    image: cubejs/cube:latest
+    container_name: nl2sql-cube
+    restart: unless-stopped
+    expose:
+      - "4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /home/ec2-user/nl2sql/cube/model:/cube/conf/model
+      - /home/ec2-user/nl2sql/cube/cube.js:/cube/conf/cube.js
+    environment:
+      CUBEJS_DEV_MODE: "false"
+      CUBEJS_DB_TYPE: postgres
+      CUBEJS_DB_HOST: postgres
+      CUBEJS_DB_PORT: 5432
+      CUBEJS_DB_NAME: sales_analytics
+      CUBEJS_DB_USER: postgres
+      CUBEJS_DB_PASS: ${POSTGRES_PASSWORD:-postgres}
+      CUBEJS_API_SECRET: ${APP_JWT_SECRET:-changeme-prod-secret}
+      CUBEJS_CACHE_MODE: "no-cache"
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4000/cubejs-api/v1/alive || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
   backend:
     build:
       context: ../backend
@@ -52,6 +82,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      cube:
+        condition: service_healthy
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -66,6 +98,8 @@ services:
       REDIS_URL: redis://redis:6379
       APP_JWT_SECRET: ${APP_JWT_SECRET:-changeme-prod-secret}
       ANTHROPIC_MODEL_ID: ${ANTHROPIC_MODEL_ID:-claude-haiku-4-5-20251001}
+      CUBE_API_URL: http://cube:4000/cubejs-api/v1
+      CUBEJS_API_SECRET: ${APP_JWT_SECRET:-changeme-prod-secret}
       LOG_LEVEL: INFO
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]

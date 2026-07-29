@@ -9,6 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - nl2sql_postgres_data:/var/lib/postgresql/data
+      - /home/ec2-user/nl2sql/cube/data:/docker-entrypoint-initdb.d
     # No host port mapping — internal only, avoids conflict with host postgres on 5432
     expose:
       - "5432"

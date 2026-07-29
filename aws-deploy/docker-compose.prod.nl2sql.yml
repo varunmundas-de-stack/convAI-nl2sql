@@ -41,6 +41,8 @@ services:
     image: nl2sql-backend:latest
     container_name: nl2sql-backend
     restart: unless-stopped
+    env_file:
+      - /home/ec2-user/nl2sql/.env
     # Host port 8010 avoids conflict with existing uvicorn on 8000
     ports:
       - "8010:8000"

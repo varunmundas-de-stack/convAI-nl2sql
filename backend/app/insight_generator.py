@@ -25,13 +25,6 @@ def generate_insights(schema: str, role: str, user: Any) -> list[dict]:
         logger.error("[Insights] psycopg2 not available")
         return []
 
-    today = date.today()
-    d7    = (today - timedelta(days=7)).isoformat()
-    d14   = (today - timedelta(days=14)).isoformat()
-    d30   = (today - timedelta(days=30)).isoformat()
-    d60   = (today - timedelta(days=60)).isoformat()
-    tod   = today.isoformat()
-
     dsn = {
         "host":     os.getenv("DB_HOST",     os.getenv("POSTGRES_HOST",     "postgres")),
         "port":     int(os.getenv("DB_PORT", os.getenv("POSTGRES_PORT",     "5432"))),
@@ -54,6 +47,18 @@ def generate_insights(schema: str, role: str, user: Any) -> list[dict]:
     try:
         conn = psycopg2.connect(**dsn)
         cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Use max invoice_date in the data as "today" so insights work regardless of current date
+        cur.execute(f"SELECT MAX(invoice_date) FROM {schema}.fact_secondary_sales")
+        row = cur.fetchone()
+        today = (row["max"] if row and row["max"] else date.today())
+        if isinstance(today, str):
+            today = date.fromisoformat(today)
+        d7    = (today - timedelta(days=7)).isoformat()
+        d14   = (today - timedelta(days=14)).isoformat()
+        d30   = (today - timedelta(days=30)).isoformat()
+        d60   = (today - timedelta(days=60)).isoformat()
+        tod   = today.isoformat()
 
         # 1 — SKU Concentration Risk
         cur.execute(f"""

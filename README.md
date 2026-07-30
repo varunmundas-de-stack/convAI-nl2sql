@@ -15,6 +15,7 @@ A production-grade natural language to SQL analytics platform for FMCG / CPG sal
 | Icons | Lucide React |
 | State | React `useState` / custom `useConversation` hook |
 | API calls | Custom `services/api.ts` (fetch wrapper) |
+| Pages | `/` Chat, `/dashboard` KPIs, `/insights` Intel, `/objectives` Goal setup, `/rlhf` Feedback |
 
 ### Backend
 | Layer | Technology |
@@ -73,6 +74,9 @@ A production-grade natural language to SQL analytics platform for FMCG / CPG sal
 │  GET  /dashboard/kpis — optimised KPI endpoint (<2s response)      │
 │  /auth/*            — login, token refresh, user info              │
 │  /rlhf/*            — feedback, prompt A/B, RLHF scheduler         │
+│  /objectives/*      — user goal setup, template questions          │
+│  /persona/*         — cold-start persona cards, preference store   │
+│  /questions/*       — guided question templates                    │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │              Query Orchestrator (pipeline engine)           │   │
@@ -183,6 +187,8 @@ The full response — data rows, narrative insight, visual spec, and request met
 - **Scope-aware dimension chips** — clarification options are filtered by PRIMARY/SECONDARY sales scope; secondary-only dimensions (retailer, route, salesrep) are hidden for primary queries.
 - **Retry flow** — users can edit a failed or unsatisfactory query inline.
 - **Multi-tenant RBAC** — JWT-based row-level security enforced at the Cube.js semantic layer.
+- **Objectives & Goal Setup** — users configure their business objectives on first login via a structured template (role-specific questions). Objectives are persisted per user and injected as query context to bias the pipeline toward their priorities.
+- **Persona Cold-Start Modal** — on first login, a persona card wizard collects user preferences (focus metrics, time horizons, territories) to personalise the assistant from session one — no cold-start blindness.
 - **Role-aware Intel Insights** — 8 non-obvious statistical detectors tuned to the latest data: SKU concentration risk, zone velocity divergence, dormant high-value brand, weekday/weekend sales pattern, emerging SKU momentum, end-of-month channel stuffing, distributor dependency, and pack size mix shift.
 - **Fast Dashboard KPIs** — `/dashboard/kpis` returns pre-computed KPIs in under 2 seconds, fine-tuned to the latest available data window.
 - **CSV ETL Pipeline** — watch-mode ingestion service (`etl-watcher`) automatically detects and loads CSV files dropped into a designated folder, upserts all dimension tables and fact tables, and archives processed files.
@@ -287,12 +293,22 @@ nl2sql/
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx            # Root — renders ChatWindow
-│       │   ├── dashboard/          # KPI dashboard (direct Postgres)
+│       │   ├── dashboard/          # KPI dashboard
 │       │   ├── insights/           # Role-aware intel insights page
+│       │   ├── objectives/         # Objective setup page
+│       │   ├── rlhf/               # RLHF feedback review page
 │       │   └── globals.css
 │       ├── components/
-│       │   ├── ChatWindow.tsx      # Chat UI + scope-aware dimension chips
-│       │   └── MessageBubble.tsx
+│       │   ├── ChatWindow.tsx          # Chat UI + scope-aware dimension chips
+│       │   ├── MessageBubble.tsx
+│       │   ├── ChartRenderer.tsx       # Chart type router (bar/line/pie)
+│       │   ├── TableRenderer.tsx       # Tabular result renderer
+│       │   ├── ClarificationPrompt.tsx # Clarification chip UI
+│       │   ├── ObjectiveModal.tsx      # Objective setup wizard
+│       │   ├── PersonaColdStartModal.tsx # First-login persona capture
+│       │   ├── FeedbackBar.tsx         # Thumbs up/down RLHF capture
+│       │   ├── RetryModal.tsx          # Inline query retry/edit
+│       │   └── ErrorBoundary.tsx
 │       ├── services/api.ts         # Backend API client + getDashboardKpis
 │       └── state/conversation.ts
 ├── backend/
@@ -302,6 +318,10 @@ nl2sql/
 │       ├── main.py                 # FastAPI app, routes, middleware
 │       ├── insight_generator.py    # 8 role-aware Postgres insight probes
 │       ├── insights_router.py      # Insights REST router
+│       ├── objectives_router.py    # Objectives / goal setup router
+│       ├── persona_router.py       # Persona card + preference store router
+│       ├── questions_router.py     # Guided question templates router
+│       ├── chat_router.py          # Chat session router
 │       ├── pipeline/               # Stage engine
 │       ├── services/
 │       │   ├── cube/
